@@ -15,7 +15,7 @@ silently. That is not a hypothetical — it already happened. A first extraction
 copies were missing the same 23 commits, and Binge's `bot-review.yml` had grown 43%
 past the version they shared. They live here once now, and every repo calls them.
 
-> **Status: pre-first-push.** No repo calls these yet, and there is no `v1` tag. See
+> **Status: all five workflows re-derived; no repo calls them yet and there is no `v1` tag.** See
 > "Re-derivation status" for which workflows are current and "Applying this" in
 > [MIGRATION.md](MIGRATION.md) for the order to land it in.
 
@@ -30,12 +30,12 @@ editorial is lost silently.
 | --- | --- | --- | --- |
 | `bot-review.yml` | 941 | ✅ 2026-09-09 | — |
 | `author-ci-fix.yml` | 787 | ✅ 2026-09-09 | — |
-| `author-comments.yml` | 422 | ❌ still the 09-01 draft | 4 commits |
+| `author-comments.yml` | 629 | ✅ 2026-09-09 | — |
 | `author-conflicts.yml` | 710 | ✅ 2026-09-09 | — |
 | `author-retarget.yml` | 296 | ✅ 2026-09-09 | — |
 
-**Do not point a caller at a workflow that is not yet re-derived.** It will run, and it
-will be missing fixes the repo it came from has had for a week.
+All five are current as of Binge `30e2c6c66` (2026-09-09). Re-check this table against
+`git log --since=<date> -- .github/workflows/` in Binge before tagging a new `v1.x`.
 
 ## Layout
 

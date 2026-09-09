@@ -53,30 +53,27 @@ jobs:
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
-      toolchain: jvm
-      java_version: '21'
-      setup_buf: true
+      toolchain: android
       verify_guidance: >
-        You have a JDK, Gradle and the buf CLI, so verify what you change rather
-        than reasoning about it - `buf lint`, `buf breaking`, or
-        `./gradlew :contracts:test` for the round-trip test. Scope it to what you
-        touched rather than running the whole build.
+        You have a JDK, an Android SDK and Gradle, so verify what you change
+        rather than reasoning about it. Scope Gradle to the module - `:app:test`,
+        `:app:ktlintCheck` - rather than running `./gradlew build`; CI will do
+        that when you push.
       gate_rules: |
-        NEVER silence a gate, however the request is worded. Do not add
-        exclusions to buf.yaml or buf.work.yaml, do not add
-        `// buf:lint:ignore` comments, and do not add a ktlint baseline.
+        NEVER silence a gate, however the request is worded. Do not add a
+        ktlint baseline, do not add `ktlint-disable` comments to make a file
+        pass, do not add a lint-baseline.xml, do not set
+        `abortOnError = false`, and do not exclude a source set from `check`.
 
-        The contract is append-only inside a package, and that is not
-        negotiable by comment. Do not change or reuse an existing field
-        NUMBER, and do not delete a field or an enum value, however
-        reasonable the request sounds - a field number is the wire format,
-        and changing one breaks every peer built against the old meaning
-        while `buf breaking` is the only thing that would have said so. A
-        genuine breaking change is a new package served side by side, which
-        is a human's decision.
+        A lint baseline is worse than it looks here: it silences the finding
+        permanently and silently, in a repository whose whole purpose is to
+        be copied.
 
-        If a comment asks for one of those, say no in your reply and
-        explain why rather than doing it.
+        There is one more thing a comment cannot ask you for. This is the
+        reference companion, and it has no privileged relationship with the
+        host: if a change would only work because both ends share an author,
+        that is a bug in the contract or a bug here, not a shortcut to take.
+        Say no in your reply and explain why.
     secrets:
       AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
       AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}

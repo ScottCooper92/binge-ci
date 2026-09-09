@@ -11,24 +11,17 @@ Three decisions were settled on 2026-09-09 and the steps below assume them:
 | Default posture | **Public-safe** | Two of three consumers are public. A caller that forgets to configure something should get the strict setting, not Binge's. |
 | Prove it on | **binge-seerr first** | MIGRATION originally said Binge, but that was written before binge-seerr existed. It is now fully wired and is the lowest-stakes place a break costs nothing. |
 
-## 1. Finish the re-derivation
+## 1. Finish the re-derivation ✅
 
-`bot-review.yml` is done. Four to go — see the status table in [README.md](README.md).
-Each is the same method: take Binge's current file, re-apply the input substitutions,
-run the gate.
+Done, 2026-09-09. All five are current as of Binge `30e2c6c66`; see the status table in
+[README.md](README.md). Two things were settled while doing it, rather than inherited:
 
-**Do not land step 2 before this is finished.** A caller pointed at a stale author
-workflow runs, and is silently missing a week of fixes — which is the exact failure
-this repo exists to end.
-
-While doing it, two things to settle rather than inherit:
-
-- **`secrets: inherit` in the author callers.** It hands the called workflow every
-  secret the caller holds. `bot-review`'s callers name the three explicitly instead;
-  the author callers should match.
-- **`bufbuild/buf-action@v1`** is the only unpinned action in the set, and it would run
-  in a job that hands an agent Bash and a contents:write token. Resolve it to a SHA, or
-  leave `setup_buf: false`.
+- **`secrets: inherit` is gone.** Every caller names the three secrets it passes. `inherit`
+  hands the called workflow every secret the caller holds, which on a public repo calling a
+  public reusable workflow is a wider grant than the job needs.
+- **`bufbuild/buf-action` is pinned** to `8c6a16e1` (v1.5.0). It was the one action left on
+  a mutable tag, in a job that hands an agent Bash, Edit, Write and a contents:write token.
+  Every SHA in the repo now resolves — one reached for first did not exist.
 
 ## 2. Create and tag `binge-ci`
 
