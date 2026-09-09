@@ -107,6 +107,23 @@ the workflows (actionlint + shellcheck) and whether the callers still fit them
 (`tools/check-callers.sh` — actionlint cannot see across a remote workflow reference, so
 a misspelled input would otherwise fail at run time in the consuming repo).
 
+## Writing a caller: the one thing that will bite you
+
+**A caller must declare any permission the called workflow needs beyond `contents`.**
+
+A reusable workflow cannot be granted more than its caller holds, and a caller with no
+`permissions:` block gets the repository default — `contents: read`, with no `actions`.
+`bot-review` and `author-ci-fix` both need `actions: read` for their CI-run lookup, so a
+caller that omits it dies as `startup_failure`: no log, no annotation, no job, and nothing
+on the PR beyond a red tick.
+
+This is the one way a caller differs from the copy it replaces. An ordinary workflow
+declaring `permissions: actions: read` simply gets it; a caller has to hold it first — which
+is why the in-repo copies ran for months and the first caller could not start.
+
+`tools/check-callers.sh` checks this now. Nothing else can: actionlint cannot see across a
+remote reference, and the called workflow's own CI is not the caller.
+
 ## Versioning
 
 Callers reference `@v1`, a moving alias. `v1.0.0` and friends are immutable — pin to one
