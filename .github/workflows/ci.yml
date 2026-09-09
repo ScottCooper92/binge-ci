@@ -1,0 +1,65 @@
+name: CI
+
+# This repository ships no code — it ships five reusable workflows and the drafts
+# of the callers that use them. So its gate is the two things that can be wrong
+# with that: the workflows themselves, and whether the callers still fit them.
+#
+# NOT named "CI" by accident: the agent workflows here match their caller's CI
+# workflow by name, and this repo does not call them, so there is no self-hosting
+# to worry about. It is named CI because that is what it is.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # actionlint runs shellcheck over every `run:` block when it is on PATH, which is
+      # the check that matters most here: these workflows are ~2500 lines of shell whose
+      # bugs are only reachable from a live PR in a consuming repo.
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: actionlint
+        env:
+          VERSION: 1.7.7
+          # Pinned by digest, like every action in the workflows this repo ships. A
+          # release asset is mutable in principle and this one lints the files that
+          # hand an agent a contents:write token.
+          SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+        run: |
+          set -euo pipefail
+          curl -sSLo actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar xzf actionlint.tar.gz actionlint
+          # --severity=warning, not the default. shellcheck's info level fires SC2016
+          # ("expressions don't expand in single quotes") on every `printf '...%s...'`
+          # format string in these files, where single quotes are exactly right - and
+          # there are eleven of them. A blanket -e SC2016 would also drop the real case
+          # the check exists for, so the floor is set by severity instead: warning and
+          # error fail the build, style and info do not.
+          #
+          # The callers reference this repo's own workflows by a REMOTE ref that does not
+          # resolve from inside a PR, so actionlint is pointed at the reusable workflows
+          # and the callers separately - tools/check-callers.sh covers what it cannot.
+          ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
+          ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
+
+      # The half actionlint cannot do: match each caller's inputs and secrets against the
+      # reusable workflow it calls. See the header of the script.
+      - name: Check the draft callers against the workflows they call
+        run: ./tools/check-callers.sh

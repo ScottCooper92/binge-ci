@@ -1,26 +1,12 @@
-# Caller. Drop at binge-integrations/.github/workflows/bot-review.yml.
-#
-# PREREQUISITES, none of which exist in binge-integrations today:
-#   - .ai/agents/pr-review-guide.md and CLAUDE.md on `main`. The called workflow
-#     reads both from the default branch and hands them to the agent as the rules
-#     for the review. They are NOT copies of Binge's: the calibration section of
-#     Binge's guide is about Compose, linters and a screenshot gate, none of which
-#     exist here. Writing them is the real work of adopting this.
-#   - The `agent-runner` self-hosted runner registered against this repo, and both
-#     GitHub Apps installed on it.
-#   - REVIEWER_APP_ID / REVIEWER_APP_PRIVATE_KEY / CLAUDE_CODE_OAUTH_TOKEN as
-#     repository secrets.
-#
-# auto_merge is FALSE here, unlike Binge. This repo is public and its whole value
-# proposition is an append-only wire contract that companion apps build against;
-# `buf breaking` is the gate that matters and a bot squash-merging to `main` on
-# top of it is a sharper tool than the same bot on a private app repo. The review,
-# the issue filing and every guard still run — a human presses merge.
 name: Bot review
 
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository. The same-repository guard inside the called workflow is the
+# whole boundary here rather than a second line of defence, and the `agent` label
+# is maintainers-only for the same reason. Do not add a `pull_request_target` path.
 on:
   workflow_run:
-    # Matched by NAME. binge-integrations' ci.yml is already named "CI".
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:
@@ -29,20 +15,19 @@ on:
         description: PR number to review
         required: true
 
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   review:
     uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
     with:
-      runner: '["self-hosted", "agent-host", "agent-runner"]'
-      default_branch: main
-      ci_workflow_file: ci.yml
       dispatch_pr: ${{ inputs.pr }}
-      review_guide_path: .ai/agents/pr-review-guide.md
-      conventions_path: CLAUDE.md
-      gated_checks: buf lint, buf breaking, or the Gradle build and test
+      # This repo publishes a wire contract other people build against, so what lands
+      # on main is read and copied. A bot squash-merging on a green `buf` run is a
+      # sharper tool here than on a private app repo.
       auto_merge: false
-    secrets: inherit
+      gated_checks: buf lint, buf breaking, ktlint or the proto round-trip test
+      # ci.yml here declares no paths-ignore, so every PR produces a run and the
+      # `labeled` door has nothing to open for. Leaving unbuilt_paths unset keeps it shut.
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

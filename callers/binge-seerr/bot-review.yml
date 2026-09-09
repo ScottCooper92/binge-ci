@@ -1,0 +1,33 @@
+name: Bot review
+
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository, and the reference companion app: what lands on main is read
+# and copied by people writing their own companions. `./gradlew build` cannot
+# check the thing that makes this repository worth anything - whether the example
+# is one worth following - which is why auto_merge is off. Turn it on when the
+# extraction has landed and the review has a track record here.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+jobs:
+  review:
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
+    with:
+      dispatch_pr: ${{ inputs.pr }}
+      auto_merge: false
+      gated_checks: ktlint or Android lint
+      # ci.yml here declares no paths-ignore - deliberately, since bot-review needs a
+      # successful run against the head and a skipped run is a PR that is never
+      # reviewed. So there are no CI-less PRs and the `labeled` door stays shut.
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
