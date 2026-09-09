@@ -53,7 +53,13 @@ jobs:
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
-      toolchain: android
+      # jvm, not android: this repo's ci.yml is setup-java + setup-gradle and nothing
+      # else. ci-setup is Binge's bootstrap - it writes a local.properties carrying a
+      # TMDB key this app has no use for, and tunes Gradle for a container this job does
+      # not run in. The Android SDK is preinstalled on the hosted runner image, which is
+      # why ci.yml installs one too.
+      toolchain: jvm
+      java_version: '17'
       verify_guidance: >
         You have a JDK, an Android SDK and Gradle, so verify what you change
         rather than reasoning about it. Scope Gradle to the module - `:app:test`,
