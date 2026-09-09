@@ -16,9 +16,9 @@ jobs:
     with:
       dispatched: ${{ github.event_name == 'workflow_dispatch' }}
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
-      # No governed_paths_script here: this repo has no .github/scripts, so the
-      # workflow's own default list applies. It covers what claude-code-action
-      # rewrites, which is what the guard is about.
+      # No governed_extra_paths: the base list in binge-ci's governed-paths action
+      # covers what claude-code-action rewrites, and this repo has nothing beyond
+      # it. `.ai/` is not rewritten by the action, so it does not belong here.
       conflict_rules: |
         A conflict in a `.proto` file is rarely yours to arbitrate. Field
         NUMBERS are the wire format: two sides that assigned the same number to

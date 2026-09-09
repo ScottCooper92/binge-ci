@@ -31,8 +31,16 @@ the private repo's Actions access setting opened up *and* prints the called work
 step bodies into the public caller's logs. A public `binge-ci` sidesteps both. Nothing
 here is secret — every credential arrives as a secret at call time.
 
-Push first, tag `v1` only once step 3 is green. A `v1` that moves under its callers is
-the drift problem again, wearing a tag.
+Tag `v1` as soon as it is pushed, because every caller references `@v1` and step 3 cannot
+run without a ref to call. Two tags, which is the usual Actions convention and matters here
+for a specific reason:
+
+- **`v1.0.0`** is immutable. It is what a caller can pin to when it wants no surprises.
+- **`v1`** is a moving alias, re-pointed when a fix lands. That is what the callers use.
+
+Until step 3 is green, `v1` may be force-moved freely - nothing calls it yet, so there is
+nothing to break. After that, treat it as published: land the fix, tag `v1.0.N`, then move
+`v1`. A `v1` that moves under a caller mid-review is the drift problem again, wearing a tag.
 
 ## 3. Prove it on binge-seerr
 
