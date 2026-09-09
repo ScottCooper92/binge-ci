@@ -24,7 +24,7 @@ runs:
     # The runner writes RUNNER_ENVIRONMENT itself, so the branches below follow the machine the
     # job actually landed on rather than a label a caller has to remember to pass. Anything
     # unrecognised is treated as self-hosted, which keeps the values this file has always written
-    # for the agent-host/PC hosts byte-identical.
+    # for a caller's own runners byte-identical.
     - name: Identify the runner
       id: runner
       shell: bash

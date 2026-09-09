@@ -74,7 +74,8 @@ A wrong `default_branch` shows up immediately as "path does not exist in origin/
 Binge is the risky one — it ships daily, runs on self-hosted runners, and its bot merges
 labelled PRs in about fifteen minutes. Go second, with binge-seerr already green.
 
-Move `callers/Binge/*.yml` over the five originals in `Binge/.github/workflows/`, and
+Binge's callers are already staged on its own `ci/binge-ci-callers` branch, rather than
+in this repo's `callers/` — see the note in [README.md](README.md). Merge that branch, and
 change one line in `Binge/.github/workflows/ci.yml`:
 
 ```diff

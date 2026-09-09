@@ -59,9 +59,9 @@ on:
           runs-on, as a JSON array string. Defaults to a GitHub-hosted runner: ephemeral,
           so the `agent` label grants code execution on a throwaway VM rather than on a
           machine that outlives the job. A caller with self-hosted capacity points this at
-          it — Binge passes ["self-hosted", "agent-host", "review-runner"], a 4 GiB container
-          of this workflow's own so a review does not queue behind an author job's Gradle
-          build. This workflow builds nothing, so it needs none of an agent runner's 12 GiB.
+          its own runner, and should give reviews one SEPARATE from its author jobs — this
+          workflow builds nothing, so it needs far less memory than an agent runner, and a
+          shared runner makes every review queue behind whatever build is in front of it.
         type: string
         default: '["ubuntu-latest"]'
       default_branch:
