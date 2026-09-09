@@ -1,41 +1,37 @@
-# Caller. Drop at binge-integrations/.github/workflows/author-conflicts.yml.
 name: Author - resolve merge conflicts
 
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository: the fork filter inside the scan is the control here, not a
+# formality. The `agent` label stays maintainers-only.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:
 
-concurrency:
-  group: author-conflicts
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-
 jobs:
-  scan:
+  resolve:
     uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1
     with:
-      runner: '["self-hosted", "agent-host", "agent-runner"]'
-      default_branch: main
+      dispatched: ${{ github.event_name == 'workflow_dispatch' }}
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      # No governed_paths_script here: this repo has no .github/scripts, so the
+      # workflow's own default list applies. It covers what claude-code-action
+      # rewrites, which is what the guard is about.
       conflict_rules: |
-        One kind of conflict is never yours to arbitrate. Two branches that
-        both added a field, an enum value or an rpc to the same proto message
-        have almost certainly claimed the SAME number. Keeping both sides'
-        text resolves the conflict marker and leaves a file that will not
-        compile — or, worse, one that does compile with a number assigned to
-        two different meanings on the wire.
+        A conflict in a `.proto` file is rarely yours to arbitrate. Field
+        NUMBERS are the wire format: two sides that assigned the same number to
+        different fields have made incompatible decisions, and picking one
+        silently breaks every peer built against the other. Keep both fields
+        with distinct numbers if that is plainly what was meant; otherwise leave
+        it unresolved and say so in note.md.
 
-        Keep both additions and renumber the LATER one to the next unused
-        number in that message. If it is not obvious which side is later, or
-        if either side is already referenced elsewhere in the tree, stop:
-        leave it unresolved and say so in note.md. A wrong number here is a
-        wire-format bug that `buf breaking` cannot catch, because on this
-        branch nothing has been published yet.
-
-        Never resolve a conflict by deleting a field, an enum value or a
-        `reserved` range from either side.
-    secrets: inherit
+        Never renumber or reuse an existing field number to resolve a conflict,
+        and never delete a field to make one go away - the contract is
+        append-only inside a package, and `buf breaking` will fail the build
+        rather than let it through.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

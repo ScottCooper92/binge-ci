@@ -1,0 +1,30 @@
+name: Author - resolve merge conflicts
+
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository: the fork filter inside the scan is the control here, not a
+# formality. The `agent` label stays maintainers-only.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  resolve:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1
+    with:
+      dispatched: ${{ github.event_name == 'workflow_dispatch' }}
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      conflict_rules: |
+        This repository has no baseline files and no suppression lists, so there
+        is nothing here of the kind that must keep both sides mechanically. What
+        there is instead: this is the reference companion, and its code is read
+        and copied. A conflict resolved into something that merely compiles is a
+        worse outcome here than one handed back - if the two sides disagree about
+        how the example should read, that is a human's call. Leave it unresolved
+        and say so in note.md.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
