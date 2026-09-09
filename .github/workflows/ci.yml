@@ -63,3 +63,15 @@ jobs:
       # reusable workflow it calls. See the header of the script.
       - name: Check the draft callers against the workflows they call
         run: ./tools/check-callers.sh
+
+      # The other half it cannot do: pointed at an action.yml, actionlint reports "on section
+      # is missing" and stops, so the shell inside a composite action goes unchecked. Both
+      # actions here carry real shell, and one of them is the guard that keeps an agent from
+      # silently discarding a PR's own changes.
+      - name: shellcheck the composite actions
+        run: ./tools/check-action-shell.sh
+
+      # The governed-paths script is a plain file rather than a run block, so it is checked
+      # directly. It is the single definition of that list for every consuming repo.
+      - name: shellcheck the governed-paths script
+        run: shellcheck --severity=warning .github/actions/governed-paths/restore-agent-governed-paths.sh

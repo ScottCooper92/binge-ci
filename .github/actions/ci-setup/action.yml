@@ -114,6 +114,12 @@ runs:
         # "N busy/incompatible daemons could not be reused" and paid to scan them. Clear the
         # registry so each job starts its one daemon clean.
         rm -rf "$GUH/daemon"
+        # Same reasoning for hs_err: the runner image's JAVA_TOOL_OPTIONS points every JVM's
+        # -XX:ErrorFile here (see the "Capture daemon diagnostics" step in ci.yml), and nothing
+        # ever deleted a file that step didn't run for (a job that failed for an unrelated reason,
+        # or didn't fail at all). Left in place, the next crash-diagnostics run would re-find and
+        # re-report someone else's old crash as this job's.
+        rm -f "$GUH"/hs_err_*.log
         tune_gb=${{ steps.runner.outputs.mem_gb }}
 
         if [ "${{ steps.runner.outputs.hosted }}" = "true" ]; then

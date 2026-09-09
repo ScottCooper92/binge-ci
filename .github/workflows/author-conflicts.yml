@@ -75,29 +75,14 @@ on:
           A rule that fits both repos is usually too vague to bind either.
         type: string
         default: ''
-      governed_paths_script:
+      governed_extra_paths:
         description: >
-          Path, in the caller's default branch, to a script supporting `--list` that names
-          the paths claude-code-action rewrites before it starts. Set this when the caller
-          already has one, so the list has a single definition shared with that repo's own
-          restore guard rather than a second copy free to drift. Empty falls back to
-          `governed_paths` below.
+          Repo-specific paths to add to the governed list, newline-separated. The base list
+          lives in this repo's governed-paths action and covers what claude-code-action
+          rewrites; this only APPENDS to it. A caller cannot narrow it, because narrowing it
+          is exactly the silent loss the guard exists to prevent.
         type: string
         default: ''
-      governed_paths:
-        description: >
-          Newline-separated fallback for `governed_paths_script`. Must mirror the paths
-          claude-code-action rewrites to the default branch's copy before it runs; a path
-          that does not exist in the caller costs nothing, but one that is MISSING here
-          means the agent silently drops the PR's side of it. Binge's script is the
-          worked example of the full list.
-        type: string
-        default: |
-          .claude
-          .mcp.json
-          .claude.json
-          CLAUDE.md
-          CLAUDE.local.md
       scan_limit:
         description: >
           How many open labelled PRs the scan looks at. `gh pr list` defaults to 30, past
@@ -283,6 +268,16 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.token.outputs.token }}
 
+      # Ships with this repo rather than the caller's, so a PR cannot touch the guard that is
+      # about to refuse it - see the action's own header. It exports GOVERNED_BASE_REF and
+      # GOVERNED_EXTRA_PATHS for the steps below and hands back the script's path.
+      - name: Provide the governed-paths script
+        id: governed
+        uses: ./.github/actions/governed-paths
+        with:
+          base-ref: origin/${{ inputs.default_branch }}
+          extra-paths: ${{ inputs.governed_extra_paths }}
+
       - name: Start the merge
         id: merge
         env:
@@ -290,8 +285,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
-          GOVERNED_SCRIPT: ${{ inputs.governed_paths_script }}
-          GOVERNED_PATHS: ${{ inputs.governed_paths }}
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
           set -uo pipefail
           # Only the clean-merge path below relies on this; once the agent step
@@ -334,33 +328,21 @@ jobs:
             # and resolving the rest is wasted anyway, since one unmerged path left behind sends
             # "Commit or bail out" down its abort path regardless.
             #
-            # The list comes from the caller's script when it has one, read from the DEFAULT
-            # BRANCH rather than the checkout: this job has a conflicted PR head in the working
-            # tree, and a PR that could edit the list could narrow the guard that is about to
-            # refuse it. A copy hand-typed into this workflow would be a second definition free
-            # to drift from the one that repo's own restore guard uses - Binge#2050. A caller
-            # with no such script passes the list literally instead, which is safe for the same
-            # reason: on a workflow_run, the caller's workflow file is itself read from the
-            # default branch.
-            if [ -n "$GOVERNED_SCRIPT" ]; then
-              list="${{ runner.temp }}/governed-paths.sh"
-              git show "origin/${DEFAULT_BRANCH}:${GOVERNED_SCRIPT}" > "$list" \
-                || { echo "::error::Could not read $GOVERNED_SCRIPT from $DEFAULT_BRANCH."; exit 1; }
-              # Not `mapfile < <(bash ...)`: process substitution discards the exit status, so a
-              # script that failed would read as a script that named nothing.
-              out=$(bash "$list" --list) \
-                || { echo "::error::$GOVERNED_SCRIPT --list failed."; exit 1; }
-              mapfile -t governed_paths <<<"$out"
-            else
-              mapfile -t governed_paths < <(printf '%s\n' "$GOVERNED_PATHS" \
-                | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
-            fi
+            # The list comes from the governed-paths action, which ships with THIS repository
+            # rather than the caller's - so the PR head sitting conflicted in the working tree
+            # cannot narrow the guard that is about to refuse it. One definition for every
+            # consuming repo, which is Binge#2050's point carried across repositories.
+            #
+            # Not `mapfile < <(bash ...)`: process substitution discards the exit status, so a
+            # script that failed would read as a script that named nothing.
+            out=$(bash "$GOVERNED_SCRIPT" --list) \
+              || { echo "::error::restore-agent-governed-paths.sh --list failed."; exit 1; }
+            mapfile -t governed_paths <<<"$out"
 
-            # The status is not enough on its own. A default-branch copy of the script predating
-            # --list treats it as the <ref> argument, still exits 0, and can print its markdown
-            # note on stdout - two junk "paths" that pass a count check, match no pathspec, and
-            # hand a conflicted CLAUDE.md to the agent with no refusal. So the shape is checked,
-            # not just the length: every governed path is a bare path, and prose is not.
+            # The status is not enough on its own: a script that printed prose on stdout would
+            # give junk "paths" that pass a count check, match no pathspec, and hand a conflicted
+            # CLAUDE.md to the agent with no refusal. So the shape is checked, not just the
+            # length: every governed path is a bare path, and prose is not.
             [ ${#governed_paths[@]} -gt 0 ] \
               || { echo "::error::No governed paths were named - refusing to run without the guard."; exit 1; }
             for path in "${governed_paths[@]}"; do

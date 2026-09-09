@@ -1,0 +1,81 @@
+name: Governed paths
+description: >
+  Exposes restore-agent-governed-paths.sh to a reusable workflow, and reports where
+  claude-code-action's rewrite is read from.
+
+# WHY THIS IS AN ACTION AND NOT A SCRIPT THE WORKFLOW READS.
+#
+# A reusable workflow cannot read a file out of its own repository - it has the CALLER's
+# checkout, not binge-ci's. But a local action reference inside a reusable workflow resolves
+# against THIS repository, so a composite action is the only vehicle that can hand a
+# workflow a file that travels with it. Same reason ci-setup lives here.
+#
+# It outputs a PATH rather than doing the work, because the two consumers use the script
+# differently and both do so from the middle of a larger shell block: author-ci-fix and
+# author-comments run it for its restore side-effect and capture its note on stdout, while
+# author-conflicts runs `--list` and then reasons about the paths itself. Wrapping either
+# shape in action inputs and outputs would mean rewriting shell that is load-bearing and
+# already proven, for no gain.
+#
+# WHY IT LIVES HERE AT ALL. Binge kept this script in-repo and read it from `master` at run
+# time, so a PR could not narrow the guard about to refuse it. Moving it here keeps that
+# property and strengthens it - a PR in a consuming repo cannot touch this file at all,
+# because it is in another repository at a pinned tag - and it gives the two public repos a
+# guard they never had, since neither has a .github/scripts of its own.
+
+inputs:
+  base-ref:
+    description: >
+      The ref claude-code-action rewrote FROM, e.g. origin/main. It is the discriminator for
+      "this is the rewrite and nothing else", so a wrong value does not corrupt anything - it
+      just reports every restore instead of only the interesting ones.
+    required: false
+    default: origin/main
+  extra-paths:
+    description: >
+      Repo-specific governed paths, newline-separated, APPENDED to the script's own list. A
+      caller cannot narrow that list, because narrowing it is exactly the silent loss the
+      script exists to prevent.
+    required: false
+    default: ''
+
+outputs:
+  script:
+    description: Absolute path to restore-agent-governed-paths.sh.
+    value: ${{ steps.locate.outputs.script }}
+
+runs:
+  using: composite
+  steps:
+    - name: Locate the governed-paths script
+      id: locate
+      shell: bash
+      env:
+        # GITHUB_ACTION_PATH is this action's directory inside the runner's copy of binge-ci,
+        # which is the only handle a composite action has on files shipped alongside it.
+        ACTION_PATH: ${{ github.action_path }}
+        BASE_REF: ${{ inputs.base-ref }}
+        EXTRA_PATHS: ${{ inputs.extra-paths }}
+      run: |
+        set -euo pipefail
+        script="${ACTION_PATH}/restore-agent-governed-paths.sh"
+        [ -f "$script" ] || { echo "::error::restore-agent-governed-paths.sh is missing from $ACTION_PATH."; exit 1; }
+        chmod +x "$script"
+
+        # Exported for the steps that follow, so a caller runs `bash "$script" <ref>` without
+        # also having to remember to set these. GITHUB_ENV rather than a step output because
+        # the script reads them from the environment.
+        {
+          echo "GOVERNED_BASE_REF=$BASE_REF"
+          if [ -n "$EXTRA_PATHS" ]; then
+            # Multi-line values need a heredoc delimiter; a bare `K=v` truncates at the first
+            # newline and would silently drop every extra path but the first.
+            delim="EOF_$(date +%s%N)"
+            echo "GOVERNED_EXTRA_PATHS<<${delim}"
+            printf '%s\n' "$EXTRA_PATHS"
+            echo "$delim"
+          fi
+        } >> "$GITHUB_ENV"
+
+        echo "script=$script" >> "$GITHUB_OUTPUT"
+        echo "Governed paths: $(bash "$script" --list | tr '\n' ' ')"
