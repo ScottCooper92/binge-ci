@@ -1,0 +1,38 @@
+name: Author - fix failing CI
+
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# `CI` is matched by NAME - renaming ci.yml's `name:` silently unhooks this, bot-review
+# and author-conflicts all at once.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  fix:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1
+    with:
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      toolchain: android
+      verify_guidance: >
+        Scope Gradle to the module rather than running the whole tree when you
+        are checking one thing — `./gradlew :app:test`, or `:app:ktlintCheck`.
+        Do not run `./gradlew build`; CI will do that when you push.
+      gate_rules: |
+        NEVER silence a gate instead of fixing it. Do not add a ktlint
+        baseline, do not add `ktlint-disable` comments to make a file pass,
+        do not add a lint-baseline.xml, do not set `abortOnError = false`,
+        and do not exclude a source set from `check`.
+
+        Formatting failures are the cheapest class of failure to fix
+        properly. A lint baseline is worse than it looks: it silences the
+        finding permanently and silently, in a repository whose whole
+        purpose is to be copied.
+
+        If the only way to green is through one of those, that is a stop:
+        make no changes and say so.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

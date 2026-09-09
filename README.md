@@ -29,7 +29,7 @@ editorial is lost silently.
 | Workflow | Lines | Re-derived | Behind Binge by |
 | --- | --- | --- | --- |
 | `bot-review.yml` | 941 | ✅ 2026-09-09 | — |
-| `author-ci-fix.yml` | 487 | ❌ still the 09-01 draft | 7 commits |
+| `author-ci-fix.yml` | 787 | ✅ 2026-09-09 | — |
 | `author-comments.yml` | 422 | ❌ still the 09-01 draft | 4 commits |
 | `author-conflicts.yml` | 710 | ✅ 2026-09-09 | — |
 | `author-retarget.yml` | 296 | ✅ 2026-09-09 | — |
