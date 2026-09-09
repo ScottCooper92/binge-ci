@@ -1,0 +1,41 @@
+# Caller. Drop at binge-integrations/.github/workflows/author-conflicts.yml.
+name: Author - resolve merge conflicts
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: author-conflicts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1
+    with:
+      runner: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch: main
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      conflict_rules: |
+        One kind of conflict is never yours to arbitrate. Two branches that
+        both added a field, an enum value or an rpc to the same proto message
+        have almost certainly claimed the SAME number. Keeping both sides'
+        text resolves the conflict marker and leaves a file that will not
+        compile — or, worse, one that does compile with a number assigned to
+        two different meanings on the wire.
+
+        Keep both additions and renumber the LATER one to the next unused
+        number in that message. If it is not obvious which side is later, or
+        if either side is already referenced elsewhere in the tree, stop:
+        leave it unresolved and say so in note.md. A wrong number here is a
+        wire-format bug that `buf breaking` cannot catch, because on this
+        branch nothing has been published yet.
+
+        Never resolve a conflict by deleting a field, an enum value or a
+        `reserved` range from either side.
+    secrets: inherit

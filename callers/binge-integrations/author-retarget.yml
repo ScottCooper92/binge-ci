@@ -1,0 +1,29 @@
+# Caller. Drop at binge-integrations/.github/workflows/author-retarget.yml.
+#
+# `pull_request_target`, not `pull_request` — see the reusable workflow's header.
+# The called job runs `git merge` and `git push` and nothing else; it has no agent
+# step and no toolchain step, and it must not acquire one. That is what makes the
+# trigger safe here, and it is worth restating in a PUBLIC repo where a fork PR is
+# a real event rather than a hypothetical one. The same-repository guard inside
+# the called workflow is what keeps a fork's head out.
+name: Author - catch up a retargeted PR
+
+on:
+  pull_request_target:
+    types: [edited, ready_for_review]
+
+concurrency:
+  group: author-retarget-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  catch-up:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-retarget.yml@v1
+    with:
+      runner: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch: main
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+    secrets: inherit

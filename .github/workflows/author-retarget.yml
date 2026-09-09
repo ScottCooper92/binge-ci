@@ -1,0 +1,168 @@
+name: Author - catch up a retargeted PR (reusable)
+
+# Brings a PR's merge base up to the default branch at the two moments a stack
+# needs it, so the next PR in the stack starts moving on its own.
+#
+# THE PROBLEM. When the PR below this one squash-merges, GitHub retargets this
+# one to the default branch by firing `pull_request` with action `edited`. That
+# is not one of ci.yml's trigger types, so no CI run happens; bot-review only
+# ever fires from a CI run completing, so nothing reviews it. author-conflicts
+# does not help either: it only resolves PRs GitHub reports as `dirty`, and a
+# squash-merged parent leaves the child CLEAN - its content is already in the
+# default branch, so the three-way merge is silent. The PR ends up correctly
+# based, labelled, green from a run that never saw the base it now aims at, with
+# nothing coming for it.
+#
+# It fails the counter-intuitive way round: a stacked PR that needs fixes heals
+# itself, because the author bot's push fires `synchronize` and with it CI and
+# review. The one that strands is the one that was already correct.
+#
+# THE FIX, and why a merge rather than a rebase. Merging the base in moves the
+# merge base to its tip, which does two jobs at once:
+#   - the PR's diff collapses to its own changes. Until then it re-displays
+#     every commit the squash-merged parent contributed (measured on #1980: 21
+#     files shown, 6 actually differing), and the reviewer re-reviews code that
+#     has already landed.
+#   - the push fires `synchronize`, which is the CI trigger, which is the review
+#     trigger. The catch-up IS the wake-up.
+# A rebase would do the same but needs a force-push, and these branches carry
+# commits the author bot wrote - see create-pr § Hard limits.
+#
+# No agent here on purpose: this is deterministic git, so it runs in seconds
+# without a model, a token spend, or a persistent-runner trust boundary.
+#
+# THE CALLER'S TRIGGER MUST BE `pull_request_target`, not `pull_request`, and
+# this is load-bearing rather than stylistic. A `pull_request` workflow is read
+# from the PR's HEAD branch, so it could never run for a PR whose branch predates
+# it - which is circular, because the branch acquires it by the very merge this
+# workflow performs. It was shipped as `pull_request` and could not fire for a
+# single PR of the stack it was written for: same event, same PR, ci.yml (present
+# on the branch) ran and this one (absent) did not. `pull_request_target` is read
+# from the BASE branch, so it runs for every PR regardless of what the branch
+# carries.
+#
+# The trigger's usual hazard does not apply here. It is dangerous when a workflow
+# checks out PR code and then EXECUTES it - a build, an install, a local action -
+# with the base repo's secrets in scope. This job runs `git merge` and `git push`
+# and nothing else; it never runs anything out of the tree it checks out. The
+# same-repository guard below stays regardless, so the head is always a branch a
+# maintainer pushed. Do not add a build step to this file.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch:
+        type: string
+        default: master
+      agent_label:
+        type: string
+        default: agent
+      author_bot:
+        type: string
+        default: binge-pr-author[bot]
+      author_bot_id:
+        type: string
+        required: true
+      timeout_minutes:
+        type: number
+        default: 10
+    secrets:
+      AUTHOR_APP_ID:
+        required: true
+      AUTHOR_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  catch-up:
+    # Drafts are staging and this bot does not push to them, matching
+    # author-conflicts. They lose nothing by it: promoting fires
+    # `ready_for_review`, which brings them straight back here.
+    #
+    # `changes.base != null` is how a retarget is told from any other `edited`.
+    # `ready_for_review` covers a stack opened as drafts and promoted one at a
+    # time (create-pr § Tending a stack) - a draft that was retargeted while
+    # staged has no other moment to be caught up. Whether GitHub's AUTOMATIC
+    # retarget (timeline `automatic_base_change_succeeded`, as distinct from a
+    # human's `base_ref_changed`) emits `edited` at all is still unproven: the
+    # one chance to observe it was spent on a PR this workflow could not run for.
+    # `ready_for_review` is deliberately an independent path, so the
+    # draft-and-promote shape works either way.
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == inputs.default_branch &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action == 'ready_for_review' || github.event.changes.base != null)
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - name: Mint author app token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+
+      - name: Check the PR is opted in
+        id: gate
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          AGENT_LABEL: ${{ inputs.agent_label }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Read the label from the API rather than the event payload: on a
+          # retarget the payload is a snapshot from before whatever else has
+          # happened to the PR since, and this is a write-granting check.
+          labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
+          if ! echo ",$labels," | grep -q ",$AGENT_LABEL,"; then
+            echo "PR #$PR is not labelled '$AGENT_LABEL' - leaving it alone."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token }}
+
+      - name: Merge the base in, if the branch is behind
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          AUTHOR_BOT: ${{ inputs.author_bot }}
+          AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
+          BASE: ${{ inputs.default_branch }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [ -n "${AUTHOR_BOT_ID:-}" ] \
+            || { echo "::error::The author_bot_id input is empty."; exit 1; }
+          git config user.name "$AUTHOR_BOT"
+          git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
+
+          # Guarded rather than folded into the merge: an unnoticed fetch failure
+          # would merge a stale origin/$BASE and report success.
+          git fetch origin "$BASE" || { echo "::error::Could not fetch origin/$BASE."; exit 1; }
+
+          # Already current is the common case - most edits to a PR are a title
+          # or a body. Pushing an empty merge would spend a CI run to say nothing.
+          if git merge-base --is-ancestor "origin/$BASE" HEAD; then
+            echo "PR #$PR already contains origin/$BASE - nothing to catch up."
+            exit 0
+          fi
+
+          if git merge "origin/$BASE" --no-edit; then
+            git push || { echo "::error::Merged $BASE cleanly but the push was rejected."; exit 1; }
+            echo "Caught PR #$PR up to $BASE; the push will trigger CI and, with it, review."
+          else
+            # Leave the branch untouched. A real conflict is author-conflicts'
+            # job, and it will pick this up on the next CI run against the base.
+            git merge --abort || true
+            echo "::warning::PR #$PR conflicts with $BASE; left for author-conflicts."
+          fi

@@ -1,0 +1,78 @@
+# Caller. Drop at binge-integrations/.github/workflows/author-comments.yml.
+#
+# The commenter gate inside the called workflow (OWNER / MEMBER / COLLABORATOR,
+# plus the reviewer bot by identity) matters MORE here than it did in Binge.
+# This repo is public: anyone can comment on a PR, the comment body becomes the
+# agent's instructions, and the push that follows routes through CI. In a private
+# repo everyone who could comment already had write access; here that association
+# check is the gate.
+#
+# The concurrency block stays in the caller for the reason spelled out in Binge's
+# copy: WORKFLOW-level concurrency admits runs before the job `if` filters them,
+# so cancel-in-progress would let a filtered-out event kill an in-flight agent.
+name: Author - respond to comments
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  respond:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1
+    with:
+      runner: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch: main
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      maintainer_handle: ScottCooper92
+      conventions_path: CLAUDE.md
+      max_rounds: 3
+      toolchain: jvm
+      java_version: '21'
+      setup_buf: true
+      # Laxer than author-ci-fix.yml's, on the same principle as Binge's split:
+      # this bot knows why the contract moved because it just moved it. The
+      # asymmetry is narrow — it may ADD to a proto when asked, never renumber.
+      gate_rules: |
+        NEVER silence a gate, however the request is worded. Do not add a
+        breaking-change exclusion to buf.yaml, and do not add a
+        `# buf:lint:ignore` to make a lint failure go away. Those are
+        deliberate human decisions, not repairs.
+
+        Proto changes have three cases, and only the first is silencing:
+
+          - `buf breaking` fails and your own diff does not account for it.
+            Never widen the exclusions. Fix the change so it is additive, or
+            change nothing and say why.
+          - A review asks for a NEW field, enum value or rpc. Add it, with the
+            next unused number. This is the ordinary case and it is always
+            additive.
+          - A review asks to change or remove an EXISTING field, enum value or
+            rpc in a published package. Refuse, in your reply, and say why:
+            the wire contract is append-only inside a package
+            (docs/Architecture.md > Versioning), and a breaking change is a new
+            `v2` package — a design decision a human makes, not one you make
+            inside a comment thread.
+
+        This holds even when the request is explicit, reasonable-sounding, or
+        comes from a maintainer. "It's still pre-alpha, nobody has shipped
+        against it, just renumber it" is exactly the request this rule exists to
+        refuse. Say no in your reply and explain why; a human who genuinely
+        wants the field renumbered can do it themselves.
+      verify_guidance: |
+        You have a working JDK, Gradle and the buf CLI, so verify what you
+        change rather than reasoning about it. Run `buf lint` and, for any
+        proto change, `buf breaking --against ".git#branch=main"`. Scope Gradle
+        to the module you touched (`:contracts:test`, not the whole tree).
+        "I could not check it" is not a true answer here.
+    secrets: inherit

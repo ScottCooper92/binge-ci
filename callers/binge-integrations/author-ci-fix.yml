@@ -1,0 +1,70 @@
+# Caller. Drop at binge-integrations/.github/workflows/author-ci-fix.yml.
+#
+# PREREQUISITES: .ai/agents/ci-triage.md and CLAUDE.md on `main`, plus the runner,
+# the apps and the secrets. The triage doc is the analogue of Binge's
+# .claude/skills/gate/SKILL.md — a table mapping each way CI can go red here
+# (buf lint, buf breaking, ktlint, a failing ProtoRoundTripTest, a Gradle
+# compile error) to the correct fix. Without it the agent triages from nothing,
+# which is the one failure mode this whole design refuses.
+#
+# setup_buf is true, so the agent can run `buf lint` and `buf breaking` itself
+# rather than reason about them. Note the UNPINNED bufbuild/buf-action in the
+# called workflow — resolve it to a SHA before enabling this, since this job
+# hands an agent Bash and a contents:write token on a persistent runner.
+name: Author - fix failing CI
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+concurrency:
+  group: author-ci-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fix:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1
+    with:
+      runner: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch: main
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      triage_doc_path: .ai/agents/ci-triage.md
+      conventions_path: CLAUDE.md
+      toolchain: jvm
+      java_version: '21'
+      setup_buf: true
+      # The contracts-repo analogue of Binge's baseline-and-allowlist block. What
+      # is being protected is different in kind: not a recorded artefact that
+      # would accept a regression, but the append-only guarantee that every
+      # companion app on the outside depends on.
+      gate_rules: |
+        NEVER silence a gate instead of fixing it. Specifically, do not
+        touch any of these, for any reason:
+
+          - buf.yaml or buf.lock breaking-change configuration. `buf breaking`
+            failing is the gate working. Adding an exclusion, an ignore entry
+            or a `# buf:lint:ignore` comment to make it pass is not a repair.
+          - a field number, a field name or a `reserved` range on any message
+            in a published proto package. Renumbering is what `buf breaking`
+            exists to catch; the wire format is the contract.
+          - an enum value's number, and never REMOVE an enum value. Peers
+            ignore values they do not know, which only holds while numbers
+            are stable.
+
+        A `buf breaking` failure means this branch changed the wire contract.
+        The correct fix is almost always to make the change ADDITIVE — a new
+        field with a new number, a new enum value appended, a new rpc — not
+        to reshape the existing one. See docs/Architecture.md > Versioning: a
+        breaking change is a new package (v2) and a deliberate human decision,
+        never something a repair bot arrives at on its own. If the only way to
+        green is through one of these, that is a stop: make no changes and say
+        so.
+
+        Contract shape is a design decision, not a build failure. A red build
+        is not permission to redesign a message.
+    secrets: inherit

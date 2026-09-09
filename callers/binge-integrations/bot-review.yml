@@ -1,0 +1,48 @@
+# Caller. Drop at binge-integrations/.github/workflows/bot-review.yml.
+#
+# PREREQUISITES, none of which exist in binge-integrations today:
+#   - .ai/agents/pr-review-guide.md and CLAUDE.md on `main`. The called workflow
+#     reads both from the default branch and hands them to the agent as the rules
+#     for the review. They are NOT copies of Binge's: the calibration section of
+#     Binge's guide is about Compose, linters and a screenshot gate, none of which
+#     exist here. Writing them is the real work of adopting this.
+#   - The `agent-runner` self-hosted runner registered against this repo, and both
+#     GitHub Apps installed on it.
+#   - REVIEWER_APP_ID / REVIEWER_APP_PRIVATE_KEY / CLAUDE_CODE_OAUTH_TOKEN as
+#     repository secrets.
+#
+# auto_merge is FALSE here, unlike Binge. This repo is public and its whole value
+# proposition is an append-only wire contract that companion apps build against;
+# `buf breaking` is the gate that matters and a bot squash-merging to `main` on
+# top of it is a sharper tool than the same bot on a private app repo. The review,
+# the issue filing and every guard still run — a human presses merge.
+name: Bot review
+
+on:
+  workflow_run:
+    # Matched by NAME. binge-integrations' ci.yml is already named "CI".
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  review:
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
+    with:
+      runner: '["self-hosted", "agent-host", "agent-runner"]'
+      default_branch: main
+      ci_workflow_file: ci.yml
+      dispatch_pr: ${{ inputs.pr }}
+      review_guide_path: .ai/agents/pr-review-guide.md
+      conventions_path: CLAUDE.md
+      gated_checks: buf lint, buf breaking, or the Gradle build and test
+      auto_merge: false
+    secrets: inherit
