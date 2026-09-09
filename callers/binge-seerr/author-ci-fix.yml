@@ -9,6 +9,19 @@ on:
     workflows: ["CI"]
     types: [completed]
 
+# A reusable workflow cannot be granted MORE than its caller holds, and a caller with no
+# `permissions:` block gets the repository default - which is `contents: read` and does NOT
+# include `actions`. The called workflow needs `actions: read` for its CI-run lookup, so without
+# this the run dies as `startup_failure` before a single step executes: no log, no annotation, and
+# nothing on the PR.
+#
+# This is the one way a reusable workflow differs from the copy it replaced. An ordinary workflow
+# declaring `permissions: actions: read` simply gets it; a caller has to hold it first. Found by
+# running it (binge-seerr#1), not by actionlint, which has no way to see across the reference.
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   fix:
     uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1
