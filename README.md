@@ -32,7 +32,7 @@ editorial is lost silently.
 | `author-ci-fix.yml` | 487 | ❌ still the 09-01 draft | 7 commits |
 | `author-comments.yml` | 422 | ❌ still the 09-01 draft | 4 commits |
 | `author-conflicts.yml` | 376 | ❌ still the 09-01 draft | 5 commits |
-| `author-retarget.yml` | 168 | ❌ still the 09-02 draft | 1 commit |
+| `author-retarget.yml` | 296 | ✅ 2026-09-09 | — |
 
 **Do not point a caller at a workflow that is not yet re-derived.** It will run, and it
 will be missing fixes the repo it came from has had for a week.

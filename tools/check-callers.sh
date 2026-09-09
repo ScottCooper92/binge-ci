@@ -33,17 +33,28 @@ for caller in callers/*/*.yml; do
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
   secrets=$(keys "$reusable" '^    secrets:' '^permissions:' '      ' '[A-Z_]')
   used=$(keys    "$caller"   '^    with:'    '^    secrets:' '      ' '[a-z_]')
+  # Inputs with `required: true` and no default. Omitting one is a run-time failure in
+  # the consuming repo, which is the same class of silence the undeclared-input check
+  # exists for, arrived at from the other side.
+  required=$(awk '
+    /^    inputs:/ {f=1; next}
+    /^    secrets:/ {f=0}
+    f && /^      [a-z_]+:/ { name=$0; sub(/:.*/,"",name); gsub(/ /,"",name); req=0 }
+    f && /^        required: *true/ { if (name != "") print name }
+  ' "$reusable" | sort -u)
   if grep -qE '^    secrets: *inherit *$' "$caller"; then
     passed="$secrets"
   else
     passed=$(keys "$caller" '^    secrets:' '^[a-z]' '      ' '[A-Z_]')
   fi
-  bad=$(comm -23 <(printf '%s\n' "$used")    <(printf '%s\n' "$inputs")  | grep -v '^$')
-  missing=$(comm -23 <(printf '%s\n' "$secrets") <(printf '%s\n' "$passed") | grep -v '^$')
-  if [ -n "$bad" ] || [ -n "$missing" ]; then
+  bad=$(comm -23 <(printf '%s\n' "$used")     <(printf '%s\n' "$inputs")   | grep -v '^$')
+  unset_req=$(comm -23 <(printf '%s\n' "$required") <(printf '%s\n' "$used")     | grep -v '^$')
+  missing=$(comm -23 <(printf '%s\n' "$secrets")  <(printf '%s\n' "$passed")   | grep -v '^$')
+  if [ -n "$bad" ] || [ -n "$missing" ] || [ -n "$unset_req" ]; then
     fail=1; echo "FAIL $caller"
-    [ -n "$bad" ]     && echo "     undeclared inputs:  $(echo "$bad")"
-    [ -n "$missing" ] && echo "     secrets not passed: $(echo "$missing")"
+    [ -n "$bad" ]       && echo "     undeclared inputs:   $(echo "$bad")"
+    [ -n "$unset_req" ] && echo "     required not passed: $(echo "$unset_req")"
+    [ -n "$missing" ]   && echo "     secrets not passed:  $(echo "$missing")"
   else
     echo "ok   $caller  ($(printf '%s\n' "$used" | grep -c .) inputs, $(printf '%s\n' "$passed" | grep -c .) secrets)"
   fi
