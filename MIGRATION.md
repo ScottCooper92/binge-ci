@@ -1,48 +1,98 @@
-# Applying this draft
+# Applying this
 
-Nothing here has been pushed and no repo calls these workflows yet. This is the
-order to land it in, smallest reversible step first.
+No repo calls these workflows yet and there is no `v1` tag. This is the order to land
+it in, smallest reversible step first.
 
-## 1. Create and tag `binge-ci`
+Three decisions were settled on 2026-09-09 and the steps below assume them:
 
-Public, under `ScottCooper92`. Public matters: `binge-integrations` is public, and
-a public repo calling a reusable workflow from a private one both needs the
-private repo's Actions access setting opened up *and* prints the called
-workflow's step bodies into the public caller's logs. A public `binge-ci`
-sidesteps both. Nothing in these files is secret — every credential arrives as a
-secret at call time.
+| Decision | Choice | Why |
+| --- | --- | --- |
+| How to catch up | **Re-derive from Binge HEAD**, not cherry-pick | 23 commits against a restructured file is 23 conflicts and no guarantee. The 09-02 draft is preserved in this repo's first commit so nothing editorial is lost silently. |
+| Default posture | **Public-safe** | Two of three consumers are public. A caller that forgets to configure something should get the strict setting, not Binge's. |
+| Prove it on | **binge-seerr first** | MIGRATION originally said Binge, but that was written before binge-seerr existed. It is now fully wired and is the lowest-stakes place a break costs nothing. |
 
-Push, then tag `v1`. Every caller references `@v1`.
+## 1. Finish the re-derivation
 
-## 2. Prove it on Binge first
+`bot-review.yml` is done. Four to go — see the status table in [README.md](README.md).
+Each is the same method: take Binge's current file, re-apply the input substitutions,
+run the gate.
 
-Binge is private, already has the runner, the apps, the secrets and the `agent`
-label, and already has the governing docs the agents read. It is the only place
-this can be validated without also inventing new documents — so it goes first,
-and a difference in behaviour there is a bug in the extraction rather than a bug
-in a new repo's setup.
+**Do not land step 2 before this is finished.** A caller pointed at a stale author
+workflow runs, and is silently missing a week of fixes — which is the exact failure
+this repo exists to end.
 
-Move `callers/Binge/*.yml` over the five originals in
-`Binge/.github/workflows/`, and change one line in `Binge/.github/workflows/ci.yml`:
+While doing it, two things to settle rather than inherit:
+
+- **`secrets: inherit` in the author callers.** It hands the called workflow every
+  secret the caller holds. `bot-review`'s callers name the three explicitly instead;
+  the author callers should match.
+- **`bufbuild/buf-action@v1`** is the only unpinned action in the set, and it would run
+  in a job that hands an agent Bash and a contents:write token. Resolve it to a SHA, or
+  leave `setup_buf: false`.
+
+## 2. Create and tag `binge-ci`
+
+Public, under `ScottCooper92`. Public matters: `binge-integrations` and `binge-seerr`
+are public, and a public repo calling a reusable workflow from a private one both needs
+the private repo's Actions access setting opened up *and* prints the called workflow's
+step bodies into the public caller's logs. A public `binge-ci` sidesteps both. Nothing
+here is secret — every credential arrives as a secret at call time.
+
+Push first, tag `v1` only once step 3 is green. A `v1` that moves under its callers is
+the drift problem again, wearing a tag.
+
+## 3. Prove it on binge-seerr
+
+binge-seerr is pre-alpha, has one open PR, no release train, and `auto_merge: false`, so
+a bad review cannot merge anything. A break there costs nothing. It also exercises the
+hosted-runner path that two of the three consumers use.
+
+It is already wired: both apps installed, all five secrets, `AUTHOR_BOT_ID`, the `agent`
+label, and a `CLAUDE.md` plus `.ai/agents/` that are about *that* repo.
+
+Move `callers/binge-seerr/*.yml` into `binge-seerr/.github/workflows/`, replacing the
+five full copies it was scaffolded with on 2026-09-06. Leave its `ci.yml` alone — CI
+stays per-repo.
+
+Then watch one PR through the full loop. The three author bots have **never actually
+run** in that repo — every invocation to date was skipped by a guard, which proves the
+trigger wiring and nothing else. So drive each one deliberately:
+
+| To exercise | Do this |
+| --- | --- |
+| `bot-review` | Already proven on binge-seerr#1. Re-run it and check the verdict still posts. |
+| `author-ci-fix` | Open a labelled PR with a ktlint violation. Check it makes exactly one repair attempt. |
+| `author-comments` | Leave an inline review comment on a labelled PR. This is the one whose three-event fan-out is easiest to get wrong. |
+| `author-retarget` | Open a two-PR stack, merge the base by hand. Zero runs to date, and it was rewritten as `pull_request_target` after the `pull_request` form could not fire in Binge. |
+| `author-conflicts` (resolve) | Make the two stacked PRs touch the same file. Only its scan job has ever run. |
+
+A wrong `default_branch` shows up immediately as "path does not exist in origin/main".
+
+## 4. Move Binge over
+
+Binge is the risky one — it ships daily, runs on self-hosted runners, and its bot merges
+labelled PRs in about fifteen minutes. Go second, with binge-seerr already green.
+
+Move `callers/Binge/*.yml` over the five originals in `Binge/.github/workflows/`, and
+change one line in `Binge/.github/workflows/ci.yml`:
 
 ```diff
 -        uses: ./.github/actions/ci-setup
 +        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1
 ```
 
-Then delete `Binge/.github/actions/ci-setup/`. Keeping a second copy for `ci.yml`
-alone is the drift this whole exercise exists to prevent — and it is a copy the
-agent workflows would *not* be using, so the two would diverge invisibly.
+Then delete `Binge/.github/actions/ci-setup/`. Keeping a second copy for `ci.yml` alone
+is the drift this whole exercise exists to prevent — and it is a copy the agent
+workflows would *not* be using, so the two would diverge invisibly.
 
-Watch one PR through the full loop before going further: red CI → repair → green
-CI → review → merge. The review and the repair both read documents from `master`,
-so a wrong `default_branch` shows up immediately as "path does not exist in
-origin/master".
+Binge's caller opts back out of every public-safe default: self-hosted `runner`,
+`auto_merge: true`, `show_full_output: true`, `default_branch: master`, and the
+`unbuilt_paths` pair that its six-pattern `paths-ignore` needs.
 
-## 3. Write binge-integrations' governing docs
+## 5. Write binge-integrations' governing docs, then wire it
 
-This is the real work, and it is authoring, not plumbing. Three documents on
-`main`, none of them copies of Binge's:
+This is the real work in that repo, and it is authoring, not plumbing. Three documents
+on `main`, none of them copies of Binge's:
 
 | File | What it has to say |
 | --- | --- |
@@ -50,32 +100,12 @@ This is the real work, and it is authoring, not plumbing. Three documents on
 | `.ai/agents/pr-review-guide.md` | The review checklist and, critically, its calibration section. Binge's is about Compose, linters and a screenshot gate; this one is about wire compatibility, capability gating and the Binder 1 MB limit. |
 | `.ai/agents/ci-triage.md` | A table mapping each way CI goes red here — `buf lint`, `buf breaking`, ktlint, `ProtoRoundTripTest`, a Gradle compile error — to the correct fix. Without it `author-ci-fix` triages from nothing. |
 
-The bots are only as good as these. Porting the workflows without them produces
-an agent reviewing a proto repo against a screenshot gate that does not exist.
+The bots are only as good as these. Porting the workflows without them produces an agent
+reviewing a proto repo against a screenshot gate that does not exist.
 
-## 4. Wire binge-integrations
+Then replace its five 09-01 copies with `callers/binge-integrations/*.yml`.
 
-Register the `agent-runner` runner against it, install both apps, add the five
-secrets and `AUTHOR_BOT_ID`, create the maintainers-only `agent` label, then move
-`callers/binge-integrations/*.yml` into `.github/workflows/`.
+## 6. Then the Seerr extraction
 
-Two things to settle before the first labelled PR:
-
-- **Resolve `bufbuild/buf-action@v1` to a SHA** in both `author-ci-fix.yml` and
-  `author-comments.yml`, or leave `setup_buf: false`. It is the only unpinned
-  action in the set, and it would run inside a job that hands an agent Bash and a
-  contents:write token on a persistent runner.
-- **Re-read the fork guard.** In Binge the same-repository check was a second
-  line of defence behind a repo nobody could fork. Here it is the whole boundary.
-  It is already in every job; the point is to have looked at it deliberately
-  rather than inherited it.
-
-`auto_merge: false` is set in the bot-review caller. Turn it on later if you want
-to, but not in the same change as everything else.
-
-## 5. Seerr
-
-Roadmap stage 4. When the companion repo is scaffolded, it needs five caller
-files of ~25 lines each — copy `callers/binge-integrations/`, change
-`default_branch` if it differs, and swap `toolchain: jvm` for `android`. That is
-the whole point of steps 1–4.
+Roadmap stage 4 in binge-integrations. That is what all of this was blocking: 325 files
+moving through binge-seerr, on bots that are current rather than a week stale.
