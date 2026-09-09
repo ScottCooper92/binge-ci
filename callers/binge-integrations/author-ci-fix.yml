@@ -19,8 +19,8 @@ jobs:
       setup_buf: true
       verify_guidance: >
         Verify by running only the check that failed — `buf lint`, `buf breaking`,
-        `./gradlew :contracts:test`, or `ktlintCheck` on the affected module. Do
-        not run the whole build; CI will do that when you push.
+        `./gradlew :contracts:test` for the round-trip test. Do not run the whole
+        build; CI will do that when you push.
       gate_rules: |
         NEVER silence a gate instead of fixing it. In this repository that
         means, specifically:
@@ -31,7 +31,6 @@ jobs:
             field or an enum value, to make `buf breaking` pass. Evolution inside
             a package is append-only; a breaking change is a new package served
             side by side, and that is a human's decision, not a repair.
-          - Do not add a ktlint baseline or `ktlint-disable` comments.
 
         If the only way to green is through one of those, that is a stop: make
         no changes and say so.

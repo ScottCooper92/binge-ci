@@ -63,8 +63,8 @@ jobs:
         touched rather than running the whole build.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add
-        exclusions to buf.yaml or buf.work.yaml, do not add
-        `// buf:lint:ignore` comments, and do not add a ktlint baseline.
+        exclusions to buf.yaml or buf.work.yaml, and do not add
+        `// buf:lint:ignore` comments.
 
         The contract is append-only inside a package, and that is not
         negotiable by comment. Do not change or reuse an existing field

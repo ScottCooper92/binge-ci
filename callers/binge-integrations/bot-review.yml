@@ -24,7 +24,10 @@ jobs:
       # on main is read and copied. A bot squash-merging on a green `buf` run is a
       # sharper tool here than on a private app repo.
       auto_merge: false
-      gated_checks: buf lint, buf breaking, ktlint or the proto round-trip test
+      # This repo's whole gate is `./gradlew build` plus buf lint/breaking. There is no
+      # linter, no coverage floor and no screenshot suite - so naming one here would tell
+      # the reviewer not to report what nothing actually catches.
+      gated_checks: buf lint, buf breaking, or the Gradle build and its tests
       # ci.yml here declares no paths-ignore, so every PR produces a run and the
       # `labeled` door has nothing to open for. Leaving unbuilt_paths unset keeps it shut.
     secrets:
