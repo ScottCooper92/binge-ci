@@ -2,21 +2,22 @@
 #
 # Two rules about how a reusable workflow here reaches this repository's own actions.
 #
-# 1. NO `uses: ./`. Inside a reusable workflow, a local action path resolves against the
-#    CALLER's workspace, not against the repository defining the workflow. No consumer has
-#    .github/actions/, so the job dies with "Can't find 'action.yml' ... Did you forget to
-#    run actions/checkout before running your local action?" - at run time, in the consuming
-#    repo, which is the one place the failure is expensive.
+# 1. NO `uses: ./`. Inside a reusable workflow a local action path resolves against the
+#    CALLER's workspace, not this repository. No consumer has .github/actions/, so the job
+#    dies with "Can't find 'action.yml' ... Did you forget to run actions/checkout" - at run
+#    time, in the consuming repo.
 #
 # 2. Every self-reference pins the SAME immutable vX.Y.Z tag, never the moving `v1`. A caller
-#    that pins `@v1.0.2` for stability would otherwise still get the action at whatever `v1`
-#    points to now, so its pin would not be a pin. `uses:` takes no expression, so the tag
-#    cannot be derived from the ref this workflow was called at - it is written out, and this
-#    check is what makes forgetting to bump it loud instead of silent.
+#    that pins `@v1.0.2` would otherwise still get the action at whatever `v1` points to now.
+#    `uses:` takes no expression, so the tag cannot be derived and is written out; this check
+#    is what makes forgetting to bump it loud.
 #
-# Release order matters and is what keeps the window safe: tag vX.Y.Z at the merge commit
-# FIRST, then move `v1` onto it. Consumers resolve the workflow at `v1`, so until that move
-# they are still on the previous commit and never see a tag that does not exist yet.
+# Release order: tag vX.Y.Z at the merge commit FIRST, then move `v1`. Consumers resolve the
+# workflow at `v1`, so until that move they are on the previous commit and never see a tag
+# that does not exist yet.
+#
+# `--resolve` additionally requires the pinned tag to EXIST. It cannot run on a PR - the tag
+# is created after the merge that names it - so tag-check.yml runs it on a tag push instead.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
