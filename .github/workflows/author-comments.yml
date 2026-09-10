@@ -92,8 +92,8 @@ on:
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
-          the same evidence: Binge#1984's response COMPLETED in 41 turns against a cap of 40
-          and the action discarded the finished work over the overrun, so nothing was pushed.
+          the same evidence: a response that COMPLETES one turn over the cap has its finished
+          work discarded over the overrun, so nothing is pushed.
           A job done and thrown away is worse than a job stopped. max_rounds still caps the
           genuine back-and-forth, so a larger cap cannot let this spin.
         type: number
@@ -412,8 +412,8 @@ jobs:
             do not delegate anything you then wait on, and do not end a turn with
             work outstanding - finish it yourself, in this turn.
 
-            Stopping mid-turn is worse here than for the reviewer that hit this in
-            Binge#2251, which at least failed clean. This job pushes whatever is in
+            Stopping mid-turn is worse here than it is for the reviewer, which at
+            least fails clean. This job pushes whatever is in
             the working tree, so a turn that ends early pushes a HALF-APPLIED change
             and reply.md then tells the reviewer their feedback was addressed.
             Answering a review with a partial change described as a whole one is the

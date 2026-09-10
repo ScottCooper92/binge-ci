@@ -429,8 +429,8 @@ jobs:
             do not delegate anything you then wait on, and do not end a turn with
             work outstanding - finish it yourself, in this turn.
 
-            Stopping mid-turn is worse here than for the reviewer that hit this in
-            Binge#2251, which at least failed clean. This job commits the merge in
+            Stopping mid-turn is worse here than it is for the reviewer, which at
+            least fails clean. This job commits the merge in
             the working tree, so a turn that ends early lands a HALF-RESOLVED merge
             on the author's branch and note.md then reports the conflicts resolved.
             Leaving a conflict explicitly unresolved, as the rules above require, is

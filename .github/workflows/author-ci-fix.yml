@@ -91,10 +91,10 @@ on:
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
-          the failure mode it calls worse than a timeout: Binge#1984's sibling run COMPLETED
-          in 41 turns against a cap of 40 and the action discarded the finished work over the
-          overrun. A run that reads the log, edits, builds the failing task, reads the result
-          and iterates spends turns a read-and-edit-only cap never had to cover. This job's
+          the failure mode it calls worse than a timeout: a run that COMPLETES one turn over
+          the cap has its finished work discarded over the overrun. A run that reads the log,
+          edits, builds the failing task, reads the result and iterates spends turns a
+          read-and-edit-only cap never had to cover. This job's
           per-commit attempt marker still stops it retrying the same head, so a larger cap
           cannot let it spin — it only stops one being cut off mid-way.
         type: number
@@ -110,8 +110,8 @@ on:
       agent_timeout_minutes:
         description: >
           A bound on the agent step alone, BELOW the job's. Keep the arithmetic ~5 minutes of
-          setup (a fetch-depth: 0 checkout alone took 3m18s on Binge#2009) + this + ~4 for the
-          push, the reporter and the upload, inside timeout_minutes.
+          setup (a fetch-depth: 0 checkout alone can take over three minutes) + this + ~4 for
+          the push, the reporter and the upload, inside timeout_minutes.
         type: number
         default: 35
       show_full_output:
@@ -478,9 +478,9 @@ jobs:
             do not delegate anything you then wait on, and do not end a turn with
             work outstanding - finish it yourself, in this turn.
 
-            Stopping mid-turn is worse here than for the reviewer that hit this in
-            Binge#2251. That run failed clean: no verdict file, a hard failure, and
-            a comment saying nothing was reviewed. This job pushes whatever is in
+            Stopping mid-turn is worse here than it is for the reviewer, which at
+            least fails clean: no verdict file, a hard failure, and a comment saying
+            nothing was reviewed. This job pushes whatever is in
             the working tree, so a turn that ends early pushes a HALF-APPLIED fix
             and note.md then reports it as the fix. A red PR told it is green is
             worse than a red PR told nobody looked.

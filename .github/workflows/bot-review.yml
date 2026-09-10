@@ -128,10 +128,10 @@ on:
         description: >
           Headroom, not a budget. agent_timeout_minutes is the real bound: it fails
           on time actually spent, and a run it kills has genuinely run away.
-          --max-turns bounds a proxy, and its failure mode is worse — Binge#1968's
-          review COMPLETED in 42 turns against a cap of 40 and the action discarded
-          the finished verdict over the overrun. 20 had already failed the other way
-          on #1969. Set clear of where real reviews land rather than chased upward
+          --max-turns bounds a proxy, and its failure mode is worse: a review that
+          COMPLETES two turns over the cap has its finished verdict discarded over
+          the overrun, which is a job done and thrown away rather than one stopped.
+          Set clear of where real reviews land rather than chased upward
           two at a time; a review that needs 100 turns has a wall-clock problem the
           timeout will catch on its own terms.
         type: number
@@ -524,10 +524,10 @@ jobs:
             you deferred comes back to you: when you stop, the process exits and
             the container goes. So do not delegate anything you then wait on, and
             do not end a turn with work outstanding — finish it yourself, in this
-            turn. Binge#2251's review died exactly here, ending on "I'll continue
-            once it reports back" with a background agent that had nothing left to
-            report to. Two minutes of completed review were discarded and the PR
-            sat unreviewed, because none of it was in the file below.
+            turn. A review has died exactly here, ending on "I'll continue once it
+            reports back" with a background agent that had nothing left to report
+            to: minutes of completed review discarded and the PR left unreviewed,
+            because none of it was in the file below.
 
             The verdict file is the only thing you produce that outlives this
             step. Your findings are not delivered by being reasoned about, or by
