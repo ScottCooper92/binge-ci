@@ -596,6 +596,7 @@ jobs:
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
           BODY_FILE: ${{ runner.temp }}/review-body.md
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
+          PAYLOAD: ${{ runner.temp }}/review-payload.json
         run: |
           set -euo pipefail
           # The concurrency group above serialises a duplicate trigger rather
@@ -663,9 +664,19 @@ jobs:
           # and the truncation, or a gh failure after GitHub had already created the review,
           # would have the PR say it was refused with the review sitting on it. An output written
           # on the failing path itself cannot drift from the path it describes.
-          if ! jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
-                 '{commit_id: $c, event: $e, body: $b}' \
-               | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - \
+          # Built first rather than piped in, so that `refused` means the POST was refused and
+          # nothing else. Wrapping the whole pipeline in `if !` put a jq failure - an unwritable
+          # $BODY_FILE.pinned, a full disk - on the same branch as a 422, and the PR would have
+          # said "GitHub refused to post it" about a request GitHub never saw. Near-unreachable
+          # given the empty-body guard above, and still the exact fault this workflow is being
+          # fixed for: a notice asserting something that did not happen.
+          #
+          # `set -e` covers the build: if it fails the step dies here, before the output is
+          # written, and the reporter takes its generic branch.
+          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
+            '{commit_id: $c, event: $e, body: $b}' > "$PAYLOAD"
+
+          if ! gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input "$PAYLOAD" \
                  > "$POST_LOG" 2>&1; then
             cat "$POST_LOG" >&2
             echo "refused=true" >> "$GITHUB_OUTPUT"
