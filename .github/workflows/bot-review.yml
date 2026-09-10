@@ -125,6 +125,9 @@ on:
           The regex form of `unbuilt_paths`, for the changed-file test. A second
           hand-written expression of the same set on purpose: `gh --jq` needs a regex, and
           the set check above needs globs. Required whenever `unbuilt_paths` is set.
+
+          Written as an ordinary regex — `\.md$`, one backslash. It reaches jq as a value
+          rather than as source text, so there is no string-literal escaping to account for.
         type: string
         default: ''
       show_full_output:
@@ -339,8 +342,19 @@ jobs:
               skip "${CI_WORKFLOW}'s paths-ignore no longer matches the caller's unbuilt_paths (see above) - teach the caller the new entry before a docs-only PR can be labelled through."
             fi
 
-            unbuilt=$(gh pr view "$num" --json files \
-              --jq "[.files[].path | select(test(\"${UNBUILT_REGEX}\") | not)] | length")
+            # Two jq calls, because the regex must arrive as a VALUE and not as source text.
+            # Interpolated into `--jq`, it lands inside a jq string literal, where `\.` is not a
+            # valid escape and the whole program fails to compile - `invalid escape sequence "\."
+            # in string literal`, at run time, in the consuming repo. A caller author writing a
+            # regex writes `\.md$`; asking them to write `\\.md$` because of where the value is
+            # spliced is a trap, and no static check can catch it: check-callers.sh validates that
+            # an input exists, not what a jq compiler will make of it.
+            #
+            # `gh --jq` takes no --arg, so the array comes out of gh and the filter goes into real
+            # jq. Same jq, so the regex flavour is unchanged - grep -Ev would have been one process
+            # fewer and a silent switch from Oniguruma to POSIX ERE.
+            unbuilt=$(gh pr view "$num" --json files --jq '[.files[].path]' \
+              | jq --arg re "$UNBUILT_REGEX" '[.[] | select(test($re) | not)] | length')
             [ "$unbuilt" = "0" ] \
               || skip "PR #$num has $unbuilt file(s) CI will build - waiting for its run."
             echo "Labelled, and CI will never run on this PR - reviewing without a build to vouch for it."
