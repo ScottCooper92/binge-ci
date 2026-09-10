@@ -620,22 +620,31 @@ jobs:
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
 
-          # Pinned to the commit that was actually read, which is why this is the REST
-          # endpoint and not `gh pr review`. That command sends no commit_id, so GitHub
-          # stamps the review against whatever the head is NOW - and a review takes
-          # minutes while the author bots push whenever CI or a reviewer asks them to.
+          # The reviewed SHA is named TWICE, in the body and in commit_id, because neither
+          # alone does the job.
           #
-          # Binge#2434 is the worked example: the run woken by CI on 0573040e resolved
-          # that head at 15:15:19, a74f4467 landed at 15:15:26, and the verdict posted at
-          # 15:21:38 carried a74f4467 - a tree it never checked out. Its own run then
-          # reviewed it properly, so the PR showed two CHANGES_REQUESTED against one
-          # commit, one of them an account of a different commit.
+          # commit_id is why this is the REST endpoint and not `gh pr review`: that command
+          # sends none, so GitHub stamps the review against whatever the head is NOW - and a
+          # review takes minutes while the author bots push whenever CI or a reviewer asks
+          # them to. Binge#2434 is the worked example: the run woken by CI on 0573040e
+          # resolved that head at 15:15:19, a74f4467 landed at 15:15:26, and the verdict
+          # posted at 15:21:38 carried a74f4467, a tree it never checked out. That commit's
+          # own run then reviewed it properly, so the PR carried two CHANGES_REQUESTED
+          # against one commit, one of them an account of a different one.
           #
-          # Nothing merged wrongly - "Merge if the bar is met" holds on head-moved - so
-          # what this costs is the PR's account of itself, which is the whole output.
-          # Posting against the older SHA is honest and self-describing: GitHub marks the
-          # review outdated, which is exactly what it is.
-          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE" \
+          # But commit_id is not VISIBLE. `outdated` is a field on PullRequestReviewComment
+          # and there is no counterpart on PullRequestReview - checked against the GraphQL
+          # schema, which exposes only `commit` there - so a body-only verdict is rendered
+          # the same whether its commit is the head or six pushes back. Pinning alone makes
+          # the API record honest and leaves the #2434 symptom on screen exactly as it was.
+          # The body line is what a reader actually sees, so it is not conditional on the
+          # head having moved: "no line" would then mean both "current" and "posted by an
+          # older version of this workflow".
+          #
+          # Nothing merged wrongly in #2434 - "Merge if the bar is met" holds on head-moved.
+          # What it cost was the PR's account of itself, which is this workflow's whole output.
+          printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}" | cat - "$BODY_FILE" > "$BODY_FILE.pinned"
+          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
             '{commit_id: $c, event: $e, body: $b}' \
             | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - >/dev/null
 
@@ -934,8 +943,24 @@ jobs:
           # review left it - exactly right when merging was never on the table.
           if [ "$SUBMITTED" != "success" ]; then
             marker="<!-- review-failed:${SHA} -->"
-            body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
-              "${SHA:0:7}" "$RUN_URL")
+            # "Re-running CI on this commit" is the wrong advice for one ordinary way this
+            # branch is reached: a force-push between resolve and submit takes the reviewed
+            # commit off the PR, and the pinned review POST then 422s on a commit_id GitHub
+            # cannot find. Telling the reader to retry a commit that no longer exists sends
+            # them after something that cannot succeed.
+            #
+            # A lookup failure falls through to the generic wording rather than the specific
+            # one - being vague about the remedy is recoverable, asserting the commit is gone
+            # when the API merely hiccuped is not.
+            on_pr=$(gh api "repos/${GH_REPO}/pulls/${PR}/commits?per_page=100" --paginate \
+              --jq '.[].sha' 2>/dev/null | grep -cFx "$SHA" || true)
+            if [ "${on_pr:-1}" = "0" ]; then
+              body=$(printf 'The automatic review of `%s` did not complete ([log](%s)), and that commit is no longer on this PR - it was force-pushed away while the review was running. Nothing was reviewed and nothing was merged. There is nothing to retry on `%s`; the current head gets its own review when its CI reports.' \
+                "${SHA:0:7}" "$RUN_URL" "${SHA:0:7}")
+            else
+              body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
+                "${SHA:0:7}" "$RUN_URL")
+            fi
           elif [ -s "$MERGE_LOG" ]; then
             marker="<!-- merge-failed:${SHA} -->"
             body=$(printf 'The review of `%s` was submitted and is on this PR. The **merge** was attempted and failed ([log](%s)), so this PR is reviewed but unmerged - it needs merging by hand, or another run once the cause is gone.\n\n```\n%s\n```' \
