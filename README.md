@@ -97,8 +97,14 @@ the base branch's copy before it starts, because a PR head is untrusted; without
 the author bots commit that rewrite as their own work and silently revert the PR. It lives
 here so a PR cannot reach the guard that is about to refuse it.
 
-Both actions live here rather than in the consuming repos because a local `uses: ./...`
-inside a reusable workflow resolves against **this** repository, not the caller's.
+Both actions live here rather than in the consuming repos so a PR cannot edit the guard
+that is about to refuse it, and so the two public repos get one they never had.
+
+They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`. Inside a
+reusable workflow a local action path resolves against the **caller's** workspace, where
+these directories do not exist. The tag is immutable rather than `v1`, so a caller pinning
+`@v1.0.N` gets the actions that shipped with it; `uses:` takes no expression, so
+`tools/check-internal-refs.sh` is what keeps the five in step.
 
 ## Its own gate
 
@@ -128,3 +134,12 @@ remote reference, and the called workflow's own CI is not the caller.
 
 Callers reference `@v1`, a moving alias. `v1.0.0` and friends are immutable — pin to one
 if you want no surprises.
+
+Releasing is: bump the self-references in `.github/workflows/` to the new patch tag, merge,
+tag `vX.Y.Z` at that commit, **then** move `v1`. That order keeps the window safe —
+consumers resolve the workflow at `v1`, so until it moves they are still on the previous
+commit and never see a tag that does not exist yet.
+
+`tag-check.yml` enforces the part a PR cannot: on any `v*` tag push it requires the
+self-referenced tag to exist. Moving `v1` is itself a tag push, so cutting the release
+without the patch tag fails there rather than in a consumer's next agent run.

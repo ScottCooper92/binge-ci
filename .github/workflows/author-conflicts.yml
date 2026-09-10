@@ -273,7 +273,7 @@ jobs:
       # GOVERNED_EXTRA_PATHS for the steps below and hands back the script's path.
       - name: Provide the governed-paths script
         id: governed
-        uses: ./.github/actions/governed-paths
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.3
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
