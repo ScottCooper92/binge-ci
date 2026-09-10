@@ -1,13 +1,15 @@
 name: Tag check
 
-# The one release mistake nothing else can catch: merging a bump to the self-referenced tag,
-# moving `v1`, and never cutting the tag itself. The workflows then name a ref that does not
-# exist, and every consumer's next agent run dies on "unable to resolve action" - at run time,
-# in the consuming repo.
+# Catches the one release mistake nothing else can: bumping the self-referenced tag, moving
+# `v1`, and never cutting the tag. The workflows then name a ref that does not exist, and
+# every consumer's next agent run dies on "unable to resolve action".
 #
-# It cannot be a PR check, because the tag is created after the merge that names it. A tag
-# push is the right moment instead: moving `v1` IS a tag push, so the mistake fires this the
-# instant it is made, and costs nothing on any other event.
+# It cannot be a PR check - the tag is created after the merge that names it - so it runs on
+# a tag push, which is when the mistake is made: moving `v1` is itself a tag push.
+#
+# It DETECTS rather than prevents. By the time this fails, `v1` has already moved and
+# consumers are already broken; it turns a silent breakage into a loud one and shortens the
+# window. A green run here is not evidence the window never opened.
 on:
   push:
     tags: ['v*']

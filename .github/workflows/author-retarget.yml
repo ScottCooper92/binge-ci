@@ -1,60 +1,28 @@
 name: Author - catch up a retargeted PR
 
-# Brings a PR's merge base up to the default branch at the moments a stack needs
-# it, so the next PR in the stack starts moving on its own - and retargets a PR
-# that was opened onto a base which had already merged, which is the same
-# stranding arrived at from the other end (see the `opened`/`labeled` note below).
+# Catches a stranded PR up to the default branch, and retargets one opened onto a
+# base that had already merged.
 #
-# Reusable. The caller owns the `pull_request_target` trigger, because a reusable
-# workflow cannot declare one, and must NOT add a `concurrency:` block of its own
-# - this workflow has one, and nesting them is a lost update rather than a guard.
+# A squash-merged parent retargets its child by firing `pull_request` action
+# `edited` - not a CI trigger type - so no CI run and therefore no review. And
+# author-conflicts does not cover it: it acts on `dirty` PRs, and a squash-merged
+# parent leaves the child CLEAN.
 #
-# THE PROBLEM. When the PR below this one squash-merges, GitHub retargets this
-# one to the default branch by firing `pull_request` with action `edited`. That
-# is not one of a CI workflow's trigger types, so no CI run happens; bot-review
-# only ever fires from a CI run completing, so nothing reviews it.
-# author-conflicts does not help either: it only resolves PRs GitHub reports as
-# `dirty`, and a squash-merged parent leaves the child CLEAN - its content is
-# already in the base, so the three-way merge is silent. The PR ends up based on
-# the default branch, labelled, green from a run that never saw the base it now
-# aims at, with nothing coming for it.
+# A merge rather than a rebase, because it both collapses the diff to the PR's own
+# changes and fires `synchronize`, which is the CI trigger and so the review
+# trigger. A rebase would need a force-push over the author bot's own commits.
 #
-# It fails the counter-intuitive way round: a stacked PR that needs fixes heals
-# itself, because the author bot's push fires `synchronize` and with it CI and
-# review. The one that strands is the one that was already correct.
+# THE CALLER MUST USE `pull_request_target`, not `pull_request`, and it is
+# load-bearing. A `pull_request` workflow is read from the PR's HEAD branch, so it
+# can never run for a PR whose branch predates it - circular, because the branch
+# acquires it by the very merge this performs. `pull_request_target` is read from
+# the BASE branch and runs regardless of what the branch carries.
 #
-# THE FIX, and why a merge rather than a rebase. Merging the base in moves the
-# merge base to its tip, which does two jobs at once:
-#   - the PR's diff collapses to its own changes. Until then it re-displays
-#     every commit the squash-merged parent contributed (measured on Binge#1980:
-#     21 files shown, 6 actually differing), and the reviewer re-reviews code
-#     that has already landed.
-#   - the push fires `synchronize`, which is the CI trigger, which is the review
-#     trigger. The catch-up IS the wake-up.
-# A rebase would do the same but needs a force-push, onto branches that carry
-# commits the author bot wrote.
+# That trigger is dangerous when a workflow EXECUTES checked-out PR code with the
+# base repo's secrets in scope. This job runs `git merge` and `git push` and
+# nothing else. Do not add an execution step here.
 #
-# No agent here on purpose: this is deterministic git, so it runs in seconds
-# without a model, a token spend, or an agent trust boundary.
-#
-# THE CALLER MUST USE `pull_request_target`, not `pull_request`, and this is
-# load-bearing rather than stylistic. A `pull_request` workflow is read from the
-# PR's HEAD branch, so it could never run for a PR whose branch predates it -
-# which is circular, because the branch acquires it by the very merge this
-# workflow performs. It was shipped that way in Binge and could not fire for a
-# single PR of the stack it was written for: same event, same PR, ci.yml (present
-# on the branch) ran and this one (absent) did not. `pull_request_target` is read
-# from the BASE branch, so it runs for every PR regardless of what the branch
-# carries.
-#
-# The trigger's usual hazard does not apply here, and on a PUBLIC caller that is
-# worth stating precisely rather than inheriting. `pull_request_target` is
-# dangerous when a workflow checks out PR code and then EXECUTES it - a build, an
-# install, a local action - with the base repo's secrets in scope. This job runs
-# `git merge` and `git push` and nothing else; it never runs anything out of the
-# tree it checks out, and it has no toolchain step and no agent step. The
-# same-repository guard below stays regardless, so the head is always a branch a
-# maintainer pushed. Do not add an execution step here.
+# The caller must NOT add a `concurrency:` block; this workflow has one.
 on:
   workflow_call:
     inputs:
@@ -94,32 +62,19 @@ permissions:
   contents: read
 
 concurrency:
-  # These triggers can arrive within seconds of each other - a promotion following a
-  # retarget, or `labeled` following `opened`. Two runs pushing to one branch is a
-  # lost update, and two racing to retarget would double-comment, so serialise per PR
-  # - and do NOT cancel-in-progress: a half-finished merge that was cancelled after
-  # `git merge` but before `git push` leaves nothing behind, but cancelling the winner
-  # would.
+  # These triggers can arrive seconds apart, and two runs pushing one branch is a lost
+  # update. NOT cancel-in-progress: a merge cancelled before its push leaves nothing
+  # behind, but cancelling the winner would.
   group: author-retarget-${{ github.repository }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   catch-up:
-    # Two shapes, and the base ref is what tells them apart.
-    #
-    # Base IS the default branch - the original: something retargeted this PR, or a
-    # retargeted draft was just promoted, and it needs the base merged in.
-    # `changes.base` is what makes an `edited` a retarget rather than a title tweak.
-    #
-    # Base is NOT the default branch - the stale-base shape: a PR opened or labelled
-    # onto another branch. Most of those are a live stack and must be left alone; the
-    # step below is what decides, because the answer needs an API call. `edited` is
-    # excluded here on purpose - a human deliberately restacking is not this workflow's
-    # business.
-    #
-    # Drafts are staging and this bot does not push to them, matching author-conflicts.
-    # They lose nothing by it: promoting fires `ready_for_review`, which brings them
-    # straight back here, by either path.
+    # Two shapes. Base IS the default branch: something retargeted this PR, and
+    # `changes.base` is what makes an `edited` a retarget and not a title tweak. Base is
+    # NOT: opened or labelled onto another branch, which needs an API call to judge, so
+    # the step below decides. `edited` is excluded there - a human restacking
+    # deliberately is not this bot's business.
     if: >
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -146,32 +101,21 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # Read the label from the API rather than the event payload: on a
-          # retarget the payload is a snapshot from before whatever else has
-          # happened to the PR since, and this is a write-granting check.
+          # From the API, not the payload: on a retarget the payload is a snapshot from
+          # before whatever else has happened since, and this check grants writes.
           labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
           if ! echo ",$labels," | grep -q ",$AGENT_LABEL,"; then
             echo "PR #$PR is not labelled '$AGENT_LABEL' - leaving it alone."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Only the stale-base shape reaches the body of this; on the ordinary retarget
-      # path the `if` skips it and `skip` reads empty, which the steps below admit.
+      # A base that is not the default branch is usually a LIVE stack. Its own PR is the
+      # discriminator: no open PR means nothing will ever land it, and requiring a MERGED
+      # one keeps this off branches that were never a stack.
       #
-      # A base that is not the default branch is USUALLY a live stack, and retargeting
-      # one of those would break it. The signal that tells a live stack from a dead one
-      # is the base branch's own PR: a stack moves because each PR below merges in turn,
-      # so a base with no open PR has nothing coming that would ever land it, and a PR
-      # stacked on it cannot merge through the stack at all. Requiring a MERGED PR as
-      # well keeps this off anything that was never a stack - a long-lived integration
-      # branch, a release branch - where retargeting would be a guess rather than a repair.
-      #
-      # Retarget and carry on into the merge below rather than leaving the resulting
-      # `edited` to re-enter the workflow. It would (an app token fires events, unlike
-      # GITHUB_TOKEN), but a fix that depends on its own trigger firing is a fix that
-      # fails silently when it does not - and this workflow exists because that already
-      # happened once. The re-entry still arrives, finds the branch current and exits on
-      # "nothing to catch up"; one cheap run is the price of not depending on it.
+      # Carries on into the merge rather than relying on the resulting `edited` to
+      # re-enter - it would, since an app token fires events, but a fix that depends on
+      # its own trigger fails silently when it does not.
       - name: Retarget a PR opened onto a base that already merged
         id: restack
         if: steps.gate.outputs.skip != 'true' && github.event.pull_request.base.ref != inputs.default_branch
@@ -182,10 +126,9 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # Read the live base rather than trust the event payload: `cancel-in-progress:
-          # false` above means a queued run (e.g. `labeled` right behind `opened`) still
-          # carries a snapshot from before an earlier run already retargeted this PR, so
-          # trusting it here would redo the retarget and re-post the comment below.
+          # The live base, not the payload: `cancel-in-progress: false` means a queued run
+          # carries a snapshot from before an earlier run retargeted this PR, and trusting
+          # it would redo the retarget and re-post the comment.
           BASE=$(gh pr view "$PR" --json baseRefName --jq .baseRefName) \
             || { echo "::error::Could not read PR #$PR's current base."; exit 1; }
           if [ "$BASE" = "$DEFAULT_BRANCH" ]; then
@@ -194,10 +137,9 @@ jobs:
             exit 0
           fi
 
-          # Assigned and guarded rather than tested inline: a command substitution that
-          # fails inside `[ ]` does not trip `set -e`, so a dead token or a rate limit
-          # would read as "this base has no PR" and quietly leave a stranded PR stranded
-          # - which is the exact fault being fixed here, reintroduced by its own repair.
+          # Assigned and guarded, not tested inline: a command substitution that fails
+          # inside `[ ]` does not trip `set -e`, so a dead token would read as "this base
+          # has no PR" and leave a stranded PR stranded - the fault being fixed here.
           open_pr=$(gh pr list --state open --head "$BASE" --json number --jq '.[].number') \
             || { echo "::error::Could not list open PRs for base '$BASE'."; exit 1; }
           merged_pr=$(gh pr list --state merged --head "$BASE" --json number --jq '.[].number') \
@@ -239,13 +181,12 @@ jobs:
           git config user.name "$AUTHOR_BOT"
           git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
 
-          # Guarded rather than folded into the merge: an unnoticed fetch failure
-          # would merge a stale origin ref and report success.
+          # Guarded: an unnoticed fetch failure merges a stale ref and reports success.
           git fetch origin "$DEFAULT_BRANCH" \
             || { echo "::error::Could not fetch origin/$DEFAULT_BRANCH."; exit 1; }
 
-          # Already current is the common case - most edits to a PR are a title
-          # or a body. Pushing an empty merge would spend a CI run to say nothing.
+          # The common case, since most edits are a title or body. An empty merge would
+          # spend a CI run to say nothing.
           if git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
             echo "PR #$PR already contains origin/$DEFAULT_BRANCH - nothing to catch up."
             exit 0
@@ -255,25 +196,17 @@ jobs:
             git push || { echo "::error::Merged $DEFAULT_BRANCH cleanly but the push was rejected."; exit 1; }
             echo "Caught PR #$PR up to $DEFAULT_BRANCH; the push will trigger CI and, with it, review."
           else
-            # Leave the branch untouched. A real conflict is author-conflicts'
-            # job, and it will pick this up on the next CI run against the base.
+            # A real conflict is author-conflicts' job, on the next CI run.
             git merge --abort || true
             echo "::warning::PR #$PR conflicts with $DEFAULT_BRANCH; left for author-conflicts."
           fi
 
-      # This workflow exists to unstick a PR that nothing else will come for, so a failure here
-      # restores exactly the condition it was written to remove - and silently. A rejected push,
-      # an unfetchable base or a dead token leaves the PR retargeted, green from a run that
-      # never saw the base it now aims at, and waiting on nobody. Every other workflow in this
-      # set says so on the PR; this one is deterministic git, which makes it less likely to fail,
-      # not less important to hear about when it does.
+      # A failure here silently restores the exact condition this workflow removes: the PR
+      # left waiting on nobody.
       #
-      # always(), not failure(), to catch a cancel by timeout-minutes.
-      #
-      # Gated on the opt-in check having SUCCEEDED and admitted the PR. If that step is itself
-      # what broke then the label was never read, and commenting on a PR that may not carry it
-      # is worse than staying quiet - the whole system is opt-in. Every failure after it is
-      # covered, which is all of the ones that can leave work half-done.
+      # always(), not failure(), to catch a cancel by timeout-minutes. Gated on the opt-in
+      # check having SUCCEEDED and admitted the PR - if that step is what broke, the label
+      # was never read, and commenting on a PR that may not carry it is worse than silence.
       - name: Report a failed catch-up
         if: >
           always() && job.status != 'success' &&

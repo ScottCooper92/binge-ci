@@ -1,12 +1,5 @@
 name: CI
 
-# This repository ships no code — it ships five reusable workflows and the drafts
-# of the callers that use them. So its gate is the two things that can be wrong
-# with that: the workflows themselves, and whether the callers still fit them.
-#
-# NOT named "CI" by accident: the agent workflows here match their caller's CI
-# workflow by name, and this repo does not call them, so there is no self-hosting
-# to worry about. It is named CI because that is what it is.
 on:
   push:
     branches: [main]
@@ -27,18 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # actionlint runs shellcheck over every `run:` block when it is on PATH, which is
-      # the check that matters most here: these workflows are ~2500 lines of shell whose
-      # bugs are only reachable from a live PR in a consuming repo.
+      # actionlint shellchecks every `run:` block, but only when shellcheck is on PATH.
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
 
       - name: actionlint
         env:
           VERSION: 1.7.7
-          # Pinned by digest, like every action in the workflows this repo ships. A
-          # release asset is mutable in principle and this one lints the files that
-          # hand an agent a contents:write token.
           SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
         run: |
           set -euo pipefail
@@ -46,28 +34,20 @@ jobs:
             "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
           echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
           tar xzf actionlint.tar.gz actionlint
-          # --severity=warning, not the default. shellcheck's info level fires SC2016
-          # ("expressions don't expand in single quotes") on every `printf '...%s...'`
-          # format string in these files, where single quotes are exactly right - and
-          # there are eleven of them. A blanket -e SC2016 would also drop the real case
-          # the check exists for, so the floor is set by severity instead: warning and
-          # error fail the build, style and info do not.
+          # --severity=warning, not the default: info fires SC2016 on every `printf` format
+          # string here, where single quotes are correct. Disabling SC2016 outright would
+          # also drop the real case, so the floor is set by severity.
           #
-          # The callers reference this repo's own workflows by a REMOTE ref that does not
-          # resolve from inside a PR, so actionlint is pointed at the reusable workflows
-          # and the callers separately - tools/check-callers.sh covers what it cannot.
+          # Two invocations because a caller's `uses:` is a remote ref actionlint cannot
+          # resolve from inside a PR; check-callers.sh covers what it therefore skips.
           ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
           ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
 
-      # The half actionlint cannot do: match each caller's inputs and secrets against the
-      # reusable workflow it calls. See the header of the script.
       - name: Check the draft callers against the workflows they call
         run: ./tools/check-callers.sh
 
-      # The other half it cannot do: pointed at an action.yml, actionlint reports "on section
-      # is missing" and stops, so the shell inside a composite action goes unchecked. Both
-      # actions here carry real shell, and one of them is the guard that keeps an agent from
-      # silently discarding a PR's own changes.
+      # Pointed at an action.yml, actionlint reports "on section is missing" and stops, so
+      # a composite action's shell is never checked by the runs above.
       - name: shellcheck the composite actions
         run: ./tools/check-action-shell.sh
 
@@ -76,7 +56,6 @@ jobs:
       - name: Check this repo's references to its own actions
         run: ./tools/check-internal-refs.sh
 
-      # The governed-paths script is a plain file rather than a run block, so it is checked
-      # directly. It is the single definition of that list for every consuming repo.
+      # A plain file, so no `run:` block carries it into the checks above.
       - name: shellcheck the governed-paths script
         run: shellcheck --severity=warning .github/actions/governed-paths/restore-agent-governed-paths.sh

@@ -1,34 +1,16 @@
 name: Author - respond to comments
 
-# Author app: reacts to review feedback of all three kinds.
-#  - issue_comment                 -> top-level PR conversation comments
-#  - pull_request_review_comment   -> inline comments on the diff
-#  - pull_request_review           -> the review submission itself
-# Wiring only the first is the usual mistake; it misses all inline feedback.
-#
-# Reusable. The caller owns all three triggers and its own concurrency group -
-# see the note on `concurrency` below, which is why the group lives in the caller
-# rather than here.
-#
-# TRUST BOUNDARY. This job checks out PR code and runs an agent with Bash, Edit
-# and Write plus a contents:write app token. TWO things admit work to it, and
-# both are needed:
-#  - the `agent` label, which is maintainers-only: applying it grants code
-#    execution with that repository's secrets in scope.
+# TRUST BOUNDARY. This job checks out PR code and runs an agent with Bash, Edit and
+# Write plus a contents:write app token. TWO things admit work to it:
+#  - the `agent` label, which is maintainers-only.
 #  - the commenter's association with the repo. The label vouches for the PR's
-#    contents, not for whoever comments on it afterwards, and the comment body is
-#    fed to the agent as its instructions. Without this second gate any passer-by
-#    could prompt the agent, and the push that follows routes straight through CI
-#    to bot-review.
+#    contents, not for whoever comments afterwards, and the comment body becomes the
+#    agent's instructions.
 #
-# That second gate carries far more weight on a PUBLIC caller. Anyone can comment
-# on a PR there; in a private repo everyone who could comment already had write
-# access, so the gate was close to redundant. Here it is the control. It lives in
-# the CALLER's job-level `if` and is repeated on the feedback the agent reads —
-# who may TRIGGER a run and whose text reaches the agent are not the same
-# question, and only the second is decided here.
-#
-# A same-repository guard keeps fork PRs out regardless.
+# That second gate is the control on a PUBLIC caller, where anyone can comment. It
+# lives in the CALLER's job-level `if` and is repeated on the feedback the agent
+# reads - who may TRIGGER a run and whose text reaches the agent are different
+# questions. A same-repository guard keeps fork PRs out regardless.
 on:
   workflow_call:
     inputs:
@@ -110,8 +92,8 @@ on:
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
-          the same evidence: Binge#1984's response COMPLETED in 41 turns against a cap of 40
-          and the action discarded the finished work over the overrun, so nothing was pushed.
+          the same evidence: a response that COMPLETES one turn over the cap has its finished
+          work discarded over the overrun, so nothing is pushed.
           A job done and thrown away is worse than a job stopped. max_rounds still caps the
           genuine back-and-forth, so a larger cap cannot let this spin.
         type: number
@@ -148,10 +130,8 @@ env:
 jobs:
   respond:
     runs-on: ${{ fromJSON(inputs.runner) }}
-    # A run here has no persistent GRADLE_USER_HOME, so it pays a full dependency resolve and
-    # configure before the agent's first task. Raise this with the turn cap rather than
-    # instead of it: the proxy getting raised while the wall clock did not only moves where a
-    # long run dies.
+    # A run here has no persistent GRADLE_USER_HOME, so it pays a full dependency resolve
+    # before the agent's first task. Raise this WITH the turn cap, not instead of it.
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - name: Mint author app token
@@ -172,9 +152,8 @@ jobs:
           set -euo pipefail
           skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
 
-          # Separated by the unit separator (0x1f), not by tab: an unlabelled PR
-          # leaves an empty field, and tab is an IFS *whitespace* character, so
-          # IFS=$'\t' would still collapse it and shift branch off the end.
+          # Unit separator (0x1f), not tab: an unlabelled PR leaves an empty field, and tab is an
+          # IFS *whitespace* character, so IFS=$'\t' would collapse it and shift branch off the end.
           IFS=$'\037' read -r cross state isdraft labels branch < <(gh pr view "$PR" \
             --json isCrossRepository,state,isDraft,labels,headRefName \
             --jq '[.isCrossRepository, .state, .isDraft,
@@ -183,9 +162,8 @@ jobs:
 
           [ "$cross" = "true" ] && skip "PR #$PR comes from a fork - out of scope."
 
-          # A closed or merged PR still takes comments, and its head branch may
-          # since have been deleted and recreated by someone else - pushing to that
-          # is not something a comment should be able to ask for.
+          # A closed or merged PR still takes comments, and its head branch may since have been
+          # deleted and recreated by someone else.
           [ "$state" = "OPEN" ] || skip "PR #$PR is $state - not answering."
           [ "$isdraft" = "true" ] && skip "PR #$PR is a draft - not answering."
 
@@ -200,14 +178,11 @@ jobs:
           echo "number=$PR" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
-      # Circuit breaker: cap how many times the bots can volley on one PR
-      # WITHOUT a human in the loop. The count deliberately restarts from the
-      # newest human comment, inline note or review. Counting every response
-      # ever posted instead would leave the bot permanently and SILENTLY dead on
-      # the PR once the cap was hit: a maintainer commenting a week later gets no
-      # reply, no push and no sign of being heard, with no way to reset short of
-      # editing comment bodies. A human joining in is precisely the evidence that
-      # this is a conversation and not the runaway loop the cap exists to stop.
+      # Circuit breaker on bot-to-bot volleys. The count restarts from the newest HUMAN
+      # comment, review or inline note: counting every response ever posted would leave the
+      # bot permanently and silently dead on the PR once the cap was hit, with no way to reset
+      # short of editing comment bodies. A human joining in is the evidence that this is a
+      # conversation and not the runaway the cap exists to stop.
       - name: Round cap
         id: rounds
         if: steps.ctx.outputs.skip != 'true'
@@ -218,14 +193,12 @@ jobs:
           MAINTAINER: ${{ inputs.maintainer_handle }}
         run: |
           set -euo pipefail
-          # Bot-authored feedback does not reset the count - the reviewer bot's
-          # reviews are the other half of the volley being capped. API timestamps
-          # are ISO-8601 UTC, so they order correctly as plain strings.
+          # Bot feedback does not reset the count - the reviewer bot is the other half of the
+          # volley. API timestamps are ISO-8601 UTC, so they order correctly as plain strings.
           last_human=""
           for endpoint in "issues/${PR}/comments" "pulls/${PR}/comments" "pulls/${PR}/reviews"; do
-            # select(. != null) is load-bearing: jq prints a missing timestamp
-            # as the string "null", which sorts ABOVE every real one, and every
-            # comparison below then fails - a silently disabled circuit breaker.
+            # select(. != null) is load-bearing: jq prints a missing timestamp as the string "null",
+            # which sorts ABOVE every real one, silently disabling the circuit breaker.
             newest=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
               --jq '.[] | select(.user.type != "Bot")
                         | (.submitted_at // .created_at) | select(. != null)' \
@@ -234,10 +207,9 @@ jobs:
           done
           echo "Counting rounds since ${last_human:-the start of the PR}."
 
-          # --paginate, not `gh pr view --json comments`, which stops at 100:
-          # undercounting here silently disables the circuit breaker. An empty
-          # last_human sorts below every timestamp, so a PR with no human
-          # feedback at all counts every response - the pure bot-to-bot case.
+          # --paginate, not `gh pr view --json comments`, which stops at 100: undercounting here
+          # disables the breaker. An empty last_human sorts below everything, so a PR with no human
+          # feedback counts every response - the pure bot-to-bot case.
           count_since() {
             gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate \
               --jq ".[] | select(.body | contains(\"$1\")) | .created_at" \
@@ -247,11 +219,8 @@ jobs:
           rounds=$(count_since "<!-- author-response -->")
           echo "Round $((rounds + 1)) of $MAX_ROUNDS"
           if [ "$rounds" -ge "$MAX_ROUNDS" ]; then
-            # One notice per capped episode, marked the way hold() in
-            # bot-review.yml marks its own. Every reply after the cap re-enters
-            # this job, and an unmarked comment would nag on each of them; scoped
-            # to the same window as the count, so a fresh notice follows a fresh
-            # cap rather than the first one silencing all the others.
+            # One notice per capped episode. Every reply after the cap re-enters this job, so an
+            # unmarked comment would nag on each; scoped to the same window as the count.
             if [ "$(count_since "<!-- round-cap -->")" -eq 0 ]; then
               {
                 echo "<!-- round-cap -->"
@@ -277,27 +246,20 @@ jobs:
           PR: ${{ steps.ctx.outputs.number }}
         run: |
           set -euo pipefail
-          # The caller's job `if` decides who may TRIGGER a run. Without this it does not decide
-          # whose text reaches the agent, and those are not the same question: these endpoints
-          # return every comment on the PR regardless of author, and this file becomes the
-          # agent's instructions. An untrusted comment therefore sits on the PR until a
-          # maintainer's next comment pulls it into context, and the commenter gate never sees
-          # it. Filter on the same association that gate uses.
+          # The caller's job `if` decides who may TRIGGER a run, not whose text reaches the agent:
+          # these endpoints return every comment regardless of author, and this file becomes the
+          # agent's instructions. An untrusted comment otherwise sits on the PR until a
+          # maintainer's next comment pulls it into context, unseen by that gate.
           #
-          # On a PUBLIC caller this is not a second line of defence - anyone can comment there.
-          #
-          # Both bots are kept by LOGIN, not association: they are the other half of this loop
-          # and neither is a collaborator - a GitHub App reports author_association NONE - so an
-          # association-only filter would drop the very reviews this workflow exists to answer.
+          # Both bots are kept by LOGIN, not association: a GitHub App reports author_association
+          # NONE, so an association-only filter would drop the reviews this workflow answers.
           KEEP='select(.author_association == "OWNER" or .author_association == "MEMBER"
                        or .author_association == "COLLABORATOR"
                        or .user.login == "'"$REVIEWER_BOT"'"
                        or .user.login == "'"$AUTHOR_BOT"'")'
 
-          # All three page at 30 (100 via `gh pr view`) and return OLDEST first,
-          # so unpaginated they drop the NEWEST feedback - on a PR with any
-          # history, that includes the very comment this run was woken for. The
-          # agent would then re-address points settled rounds ago.
+          # All three page at 30 and return OLDEST first, so unpaginated they drop the NEWEST
+          # feedback - including the comment this run was woken for.
           {
             echo "## Conversation comments"
             gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate \
@@ -322,9 +284,8 @@ jobs:
           CONVENTIONS_PATH: ${{ inputs.conventions_path }}
         run: |
           set -euo pipefail
-          # NOT --depth=1: that re-shallows the full clone the checkout above
-          # asked for with fetch-depth: 0, leaving the agent no merge base to
-          # diff this branch against the default branch with.
+          # NOT --depth=1: it re-shallows the full clone `fetch-depth: 0` asked for, leaving the
+          # agent no merge base to diff against.
           git fetch origin "$DEFAULT_BRANCH"
           mkdir -p "$RULES_DIR"
           git show "origin/${DEFAULT_BRANCH}:${CONVENTIONS_PATH}" > "$RULES_DIR/conventions.md"
@@ -345,16 +306,12 @@ jobs:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
-      # An agent runner ships no JDK and no Android SDK, so every Gradle task an agent was
-      # asked to run failed before it started. The bots handled that honestly (they named the
-      # command a human would have to run rather than fabricating a result), but it left work
-      # half-finished by construction: a review asking for a new preview could have its code
-      # written and never its baseline recorded, so CI stayed red on a PR whose only remaining
-      # fault was the missing artefact.
+      # An agent runner ships no toolchain, so every Gradle task an agent was asked to run
+      # failed before it started - leaving work half-finished, e.g. code written for a new
+      # preview whose baseline was never recorded.
       #
-      # Guarded like every other step after the checkout. The skip paths `exit 0`, so an
-      # unguarded step still fires on them — and the dominant case for these jobs is a PR with
-      # no `agent` label, where the checkout never ran.
+      # Guarded like every step after the checkout: the skip paths `exit 0`, and the dominant
+      # case is a PR with no `agent` label, where the checkout never ran.
       - name: Set up the build toolchain (Android)
         if: >
           inputs.toolchain == 'android' &&
@@ -362,8 +319,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.3
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
-          # A hosted runner mounts nothing, and a self-hosted agent container mounts no
-          # persistent ~/.gradle either — unlike the CI runner, which bind-mounts one.
+          # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle.
           persistent-gradle-home: 'false'
 
       - name: Set up the build toolchain (JVM)
@@ -381,9 +337,7 @@ jobs:
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
-      # Pinned like every other action here: this job hands an agent Bash, Edit, Write and a
-      # contents:write token, and a mutable tag inside that boundary is the supply-chain hole
-      # the rest of the pinning closes.
+      # Pinned: this job hands an agent Bash, Edit, Write and a contents:write token.
       - name: Set up buf
         if: >
           inputs.setup_buf &&
@@ -394,48 +348,34 @@ jobs:
 
       - name: Address it with Claude
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        # A bound of its own, BELOW the job's. Without it the agent runs until timeout-minutes
-        # cancels the whole job, and cancellation skips every ordinary step after it -
-        # Binge#2009 died that way and its "Push and reply" shows completed/skipped, so nothing
-        # was pushed and nothing was said.
+        # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
+        # cancellation skips every ordinary step after it - so nothing is pushed and nothing is
+        # said. A step timeout FAILS the step and leaves the job alive, so the push, the reply,
+        # the reporter and the upload all get their ordinary budget.
         #
-        # A step timeout instead FAILS the step and leaves the job alive, so everything below
-        # gets its ordinary budget: the push, the reply, the reporter and the upload.
-        #
-        # This is a step key, NOT a `with:` input. Binge#2011 wrote it under `with:`, where it
-        # is silently dropped - claude-code-action declares no timeout input, and a composite
-        # action ignores what it does not declare.
+        # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
+        # composite action silently drops what it does not declare.
         timeout-minutes: ${{ inputs.agent_timeout_minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # See the `show_full_output` input. Without it the SDK stream is suppressed and the
-          # step logs an init line, then nothing until it ends - Binge#2009's response hit its
-          # cap with 26 minutes of blank log between "Claude Code initialized" and "The
-          # operation was canceled", which left no way to tell whether it was close to
-          # finishing or stuck, and so no way to size the timeout on evidence.
+          # See `show_full_output`. Without it the SDK stream is suppressed and the step logs an
+          # init line, then nothing until it ends - leaving no way to size the timeout on evidence.
           show_full_output: ${{ inputs.show_full_output }}
-          # Without a token of its own the action mints one by exchanging a GitHub OIDC token,
-          # which needs `id-token: write` - a broader grant than anything else in these
-          # workflows, in a job that executes agent code. Hand it the app token this job already
-          # minted: setupGitHubToken returns an overridden token before it reaches the OIDC path.
+          # Without a token of its own the action mints one via GitHub OIDC, needing `id-token:
+          # write` - a broader grant than anything else here, in a job that executes agent code.
+          # setupGitHubToken returns an overridden token before it reaches the OIDC path.
           github_token: ${{ steps.token.outputs.token }}
-          # The reviewer bot submitting a review is this workflow's designed trigger - the
-          # caller's job `if` admits it by name - and on that path the actor IS that bot, which
-          # checkHumanActor rejects by default. The commenter gate is what decides trust here;
-          # this only re-admits the one bot that gate already named.
+          # The reviewer bot is this workflow's designed trigger, and on that path the actor IS a
+          # bot, which checkHumanActor rejects by default. The commenter gate decides trust here.
           allowed_bots: ${{ inputs.reviewer_bot }}
-          # Same hole as author-ci-fix: when the agent commits on its own, "Push and reply"
-          # skips its own git commit and its git config lands too late to affect the commit that
-          # already exists. Setting the identity here covers that path as well as the ordinary one.
+          # When the agent commits on its own, "Push and reply" skips its git commit and its git
+          # config lands too late to affect the commit that already exists.
           bot_name: ${{ inputs.author_bot }}
           bot_id: ${{ inputs.author_bot_id }}
-          # --disallowedTools "Task,Agent", ported from bot-review.yml. The whitelist already
-          # omits the subagent tool, and Binge#2251 is the evidence that omitting it does not
-          # stop it being used: that run started a background `general-purpose` agent and ended
-          # its turn to wait for one. The whitelist gates what may run unprompted, not what
-          # exists. Both names it has shipped under, because an unmatched entry is inert and a
-          # missed one is the failure again.
+          # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent
+          # tool from it does not stop an agent starting one. Both names it has shipped under,
+          # since an unmatched entry is inert and a missed one is the failure again.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
@@ -472,8 +412,8 @@ jobs:
             do not delegate anything you then wait on, and do not end a turn with
             work outstanding - finish it yourself, in this turn.
 
-            Stopping mid-turn is worse here than for the reviewer that hit this in
-            Binge#2251, which at least failed clean. This job pushes whatever is in
+            Stopping mid-turn is worse here than it is for the reviewer, which at
+            least fails clean. This job pushes whatever is in
             the working tree, so a turn that ends early pushes a HALF-APPLIED change
             and reply.md then tells the reviewer their feedback was addressed.
             Answering a review with a partial change described as a whole one is the
@@ -492,28 +432,24 @@ jobs:
           set -euo pipefail
           push_note=""
           commit_stat=""
-          # origin/$BRANCH is not refetched during the job, so it still points at
-          # what was checked out - exactly the question being asked here.
+          # origin/$BRANCH is not refetched during the job, so it still points at what was
+          # checked out - exactly the question being asked.
           checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
 
-          # Ahead of the porcelain read, not after it: claude-code-action rewrites the paths
-          # that govern an agent (.claude, CLAUDE.md, ...) to the base's copy in the WORKING
-          # TREE before it starts, so `git add -A` below would commit that rewrite as the
-          # agent's own work and revert the PR (Binge#2029). A run whose only change was the
-          # rewrite has to come out of this reading CLEAN and commit nothing at all, which
-          # only holds if the restore happens first.
+          # Ahead of the porcelain read, not after it. claude-code-action rewrites the paths that
+          # govern an agent to the base's copy in the WORKING TREE before it starts, so `git add
+          # -A` would commit that rewrite as the agent's own work and revert the PR. A run whose
+          # only change was the rewrite must read CLEAN here and commit nothing.
           #
-          # The script comes from binge-ci, not from the PR's checkout, and either reason alone
-          # is enough. A branch cut before an in-repo script landed would not have it, and under
-          # `set -e` the missing file is an exit 127 that fails this step and throws the work
-          # away - which is what happened to Binge#2036. And a script whose job is to defend
-          # against the PR head must not be supplied BY the PR head.
+          # The script comes from binge-ci, not the PR's checkout, for two independent reasons: a
+          # branch cut before an in-repo script landed would not have it, and under `set -e` that
+          # missing file is an exit 127 that throws the work away; and a script defending against
+          # the PR head must not be supplied BY the PR head.
           governed_note=$(bash "$GOVERNED_SCRIPT" "${checked_out:-HEAD}")
 
           dirty=$(git status --porcelain)
-          # The prompt says not to commit, but agents commit anyway often enough
-          # that trusting the porcelain alone would strand the work in the runner
-          # workspace and reply as though nothing had changed.
+          # Agents commit anyway often enough that trusting the porcelain alone would strand the
+          # work in the runner workspace and reply as though nothing had changed.
           committed=false
           if [ -n "$checked_out" ] && [ "$(git rev-parse HEAD)" != "$checked_out" ]; then
             committed=true
@@ -526,15 +462,13 @@ jobs:
               git add -A
               git commit -m "chore: address review feedback"
             fi
-            # Read before the push, so a rebase onto a branch that moved cannot fold
-            # someone else's commits into what this run reports as its own.
+            # Read before the push, so a rebase onto a moved branch cannot fold someone else's
+            # commits into what this run reports as its own.
             if [ -n "$checked_out" ]; then
               commit_stat=$(git diff --stat "$checked_out" HEAD | head -40)
             fi
-            # The checkout is by branch name and predates the agent run, so the
-            # branch can have moved under us - the ci-fix bot, a human, or a second
-            # queued comment run. Letting set -e kill the step here would strand
-            # the work AND skip the reply, so the round cap would never advance.
+            # The branch can have moved under us. Letting set -e kill the step here would strand the
+            # work AND skip the reply, so the round cap would never advance.
             if ! git push; then
               git fetch origin "$BRANCH"
               if git rebase "origin/$BRANCH" && git push; then
@@ -551,22 +485,16 @@ jobs:
             cat "${{ runner.temp }}/reply.md" 2>/dev/null || echo "_No reply written._"
             if [ -n "$governed_note" ]; then printf '%s\n' "$governed_note"; fi
             if [ -n "$push_note" ]; then printf '\n\n%s\n' "$push_note"; fi
-            # The reply above is the agent's account of what it did; this is the commit's.
-            # Binge#2029 was a reply saying a file was "left as-is" next to a commit that had
-            # reverted it, and nothing beside it disagreed. Listing the files does not make
-            # the account true - it makes it falsifiable without re-diffing the branch,
-            # which is the check a reader was assumed to be doing and was not.
+            # The reply above is the agent's account; this is the commit's. Listing the files does
+            # not make the account true - it makes it falsifiable without re-diffing the branch.
             if [ -n "$commit_stat" ]; then
               printf '\n<details><summary>Files this push changed</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"
             fi
           } | gh pr comment "$PR" --body-file -
 
       # The step log is the only trace of an agent run that outlives its container, and it does
-      # not carry the files the run produced. On this job that is the feedback it was answering,
-      # the reply if it got that far, and the changes it had made but never got to push - which
-      # together answer the question a timeout raises.
-      #
-      # Only on a run that went wrong: on a good one the reply and the push ARE the record.
+      # not carry the files the run produced. Only on a run that went wrong: on a good one the
+      # reply and the push ARE the record.
       - name: Collect diagnostics
         if: always() && job.status != 'success' && steps.ctx.outputs.number != '' && steps.rounds.outputs.skip != 'true'
         env:
@@ -577,10 +505,8 @@ jobs:
           for f in feedback.md reply.md; do
             [ -f "${{ runner.temp }}/$f" ] && cp "${{ runner.temp }}/$f" "$OUT/" || true
           done
-          # The whole question a timeout raises is how far the agent got, and the working tree
-          # answers it in one look: the change written but unpushed reads completely differently
-          # from a tree the agent never touched. Untracked files show as ?? in the status;
-          # gitignored ones are excluded by default.
+          # How far the agent got is what a timeout raises, and the working tree answers it: a
+          # change written but unpushed reads differently from a tree never touched.
           git status --porcelain > "$OUT/git-status.txt" 2>&1 || true
           { git diff; git diff --cached; } > "$OUT/working-tree.diff" 2>&1 || true
           git log --oneline -5 > "$OUT/git-log.txt" 2>&1 || true
@@ -596,25 +522,19 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      # Every other workflow in this set reports a failed run on the PR; this one never did,
-      # though bot-review.yml's note claimed otherwise. A response that dies - the agent step
-      # faulting, or the job hitting timeout-minutes mid-build - pushes nothing and posts no
-      # reply, and because the head has not moved there is no CI run and so no review to follow
-      # it. The feedback is left sitting under a request_changes in total silence, which from
-      # the PR page is indistinguishable from a bot that simply has not got to it yet.
+      # A response that dies pushes nothing and posts no reply, and because the head has not
+      # moved there is no CI run and so no review to follow it - leaving feedback in silence
+      # that is indistinguishable from a bot that has not got to it yet.
       #
-      # always(), not failure(), so a job cancelled by timeout-minutes is caught - the likeliest
-      # way for this job to die now that it provisions a toolchain and builds inside its budget.
+      # always(), not failure(), so a job cancelled by timeout-minutes is caught.
       #
-      # Deduped on the triggering event, not on the head SHA: a PR sits at one SHA across many
-      # comments, and each unanswered piece of feedback deserves its own note rather than the
-      # first one silencing the rest. No round is consumed on this path - the cap counts posted
-      # <!-- author-response --> comments and there is none - so "comment again" really is a retry.
+      # Deduped on the triggering event, not the head SHA: a PR sits at one SHA across many
+      # comments, and each unanswered piece deserves its own note. No round is consumed here,
+      # so "comment again" really is a retry.
       #
-      # Guarded on ctx's number rather than on `skip != 'true'`, for the reason author-ci-fix.yml
-      # records: a step that FAILED reports '' for every output, so the skip form passes when
-      # "Gather PR context" is what broke. That step is also where opt-in is established, so
-      # without the guard this would comment on a PR it cannot show carries the label.
+      # Guarded on ctx's number rather than `skip != 'true'`: a step that FAILED reports '' for
+      # every output, so the skip form passes when "Gather PR context" is what broke - and that
+      # step is where opt-in is established.
       - name: Report a failed response
         if: always() && job.status != 'success' && steps.ctx.outputs.number != ''
         env:

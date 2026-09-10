@@ -1,19 +1,10 @@
 name: Author - fix failing CI
 
-# Author app: reacts to a failed CI run on one of its own PRs.
-# Policy: exactly one repair attempt per commit. If the retry also fails,
-# it comments and stops rather than churning.
-#
-# Reusable. The caller owns the `workflow_run` trigger, because a reusable
-# workflow cannot declare one, and matches CI by NAME.
-#
-# TRUST BOUNDARY. This job checks out PR code and runs an agent with Bash, Edit
-# and Write plus a contents:write app token. The `agent` label is what admits a PR
-# to it, so the label is maintainers-only: applying it grants code execution with
-# that repository's secrets in scope. A same-repository guard keeps fork PRs out
-# regardless - on a PUBLIC caller that guard is the control rather than a second
-# line of defence. `runner` defaults to an ephemeral hosted VM; a caller pointing
-# it at a persistent self-hosted runner is making the label a sharper grant.
+# TRUST BOUNDARY. This job checks out PR code and runs an agent with Bash, Edit and Write
+# plus a contents:write app token. The `agent` label is what admits a PR, so that label is
+# maintainers-only. A same-repository guard keeps fork PRs out - on a PUBLIC caller that
+# guard is the control, not a second line of defence. Pointing `runner` at a persistent
+# self-hosted machine makes the label a sharper grant than the ephemeral default.
 on:
   workflow_call:
     inputs:
@@ -100,10 +91,10 @@ on:
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
-          the failure mode it calls worse than a timeout: Binge#1984's sibling run COMPLETED
-          in 41 turns against a cap of 40 and the action discarded the finished work over the
-          overrun. A run that reads the log, edits, builds the failing task, reads the result
-          and iterates spends turns a read-and-edit-only cap never had to cover. This job's
+          the failure mode it calls worse than a timeout: a run that COMPLETES one turn over
+          the cap has its finished work discarded over the overrun. A run that reads the log,
+          edits, builds the failing task, reads the result and iterates spends turns a
+          read-and-edit-only cap never had to cover. This job's
           per-commit attempt marker still stops it retrying the same head, so a larger cap
           cannot let it spin — it only stops one being cut off mid-way.
         type: number
@@ -119,8 +110,8 @@ on:
       agent_timeout_minutes:
         description: >
           A bound on the agent step alone, BELOW the job's. Keep the arithmetic ~5 minutes of
-          setup (a fetch-depth: 0 checkout alone took 3m18s on Binge#2009) + this + ~4 for the
-          push, the reporter and the upload, inside timeout_minutes.
+          setup (a fetch-depth: 0 checkout alone can take over three minutes) + this + ~4 for
+          the push, the reporter and the upload, inside timeout_minutes.
         type: number
         default: 35
       show_full_output:
@@ -143,9 +134,8 @@ concurrency:
 
 permissions:
   contents: read
-  # For reading the failing job's log below. The author app's grant covers
-  # contents and pull requests but NOT Actions, so that call runs against the
-  # workflow's own GITHUB_TOKEN instead.
+  # For reading the failing job's log. The author app's grant covers contents and pull
+  # requests but NOT Actions, so that call uses the workflow's own GITHUB_TOKEN.
   actions: read
 
 env:
@@ -187,10 +177,8 @@ jobs:
           [ "$(gh pr view "$num" --json isCrossRepository --jq .isCrossRepository)" = "true" ] \
             && skip "PR #$num comes from a fork - out of scope."
 
-          # A CI workflow that skips drafts normally reports conclusion "skipped" and never
-          # reaches this workflow at all. The exception is a PR marked draft while its CI was
-          # already running: that job keeps going, reports failure, and without this we would
-          # push a repair to a branch someone had just parked - and spend its attempt doing it.
+          # A PR marked draft while its CI was already running still reports failure here. Without
+          # this we would push a repair to a branch someone had just parked, and spend its attempt.
           [ "$(gh pr view "$num" --json isDraft --jq .isDraft)" = "true" ] \
             && skip "PR #$num is a draft - leaving it alone."
 
@@ -199,11 +187,10 @@ jobs:
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$num has no '$AGENT_LABEL' label - leaving it alone."
 
-          # The checkout below is by branch name, while the failure log and the
-          # attempt marker are both keyed to SHA. If the branch has moved on,
-          # repairing a new tip from a stale log is worse than doing nothing - and
-          # the marker would be recorded against a commit that is no longer head,
-          # handing the real head a fresh attempt it hasn't earned.
+          # The checkout is by branch name, while the failure log and the attempt marker are keyed to
+          # SHA. Repairing a new tip from a stale log is worse than doing nothing, and the marker
+          # would be recorded against a commit that is no longer head - handing the real head a fresh
+          # attempt it has not earned.
           head_now=$(gh pr view "$num" --json headRefOid --jq .headRefOid)
           [ "$head_now" = "$SHA" ] \
             || skip "PR #$num has moved past ${SHA:0:7} (now ${head_now:0:7}) - its own CI run will cover it."
@@ -216,18 +203,14 @@ jobs:
 
       # The loop cap: a marker comment keyed to the failing commit SHA.
       #
-      # Checking and RECORDING are deliberately far apart - the check is here, the record is in
-      # "Commit and push", on each of that step's outcomes. Anything earlier records an INTENT,
-      # and every failure between the two then spends the commit's one attempt without one
-      # having happened: an unreadable log (`gh run view --log-failed` races the archive, which
-      # workflow_run routinely beats), a toolchain setup error, the agent's step timeout, a
-      # crash in the push itself. Binge#2036 lost a correct ktlint repair to the last of those
-      # and was then told CI was "still failing after an automatic fix attempt" - both halves
-      # wrong, and the marker had to be deleted by hand for the retry to happen. #2053.
+      # Checking and RECORDING are deliberately far apart - the check here, the record in "Commit
+      # and push", on each of that step's outcomes. Anything earlier records an INTENT, and every
+      # failure between the two then spends the commit's one attempt without one having happened:
+      # an unreadable log, a toolchain error, the agent's step timeout, a crash in the push.
       #
-      # Recording on the outcome does not reopen the loop this guards against. That loop needs a
-      # fix to be PUSHED - a push is a new SHA, which gets its own marker and its own attempt.
-      # A run that dies before pushing leaves no commit, so no CI run, so nothing to loop on.
+      # Recording on the outcome does not reopen the loop this guards. That loop needs a fix to be
+      # PUSHED, and a push is a new SHA with its own marker and its own attempt. A run that dies
+      # before pushing leaves no commit, so no CI run, so nothing to loop on.
       - name: One attempt per commit
         id: guard
         if: steps.pr.outputs.skip != 'true'
@@ -239,16 +222,15 @@ jobs:
         run: |
           set -euo pipefail
           marker="<!-- ci-fix-attempted:${SHA} -->"
-          # Not a pipeline: grep -q exits on the first match, gh takes SIGPIPE and
-          # returns 141, and under pipefail that reads as "not yet attempted" - so
-          # the loop guard fails open exactly when the comment list is long.
+          # Not a pipeline: grep -q exits on the first match, gh takes SIGPIPE and returns 141, and
+          # under pipefail that reads as "not yet attempted" - so the loop guard fails open exactly
+          # when the comment list is long.
           comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
             --paginate --jq '.[].body')
           if grep -qF "$marker" <<<"$comments"; then
             echo "Already attempted a fix for $SHA. Stopping."
-            # Marked like every other comment these bots post. Re-running the
-            # same red CI - a flake retry, say - re-enters this job on the same
-            # SHA, and an unmarked note would repeat on every one of them.
+            # Re-running the same red CI re-enters this job on the same SHA, and an unmarked note would
+            # repeat on every one.
             done_marker="<!-- ci-fix-exhausted:${SHA} -->"
             if ! grep -qF "$done_marker" <<<"$comments"; then
               printf '%s\nCI is still failing on `%s` after an automatic fix attempt. Stopping here - this one needs a human.\n' \
@@ -268,9 +250,8 @@ jobs:
         id: log
         if: steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true'
         env:
-          # Reading run logs is an Actions API call, outside the author app's
-          # grant. The workflow's own GITHUB_TOKEN carries the `actions: read`
-          # declared above; the app token is only needed for the PR comment.
+          # An Actions API call, outside the author app's grant. The workflow's own GITHUB_TOKEN
+          # carries the `actions: read` declared above.
           GH_TOKEN: ${{ github.token }}
           APP_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -283,17 +264,14 @@ jobs:
           LOG="${{ runner.temp }}/ci-failure.log"
           TRIMMED="${{ runner.temp }}/ci-failure.trimmed.log"
 
-          # Retried, because the commonest reason this comes back empty is a race rather than a
-          # fault: workflow_run fires the instant CI completes, and GitHub finalizes the log
-          # archive asynchronously after that, so the first read lands in a window where the run
-          # is complete and its log is not yet servable. One shot at it meant an ordinary few
-          # seconds of lag was indistinguishable from an expired log.
+          # Retried, because the commonest reason this comes back empty is a race, not a fault:
+          # workflow_run fires the instant CI completes and GitHub finalizes the log archive
+          # asynchronously after that, so the first read lands in a window where the run is complete
+          # and its log is not yet servable.
           #
-          # gh's own errors go to a SEPARATE file. Folded in with 2>&1 they make
-          # an unreadable log - expired, still finalizing, API error - look
-          # perfectly good to the emptiness check below, which is how the agent
-          # ends up triaging "error: failed to get run log" as though it were
-          # the failing job's output. That is repairing blind, by another route.
+          # gh's own errors go to a SEPARATE file. Folded in with 2>&1 they look perfectly good to the
+          # emptiness check below, which is how an agent ends up triaging "error: failed to get run
+          # log" as though it were the failing job's output.
           for attempt in 1 2 3 4 5; do
             gh run view "$RUN_ID" --log-failed > "$LOG" 2> "${LOG}.err" || true
             tail -c "$TAIL_BYTES" "$LOG" > "$TRIMMED"
@@ -303,13 +281,10 @@ jobs:
             if [ "$attempt" -lt 5 ]; then sleep 10; fi
           done
 
-          # The prompt below opens with "read it first". An empty log means the
-          # agent triages from nothing, and the likeliest outcome of that is a
-          # guessed fix pushed to the branch. Stop instead of repairing blind.
-          #
-          # No attempt has been recorded at this point - the marker is only written by "Commit
-          # and push", much later - so stopping here costs the commit nothing and the next CI run
-          # on the same SHA gets a clean try. That is the whole reason the marker moved.
+          # An empty log means the agent triages from nothing, and the likeliest outcome is a guessed
+          # fix pushed to the branch. No attempt has been recorded at this point - the marker is only
+          # written by "Commit and push" - so stopping costs the commit nothing and the next CI run on
+          # the same SHA gets a clean try.
           if [ ! -s "$TRIMMED" ]; then
             echo "::error::Could not read the failing job log for run ${RUN_ID} after 5 attempts."
             sed 's/^/gh: /' "${LOG}.err" || true
@@ -318,17 +293,13 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Says the run has started, and nothing more. A job with a long ceiling that is silent
-      # until it finishes is indistinguishable from one that never picked the failure up.
+      # Says the run has started, and nothing more: a job with a long ceiling that is silent until
+      # it finishes is indistinguishable from one that never picked the failure up.
       #
-      # This is NOT the loop cap - it carries its own marker, not ci-fix-attempted, so a crash
-      # after it leaves the commit's attempt unspent. "Commit and push" records that one.
-      #
-      # Deliberately NOT deduped on the SHA. A crashed run spends no attempt, so the next CI run
-      # on this commit re-enters here - that retry is the whole point of Binge#2053, and it is
-      # the only signal it produces: "Report a failed attempt" dedupes its own note on
-      # ci-fix-failed:$SHA, so a second crash says nothing at all. One line per run is the
-      # floor, not noise.
+      # NOT the loop cap - it carries its own marker, so a crash after it leaves the commit's
+      # attempt unspent. Deliberately not deduped on the SHA either: a crashed run spends no
+      # attempt, so the next CI run on this commit re-enters here, and this line is the only
+      # signal that retry produces.
       - name: Announce the attempt
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
@@ -356,9 +327,8 @@ jobs:
           CONVENTIONS_PATH: ${{ inputs.conventions_path }}
         run: |
           set -euo pipefail
-          # NOT --depth=1. That re-shallows the full clone the checkout above
-          # asked for with fetch-depth: 0, and the repair agent then has no merge
-          # base to diff this branch against the default branch with.
+          # NOT --depth=1: it re-shallows the full clone `fetch-depth: 0` asked for, leaving the agent
+          # no merge base to diff against.
           git fetch origin "$DEFAULT_BRANCH"
           mkdir -p "$RULES_DIR"
           git show "origin/${DEFAULT_BRANCH}:${TRIAGE_PATH}" > "$RULES_DIR/ci-triage.md"
@@ -378,17 +348,12 @@ jobs:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
-      # An agent runner ships no JDK and no Android SDK, so every Gradle task an agent was asked
-      # to run failed before it started — `java` is not on PATH and JAVA_HOME is unset. The bots
-      # handled that honestly (they named the command a human would have to run rather than
-      # fabricating a result), but it left work half-finished by construction, and it left this
-      # job unable to run the build it was repairing.
+      # An agent runner ships no toolchain, so every Gradle task an agent was asked to run failed
+      # before it started - leaving this job unable to run the build it was repairing. ci-setup is
+      # reused rather than reimplemented, so the agents build the way CI builds.
       #
-      # ci-setup is reused rather than reimplemented so the agents build the way CI builds.
-      #
-      # Guarded like every other step after the checkout. The skip paths `exit 0`, so an
-      # unguarded step still fires on them — and the dominant case for these jobs is a PR with no
-      # `agent` label, where the checkout never ran.
+      # Guarded like every step after the checkout: the skip paths `exit 0`, and the dominant case
+      # is a PR with no `agent` label, where the checkout never ran.
       - name: Set up the build toolchain (Android)
         if: >
           inputs.toolchain == 'android' &&
@@ -397,8 +362,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.3
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
-          # A hosted runner mounts nothing, and a self-hosted agent container mounts no
-          # persistent ~/.gradle either — unlike the CI runner, which bind-mounts one. Leaving
+          # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle, so leaving
           # the cache disabled would re-resolve the whole dependency graph on every agent run.
           persistent-gradle-home: 'false'
 
@@ -419,10 +383,7 @@ jobs:
           steps.log.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
-      # Pinned like every other action here. It was left on the mutable `v1` tag in the
-      # first draft with a TODO, and the TODO was right: these jobs execute an agent with
-      # Bash, Edit and Write plus a contents:write token, and a mutable tag inside that
-      # boundary is exactly the supply-chain hole the rest of the discipline closes.
+      # Pinned: this job hands an agent Bash, Edit, Write and a contents:write token.
       - name: Set up buf
         if: >
           inputs.setup_buf &&
@@ -436,51 +397,36 @@ jobs:
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        # A bound of its own, BELOW the job's. Without it the agent runs until timeout-minutes
-        # cancels the whole job, and cancellation skips every ordinary step after it -
-        # Binge#2009 died that way and its "Push and reply" shows completed/skipped, so nothing
-        # was pushed and nothing was said.
+        # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
+        # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
+        # the job alive, so the reporter, the diagnostics upload and the push all still run.
         #
-        # A step timeout instead FAILS the step and leaves the job alive, so everything below
-        # gets its ordinary budget: the reporter comments, the diagnostics upload, and the push
-        # of whatever the agent had finished.
-        #
-        # This is a step key, NOT a `with:` input. Binge#2011 wrote it under `with:`, where it
-        # is silently dropped - claude-code-action declares no timeout input, and a composite
-        # action ignores what it does not declare.
+        # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
+        # composite action silently drops what it does not declare.
         timeout-minutes: ${{ inputs.agent_timeout_minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # See the `show_full_output` input. Without it the SDK stream is suppressed and the
-          # step logs an init line, then nothing until it ends - so a run that dies is
-          # undiagnosable after the fact, and this is the only trace that outlives the job.
+          # See `show_full_output`. Without it the SDK stream is suppressed and a run that dies is
+          # undiagnosable - this log is the only trace that outlives the job.
           show_full_output: ${{ inputs.show_full_output }}
-          # Without a token of its own the action mints one by exchanging a GitHub OIDC token,
-          # which needs `id-token: write` - a broader grant than anything else in these
-          # workflows, in a job that executes agent code. Hand it the app token this job already
-          # minted: setupGitHubToken returns an overridden token before it reaches the OIDC path.
+          # Without a token of its own the action mints one via GitHub OIDC, needing `id-token:
+          # write` - a broader grant than anything else here, in a job that executes agent code.
           github_token: ${{ steps.token.outputs.token }}
-          # checkHumanActor is prepareAgentMode's first call and throws for any actor whose
-          # account type is not User; allowed_bots defaults to empty. On a workflow_run the
-          # actor is inherited from the CI run, which for a commit the author bot pushed is that
-          # bot - so without this the repair loop dies the moment it repairs anything. Note
-          # checkWritePermissions short-circuits on the [bot] suffix and checkHumanActor
-          # deliberately does not, so a passing write check is no evidence this passes. Not a
-          # trust gate: the label, fork and same-repo guards above already decided that.
+          # checkHumanActor throws for any actor whose account type is not User, and allowed_bots
+          # defaults to empty. On a workflow_run the actor is inherited from the CI run, which for a
+          # commit the author bot pushed is that bot - so without this the repair loop dies the moment
+          # it repairs anything. Note checkWritePermissions short-circuits on the [bot] suffix and
+          # checkHumanActor does not, so a passing write check is no evidence this passes. Not a trust
+          # gate: the label, fork and same-repo guards already decided that.
           allowed_bots: ${{ inputs.author_bot }}
-          # The prompt says not to commit, but agents commit anyway - "Commit and push" codes
-          # around exactly that. On that path its git config runs AFTER the commit already
-          # exists and changes nothing, so the identity the agent committed under is whatever
-          # configureGitAuth set when the step started. Set it here and both paths are attributed.
+          # Agents commit anyway, and on that path "Commit and push"'s own git config runs after the
+          # commit exists and changes nothing. Set here, both paths are attributed.
           bot_name: ${{ inputs.author_bot }}
           bot_id: ${{ inputs.author_bot_id }}
-          # --disallowedTools "Task,Agent", ported from bot-review.yml. The whitelist already
-          # omits the subagent tool, and Binge#2251 is the evidence that omitting it does not
-          # stop it being used: that run started a background `general-purpose` agent and ended
-          # its turn to wait for one. The whitelist gates what may run unprompted, not what
-          # exists. Both names it has shipped under, because an unmatched entry is inert and a
-          # missed one is the failure again.
+          # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent tool
+          # does not stop an agent starting one. Both names it has shipped under, since an unmatched
+          # entry is inert and a missed one is the failure again.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
@@ -532,9 +478,9 @@ jobs:
             do not delegate anything you then wait on, and do not end a turn with
             work outstanding - finish it yourself, in this turn.
 
-            Stopping mid-turn is worse here than for the reviewer that hit this in
-            Binge#2251. That run failed clean: no verdict file, a hard failure, and
-            a comment saying nothing was reviewed. This job pushes whatever is in
+            Stopping mid-turn is worse here than it is for the reviewer, which at
+            least fails clean: no verdict file, a hard failure, and a comment saying
+            nothing was reviewed. This job pushes whatever is in
             the working tree, so a turn that ends early pushes a HALF-APPLIED fix
             and note.md then reports it as the fix. A red PR told it is green is
             worse than a red PR told nobody looked.
@@ -553,60 +499,52 @@ jobs:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
           set -euo pipefail
-          # origin/$BRANCH is not refetched during the job, so it still points at
-          # what was checked out - exactly the question being asked here.
+          # origin/$BRANCH is not refetched during the job, so it still points at what was checked
+          # out - exactly the question being asked.
           checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
 
-          # Ahead of the porcelain read, not after it: claude-code-action rewrites the paths
-          # that govern an agent (.claude, CLAUDE.md, ...) to the base's copy in the WORKING
-          # TREE before it starts, so `git add -A` below would commit that rewrite as the
-          # agent's own repair and revert the PR (Binge#2029). A run that found no fix has to
-          # come out of this reading CLEAN and take the "couldn't identify a fix" path, rather
-          # than push a commit whose entire content is the rewrite - which only holds if the
-          # restore happens before `dirty` is read.
+          # Ahead of the porcelain read, not after it. claude-code-action rewrites the paths that
+          # govern an agent to the base's copy in the WORKING TREE before it starts, so `git add -A`
+          # would commit that rewrite as the agent's own repair and revert the PR. A run that found no
+          # fix must read CLEAN here and take the "couldn't identify a fix" path.
           #
-          # The script comes from binge-ci, not from the PR's checkout, and either reason alone
-          # is enough. A branch cut before an in-repo script landed would not have it, and under
-          # `set -e` the missing file is an exit 127 that fails this step and throws the repair
-          # away - which is what happened to Binge#2036, on a branch that predated it by hours.
-          # And a script whose job is to defend against the PR head must not be supplied BY the
-          # PR head.
+          # The script comes from binge-ci, not the PR's checkout, for two independent reasons: a
+          # branch cut before an in-repo script landed would not have it, and under `set -e` that
+          # missing file is an exit 127 that throws the repair away; and a script defending against
+          # the PR head must not be supplied BY the PR head.
           governed_note=$(bash "$GOVERNED_SCRIPT" "${checked_out:-HEAD}")
 
-          # This job pushes without saying anything on the PR, so unlike author-comments there
-          # is no reply for the note to ride along on. Posted ahead of the "couldn't identify a
-          # fix" early return below: when the discard is the only change the agent made, the
-          # tree comes out clean and would otherwise hit that return before this ever printed.
+          # This job pushes without saying anything on the PR, so there is no reply for the note to
+          # ride on. Posted ahead of the "couldn't identify a fix" return: when the discard is the
+          # only change the agent made, the tree comes out clean and would hit that return first.
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
 
           dirty=$(git status --porcelain)
-          # The prompt says not to commit, but agents commit anyway often enough
-          # that trusting the porcelain alone would leave the repair in the runner
-          # workspace, throw it away, and tell the PR nothing was found.
+          # Agents commit anyway often enough that trusting the porcelain alone would leave the repair
+          # in the runner workspace, throw it away, and tell the PR nothing was found.
           committed=false
           if [ -n "$checked_out" ] && [ "$(git rev-parse HEAD)" != "$checked_out" ]; then
             committed=true
           fi
 
-          # The agent's account of what it found. author-comments has reply.md and
-          # author-conflicts has note.md; this job had neither, so whatever it worked out died
-          # with the container and the PR got the fixed sentence below instead (Binge#2044). On
-          # #2036 that sentence read "couldn't identify a fix worth making" over a triage that
-          # had already named the exact four baseline PNGs a human needed to re-record.
+          # The agent's account of what it found. Without it, whatever it worked out dies with the
+          # container and the PR gets the fixed sentence below instead - which has read "couldn't
+          # identify a fix worth making" over a triage that had already named the exact files a human
+          # needed to fix.
           note=$(cat "${{ runner.temp }}/note.md" 2>/dev/null || true)
 
-          # The attempted-marker rides on each of this step's outcomes rather than being posted
-          # ahead of the agent, so it cannot exist without an account of the attempt attached to
-          # it - which is what makes the guard's "after an automatic fix attempt" true. #2053.
+          # The attempted-marker rides on each of this step's outcomes rather than being posted ahead
+          # of the agent, so it cannot exist without an account of the attempt attached to it - which
+          # is what makes the guard's "after an automatic fix attempt" true.
+          #
+          # Declining carries a second marker as WELL as the attempted one. `attempted` has to stay,
+          # since the loop guard and "Report a failed attempt" both read it - but it also rides the
+          # success-with-a-push outcome, so alone it cannot tell a run that fixed something from one
+          # that gave up, and the only outcome waiting on a human was the one a status sweep could
+          # never list.
           attempted="<!-- ci-fix-attempted:${SHA} -->"
-          # Declining carries a second marker as well as the attempted one, rather than instead
-          # of it. `attempted` has to stay: the loop guard and "Report a failed attempt" both
-          # read it to decide whether this commit's one attempt is spent. But it also rides the
-          # success-with-a-push outcome, so on its own it cannot tell a run that fixed something
-          # from one that gave up - which is why the only outcome actually waiting on a human was
-          # the one a status sweep could never list (#2076).
           declined="<!-- ci-fix-declined:${SHA} -->"
 
           if [ -z "$dirty" ] && [ "$committed" = "false" ]; then
@@ -615,9 +553,8 @@ jobs:
               if [ -n "$note" ]; then
                 printf 'Looked at the CI failure on `%s` and changed nothing.\n\n%s\n' "${SHA:0:7}" "$note"
               else
-                # Only when the agent wrote nothing at all - a step that timed out or died
-                # before it got here. Stopping is a legitimate outcome for this job, so the
-                # fallback stays a plain sentence rather than an error.
+                # Only when the agent wrote nothing at all. Stopping is a legitimate outcome for this job,
+                # so the fallback is a plain sentence rather than an error.
                 printf 'Looked at the CI failure on `%s` but could not identify a fix worth making. Over to you.\n' "${SHA:0:7}"
               fi
             } | gh pr comment "$PR" --body-file -
@@ -630,35 +567,32 @@ jobs:
             git add -A
             git commit -m "fix: address CI failure on ${SHA:0:7}"
           fi
-          # Read before the push, so a rebase onto a branch that moved cannot fold someone
-          # else's commits into what this run reports as its own.
+          # Read before the push, so a rebase onto a moved branch cannot fold someone else's commits
+          # into what this run reports as its own.
           commit_stat=""
           if [ -n "$checked_out" ]; then
             commit_stat=$(git diff --stat "$checked_out" HEAD | head -40)
           fi
-          # A push rejected under set -e would kill the step with the repair still
-          # only in the runner workspace, and say nothing on the PR about it.
+          # A push rejected under set -e would kill the step with the repair still only in the runner
+          # workspace, and say nothing on the PR about it.
           if ! git push; then
             git fetch origin "$BRANCH"
             if git rebase "origin/$BRANCH" && git push; then
               echo "Pushed after rebasing onto a branch that had moved."
             else
               git rebase --abort || true
-              # Whether this spends the commit's attempt turns on WHY the push failed, and the
-              # refetched remote head is the only thing that says. A branch that genuinely moved
-              # leaves the work re-doable on the new head, so it must not be charged. A push that
-              # failed for something the rebase cannot clear - branch protection, an expired
-              # token, a second 5xx - leaves the head where it was, and NOT charging it makes
-              # this SHA retryable forever: every re-run spends another agent run, posts another
-              # started/unpushed pair, and ci-fix-exhausted can never fire.
+              # Whether this spends the commit's attempt turns on WHY the push failed, and the refetched
+              # remote head is the only thing that says. A branch that genuinely moved leaves the work
+              # re-doable on the new head, so it must not be charged. A push that failed for something a
+              # rebase cannot clear - branch protection, an expired token - leaves the head where it was,
+              # and not charging it makes this SHA retryable forever.
               moved_to=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
               attempted_marker=""
               if [ -n "$checked_out" ] && [ "$moved_to" = "$checked_out" ]; then
                 attempted_marker="<!-- ci-fix-attempted:${SHA} -->"
               fi
-              # ci-fix-unpushed is marked so "Report a failed attempt" can tell that this outcome
-              # has already been explained: the exit 1 below trips that step, and two comments
-              # describing one event in different words is worse than none.
+              # Marked so "Report a failed attempt" can tell this outcome has already been explained: the
+              # exit 1 below trips that step, and two comments describing one event is worse than none.
               {
                 if [ -n "$attempted_marker" ]; then printf '%s\n' "$attempted_marker"; fi
                 if [ -n "$checked_out" ] && [ "$moved_to" = "$checked_out" ]; then
@@ -674,12 +608,10 @@ jobs:
             fi
           fi
 
-          # After the push, not before: until it lands there is nothing to describe, and the
-          # unpushed path above already has its own comment. The commit message is fixed
-          # ("fix: address CI failure on <sha>"), so without this the only account of WHAT was
-          # repaired is a step log the PR never links to - the same gap as the stopped path,
-          # reached from the other side. The diffstat is the commit's own account next to the
-          # agent's, per Binge#2029.
+          # After the push: until it lands there is nothing to describe, and the unpushed path has its
+          # own comment. The commit message is fixed, so without this the only account of WHAT was
+          # repaired is a step log the PR never links to. The diffstat is the commit's own account
+          # next to the agent's.
           {
             printf '%s\n' "$attempted"
             printf 'Pushed a fix for the CI failure on `%s`.\n' "${SHA:0:7}"
@@ -690,10 +622,8 @@ jobs:
           } | gh pr comment "$PR" --body-file -
 
       # The step log is the only trace of an agent run that outlives its container, and it does
-      # not carry the files the run produced. On this job that is the failing CI log it triaged
-      # from, and the repair it had written but never got to push.
-      #
-      # Only on a run that went wrong: on a good one the pushed commit IS the record.
+      # not carry the files the run produced - here the CI log it triaged from and the repair it
+      # never pushed. Only on a run that went wrong.
       - name: Collect diagnostics
         if: >
           always() && job.status != 'success' && steps.pr.outputs.number != '' &&
@@ -706,10 +636,8 @@ jobs:
           [ -f "${{ runner.temp }}/ci-failure.trimmed.log" ] \
             && cp "${{ runner.temp }}/ci-failure.trimmed.log" "$OUT/" || true
           [ -f "${{ runner.temp }}/note.md" ] && cp "${{ runner.temp }}/note.md" "$OUT/" || true
-          # The whole question a timeout raises is how far the agent got, and the working tree
-          # answers it in one look: the fix written but unpushed reads completely differently
-          # from a tree the agent never touched. Untracked files show as ?? in the status;
-          # gitignored ones are excluded by default.
+          # How far the agent got is what a timeout raises, and the working tree answers it: a fix
+          # written but unpushed reads differently from a tree never touched.
           git status --porcelain > "$OUT/git-status.txt" 2>&1 || true
           { git diff; git diff --cached; } > "$OUT/working-tree.diff" 2>&1 || true
           git log --oneline -5 > "$OUT/git-log.txt" 2>&1 || true
@@ -727,19 +655,15 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      # The marker rides on "Commit and push"'s own outcome comments, not on a step that runs
-      # ahead of the agent - so a failure anywhere before that step writes one (the guard, the
-      # checkout, the log capture, the announce, the docs extraction, the toolchain setup, the
-      # agent step itself, or a crash inside "Commit and push" before it reaches a comment)
-      # leaves this commit's attempt genuinely unspent. This step exists to say which happened -
-      # silence would otherwise leave the PR under an "attempting one automatic fix" comment
-      # that never lands and never retries.
+      # The marker rides on "Commit and push"'s outcome comments, so a failure anywhere before
+      # that step leaves this commit's attempt genuinely unspent. This step says which happened -
+      # silence would leave the PR under an "attempting one automatic fix" comment that never
+      # lands and never retries.
       #
-      # always(), not failure(): the likeliest way to burn an attempt silently
-      # is the agent hanging into timeout-minutes, and a job cancelled by its
-      # timeout does not satisfy failure(). Guarded on number rather than on
-      # `skip != 'true'` because a step that FAILED also reports '' for every
-      # output, so the skip form passes when "Resolve the PR" is what broke -
+      # always(), not failure(): the likeliest way to burn an attempt silently is the agent
+      # hanging into timeout-minutes, and a job cancelled by its timeout does not satisfy
+      # failure(). Guarded on number rather than `skip != 'true'`, because a step that FAILED also
+      # reports '' for every output - so the skip form passes when "Resolve the PR" is what broke,
       # and then runs this with an empty PR number and an empty token.
       - name: Report a failed attempt
         if: >
@@ -756,25 +680,20 @@ jobs:
           comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
             --paginate --jq '.[].body')
 
-          # "Commit and push" reports the branch-moved outcome itself and then
-          # exits 1, which lands us here. It has already said what happened.
+          # "Commit and push" reports the branch-moved outcome itself and then exits 1, landing here.
           grep -qF "<!-- ci-fix-unpushed:${SHA} -->" <<<"$comments" && exit 0
 
           marker="<!-- ci-fix-failed:${SHA} -->"
           grep -qF "$marker" <<<"$comments" && exit 0
 
-          # Whether an attempt was actually spent is a question about the attempted-marker, not
-          # about this run: if the failure came anywhere before "Commit and push" writes one of
-          # its outcome comments, no marker was posted, and the next CI failure on this commit
-          # gets a clean attempt. Asserting otherwise tells the author to push a commit they do
-          # not need to push. Reading the marker rather than tracking which step failed is what
-          # keeps this true as the steps before it move.
+          # Whether an attempt was spent is a question about the attempted-marker, not about this run:
+          # a failure before "Commit and push" writes one of its outcome comments posts no marker, and
+          # the next CI failure on this commit gets a clean attempt. Reading the marker rather than
+          # tracking which step failed is what keeps this true as the steps before it move.
           #
-          # The head is read as well as the marker, because the marker rides on the outcome
-          # comment: a `gh pr comment` that fails after a successful push leaves a fix on the
-          # branch and no record of it, and "nothing was attempted" would then send the author
-          # after a commit they already have. A head past $SHA is evidence something landed,
-          # whoever pushed it.
+          # The head is read as well, because the marker rides on the outcome comment: a `gh pr
+          # comment` that fails after a successful push leaves a fix on the branch and no record of
+          # it, and "nothing was attempted" would send the author after a commit they already have.
           head_now=$(gh pr view "$PR" --json headRefOid --jq .headRefOid || echo "")
           if grep -qF "<!-- ci-fix-attempted:${SHA} -->" <<<"$comments"; then
             spent="That spent this commit's one attempt; push again for another."
