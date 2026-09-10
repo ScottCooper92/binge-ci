@@ -1,0 +1,25 @@
+name: Tag check
+
+# The one release mistake nothing else can catch: merging a bump to the self-referenced tag,
+# moving `v1`, and never cutting the tag itself. The workflows then name a ref that does not
+# exist, and every consumer's next agent run dies on "unable to resolve action" - at run time,
+# in the consuming repo.
+#
+# It cannot be a PR check, because the tag is created after the merge that names it. A tag
+# push is the right moment instead: moving `v1` IS a tag push, so the mistake fires this the
+# instant it is made, and costs nothing on any other event.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Every self-referenced tag must exist
+        run: ./tools/check-internal-refs.sh --resolve

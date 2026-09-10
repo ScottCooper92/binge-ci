@@ -139,3 +139,7 @@ Releasing is: bump the self-references in `.github/workflows/` to the new patch 
 tag `vX.Y.Z` at that commit, **then** move `v1`. That order keeps the window safe —
 consumers resolve the workflow at `v1`, so until it moves they are still on the previous
 commit and never see a tag that does not exist yet.
+
+`tag-check.yml` enforces the part a PR cannot: on any `v*` tag push it requires the
+self-referenced tag to exist. Moving `v1` is itself a tag push, so cutting the release
+without the patch tag fails there rather than in a consumer's next agent run.
