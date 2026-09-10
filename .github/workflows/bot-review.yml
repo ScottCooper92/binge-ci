@@ -1,56 +1,36 @@
 name: Bot review
 
-# Reviewer app: reviews a PR once CI is GREEN. Reusable — every consuming repo
-# calls this rather than keeping a copy, because the shell below encodes fixes
-# that were each found the expensive way and would be lost one at a time by
-# copying (see README.md).
+# Reviewer app: reviews a PR once CI is GREEN.
 #
-# Triggering on CI success rather than on `pull_request` means:
-#  - no review of code that's about to change under a failing build
-#  - the review never queues ahead of the CI run it should be waiting for
-#  - "new PR" and "new commits" both arrive through one door, since CI runs on both
-#  - green routes here, red routes to author-ci-fix.yml — never both at once
+# Triggering on CI success rather than on `pull_request` means no review of code about to
+# change under a failing build, no review queued ahead of the run it should wait for, and
+# one door for both "new PR" and "new commits" - green routes here, red to author-ci-fix,
+# never both.
 #
-# The caller owns the triggers, because a reusable workflow cannot declare any.
-# It must pass `dispatch_pr` on the workflow_dispatch path; the `workflow_run`
-# and `pull_request: [labeled]` paths are read from the shared `github` context
-# directly, which a called workflow inherits from its caller.
+# The caller owns the triggers and must pass `dispatch_pr` on the workflow_dispatch path;
+# the other two read the `github` context a called workflow inherits from its caller.
 #
-# TRUST BOUNDARY. The review job checks out PR code and runs an agent with Bash
-# and the reviewer app's token, and — when `auto_merge` is on — it can merge to
-# the default branch. Three things hold that line:
-#  - the `agent` label, which is therefore maintainers-only. Applying it grants
-#    code execution with this repository's secrets in scope. Do not label a PR
-#    you have not read.
-#  - a same-repository guard, so a fork PR never reaches these steps. On a PUBLIC
-#    caller that guard is the whole boundary rather than a second line of
-#    defence: a drive-by fork PR is an ordinary event there, not a hypothetical.
-#    Do not weaken it, and do not add a `pull_request_target` path to any
-#    workflow that executes checked-out code.
-#  - the runner. `runner` defaults to a GitHub-hosted VM, destroyed after the job
-#    and sharing nothing with the next one, so the blast radius is one throwaway
-#    machine. A caller that points this at a PERSISTENT self-hosted runner is
-#    making the label a sharper grant and should say so in its own docs.
+# TRUST BOUNDARY. The review job checks out PR code and runs an agent with Bash and the
+# reviewer app's token, and with `auto_merge` on it can merge to the default branch. Three
+# things hold that line:
+#  - the `agent` label, which is therefore maintainers-only.
+#  - a same-repository guard, so a fork PR never reaches these steps. On a PUBLIC caller
+#    that guard is the whole boundary. Do not weaken it, and do not add a
+#    `pull_request_target` path to any workflow that executes checked-out code.
+#  - the runner. The default is a hosted VM destroyed after the job; a caller pointing this
+#    at a PERSISTENT self-hosted machine makes the label a sharper grant.
 #
-# The governing docs are read from the default branch, never from the PR
-# checkout, so a PR cannot rewrite the rules it is judged by. See "Extract the
-# governing docs".
+# The governing docs are read from the default branch, never from the PR checkout, so a PR
+# cannot rewrite the rules it is judged by.
 #
-# The reviewer app holds Pull requests: RW to review and Issues: RW to file
-# out-of-scope findings. Contents: RW is what makes the `agent` label a
-# merge-to-default-branch grant; nothing else in the app is as sharp, and a
-# caller that does not want it passes `auto_merge: false`.
+# THE THIRD DOOR (`pull_request: [labeled]`) exists because the first cannot open for every
+# PR: a caller whose CI declares `paths-ignore` produces no run, no `workflow_run` and no
+# review for a PR whose every path matches - the label silently doing nothing while every
+# visible signal reads as tended.
 #
-# THE THIRD DOOR (`pull_request: [labeled]`) exists because the first one cannot
-# open for every PR: a caller whose CI declares `paths-ignore` produces no run,
-# no `workflow_run` and no review for a PR whose every changed path matches — the
-# label silently doing nothing while every visible signal (labelled, mergeable, a
-# bot comment from author-comments) reads as tended. Binge#2082.
-#
-# It is OFF unless the caller passes BOTH `unbuilt_paths` and
-# `unbuilt_paths_regex`, because a caller with no `paths-ignore` has no such PRs
-# and the door would only ever review code mid-build. A caller that passes them
-# must also wire the `pull_request: [labeled]` trigger.
+# It is OFF unless the caller passes BOTH `unbuilt_paths` and `unbuilt_paths_regex`: a
+# caller with no `paths-ignore` has no such PRs, and the door would only review code
+# mid-build. A caller that passes them must also wire the `pull_request: [labeled]` trigger.
 on:
   workflow_call:
     inputs:
@@ -184,21 +164,18 @@ on:
 
 permissions:
   contents: read
-  # For the CI-run lookup in "Resolve the PR". The reviewer app's grant covers
-  # pull requests, contents and issues but NOT Actions, so that one call runs
-  # against the workflow's own GITHUB_TOKEN instead.
+  # For the CI-run lookup in "Resolve the PR". The reviewer app's grant covers pull requests,
+  # contents and issues but NOT Actions, so that call uses the workflow's own GITHUB_TOKEN.
   actions: read
 
 env:
   AGENT_LABEL: ${{ inputs.agent_label }}
 
 jobs:
-  # Resolving the PR is a job of its own so that the review job below can key
-  # its concurrency group on the PR NUMBER. workflow_run knows only the head
-  # branch and workflow_dispatch knows only the number, so any group built from
-  # the event alone files the two paths under different keys - which is no
-  # guard at all against the race it exists to stop. `needs` is the only thing
-  # that gives both paths one key.
+  # A job of its own so the review job below can key its concurrency group on the PR NUMBER.
+  # workflow_run knows only the head branch and workflow_dispatch only the number, so any
+  # group built from the event alone files the two paths under different keys - no guard at
+  # all against the race it exists to stop. `needs` is the only thing that gives both one key.
   resolve:
     if: >
       inputs.dispatch_pr != '' ||
@@ -209,9 +186,8 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
-    # Both jobs below must carry the SAME label. `needs` sequences them but does not place
-    # them: split across two labels, the review waits on a runner that never picked the
-    # resolve up.
+    # Both jobs must carry the SAME label. `needs` sequences them but does not place them: split
+    # across two labels, the review waits on a runner that never picked the resolve up.
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.resolve_timeout_minutes }}
     outputs:
@@ -234,11 +210,9 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          # The Actions API is outside the reviewer app's grant, so an app-token call
-          # to it is a hard 403 on a private caller - which under `set -e` would fail
-          # this step on every workflow_run invocation. A public caller would read
-          # rather than 403, but the split is kept for both: relying on public-read to
-          # paper over a missing grant breaks the day a repo goes private.
+          # The Actions API is outside the reviewer app's grant, so an app-token call is a hard 403 on
+          # a private caller - which under `set -e` fails this step on every workflow_run. A public
+          # caller would read rather than 403, but relying on that breaks the day a repo goes private.
           CI_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -261,10 +235,9 @@ jobs:
           fi
           [ -n "$num" ] || skip "No open PR found - nothing to review."
 
-          # Separated by the unit separator (0x1f), not by tab. An unlabelled PR
-          # leaves an empty middle field, and tab is an IFS *whitespace* character:
-          # IFS=$'\t' still collapses a run of them, so @tsv would shift sha and
-          # cross a field left. Only a non-whitespace separator survives read.
+          # Unit separator (0x1f), not tab. An unlabelled PR leaves an empty middle field, and tab is
+          # an IFS *whitespace* character: IFS=$'\t' still collapses a run of them, so @tsv would shift
+          # sha and cross a field left. Only a non-whitespace separator survives read.
           IFS=$'\037' read -r isdraft labels sha cross < <(gh pr view "$num" \
             --json isDraft,labels,headRefOid,isCrossRepository \
             --jq '[.isDraft, ([.labels[].name] | join(",")), .headRefOid, .isCrossRepository]
@@ -272,30 +245,25 @@ jobs:
 
           [ "$isdraft" = "true" ] && skip "PR #$num is a draft - skipping."
 
-          # Belt and braces with the job-level guard, and the only such guard on
-          # the workflow_dispatch path. On a public caller this is the control that
-          # matters most - see the trust boundary note at the top.
+          # Belt and braces with the job-level guard, and the only such guard on the workflow_dispatch
+          # path. On a public caller this is the control that matters most.
           [ "$cross" = "true" ] && skip "PR #$num comes from a fork - out of scope."
 
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$num has no '$AGENT_LABEL' label - not opted in."
 
-          # Published HERE rather than with the rest at the end, because this is the line at which
-          # opt-in is proven and everything below it can fail. "Report a failed resolve" keys off
-          # this output: without an early write, a failure in the CI-run lookup below leaves it ''
-          # and the report is skipped - which is the silence this job had no cover for at all.
+          # Published HERE rather than with the rest at the end: this is the line at which opt-in is
+          # proven and everything below it can fail. "Report a failed resolve" keys off this output,
+          # and without an early write a failure below leaves it '' and the report is skipped.
           echo "number=$num" >> "$GITHUB_OUTPUT"
 
-          # CLEAN is not green, and the run that woke us may belong to an older
-          # commit. Demand a successful CI run against THIS head. A head pushed
-          # since then gets its review when its own CI run reports.
+          # CLEAN is not green, and the run that woke us may belong to an older commit. Demand a
+          # successful CI run against THIS head.
           #
-          # The run's created_at doubles as the time the head was pushed. The
-          # commit's own committer date does not: a commit written locally an hour
-          # before it was pushed dates the head an hour early, and since the merge
-          # gate below blocks on feedback NEWER than this timestamp, that hour of
-          # comments - in practice every comment on the PR - reads as unaddressed
-          # and holds the merge for good.
+          # The run's created_at doubles as the time the head was pushed; the commit's committer date
+          # does not. A commit written locally an hour before it was pushed dates the head an hour
+          # early, and since the merge gate blocks on feedback NEWER than this timestamp, that hour of
+          # comments reads as unaddressed and holds the merge for good.
           run_info=$(GH_TOKEN="$CI_TOKEN" gh api \
             "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?head_sha=${sha}&status=completed" \
             --jq '[.workflow_runs[] | select(.event == "pull_request")] | .[0]
@@ -303,34 +271,29 @@ jobs:
           ci=${run_info%%|*}
           pushed_at=${run_info##*|}
 
-          # Only a workflow_run review is vouched for by a green build; the other two doors
-          # are not, and "Merge if the bar is met" holds on that rather than merging on nothing.
+          # Only a workflow_run review is vouched for by a green build; the other two doors are not,
+          # and "Merge if the bar is met" holds on that rather than merging on nothing.
           vouched=true
           if [ -n "${DISPATCH_PR:-}" ]; then
             vouched=false
             echo "Manual dispatch - not requiring a CI run (conclusion: '${ci:-none}')."
           elif [ -n "${LABELED_PR:-}" ]; then
             vouched=false
-            # Two ways this is the wrong door, and both are ordinary rather than exceptional.
-            # A head CI has already reported on gets its review from that run, so reviewing here
-            # too would double up; a head CI has NOT yet reported on is code mid-build, and
-            # reviewing it is the thing this workflow's whole trigger choice exists to avoid.
+            # Two ways this is the wrong door. A head CI has already reported on gets its review from
+            # that run, so reviewing here would double up; a head CI has NOT reported on is code
+            # mid-build, which this workflow's whole trigger choice exists to avoid.
             [ -z "$ci" ] || skip "PR #$num already has a CI run on $sha - its review comes with that."
 
-            # The mirror of the caller's paths-ignore is duplicated from another repo's
-            # workflow, so it can drift: an entry added to ci.yml and not to `unbuilt_paths`
-            # puts that PR back in the silent limbo this door is about, holding on a run that
-            # will never arrive.
+            # The mirror of the caller's paths-ignore lives in another repo's workflow, so it can drift:
+            # an entry added there and not to `unbuilt_paths` puts that PR back in the silent limbo this
+            # door is about, holding on a run that will never arrive.
             #
-            # So the copy is CHECKED rather than trusted (Binge#2086). Not by deriving the regex
-            # from ci.yml at runtime: that needs YAML parsed out of a fetched file and globs
-            # translated to a regex, three new failure surfaces to remove one. Comparing the SET
-            # is the whole check - no translation, so no translation bugs - and a difference
-            # closes this door loudly instead of narrowing it in silence.
+            # So the copy is CHECKED, not trusted - by comparing the SET rather than deriving the regex
+            # at runtime, which would need YAML parsed out of a fetched file and globs translated, three
+            # new failure surfaces to remove one. A difference closes this door loudly.
             #
-            # Read from the default branch rather than the PR's head, so a PR cannot edit the
-            # list its own review door is measured against. Anything unreadable or unparseable
-            # leaves `declared` empty, which is a mismatch, which skips.
+            # Read from the default branch, so a PR cannot edit the list its own review door is measured
+            # against. Anything unreadable leaves `declared` empty, which is a mismatch, which skips.
             mirrored=$(printf '%s\n' "$UNBUILT_PATHS" \
                        | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
                        | grep -v '^$' | sort -u)
@@ -376,26 +339,22 @@ jobs:
           fi
           echo "vouched=$vouched" >> "$GITHUB_OUTPUT"
 
-          # `pushed_at` is deliberately left empty when there is no run to date the push by -
-          # only reachable on the two unvouched doors, which the merge gate stops at before it
-          # reads this. There is no honest fallback: the committer date is earlier than the push
-          # (above), and the dispatch instant is later than every comment already on the PR. An
-          # empty watermark is the fail-safe of the two - it holds on any human feedback rather
-          # than merging over it.
+          # `pushed_at` is left empty when there is no run to date the push by - reachable only on the
+          # two unvouched doors, which the merge gate stops at first. There is no honest fallback: the
+          # committer date is earlier than the push, the dispatch instant later than every comment
+          # already on the PR. An empty watermark holds on any human feedback rather than merging over
+          # it.
 
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "pushed_at=$pushed_at" >> "$GITHUB_OUTPUT"
           echo "base=$(gh pr view "$num" --json baseRefName --jq .baseRefName)" >> "$GITHUB_OUTPUT"
 
-      # The review job carries a reporter; this one did not, and a failure HERE is silent in a way
-      # nothing downstream can cover: `review` needs this job, so when this job dies `review` is
-      # skipped and its reporter never runs. A PR whose resolve timed out or whose API calls
-      # failed therefore looks exactly like one no CI run has reported for yet.
+      # A failure HERE is silent in a way nothing downstream can cover: `review` needs this job, so
+      # when this dies `review` is skipped and its reporter never runs - and the PR looks exactly
+      # like one no CI run has reported for yet.
       #
-      # always(), not failure(), so the timeout is caught too. Deduped on the run id rather than
-      # the head SHA: this job may well have failed before it learned the SHA, and a resolve
-      # failure is exceptional enough that one note per occurrence is right - unlike the review
-      # job, which can revisit one unchanged head across many CI runs.
+      # always(), not failure(), so the timeout is caught. Deduped on the run id rather than the
+      # head SHA: this job may have failed before it learned the SHA.
       - name: Report a failed resolve
         if: always() && job.status != 'success' && steps.pr.outputs.number != ''
         env:
@@ -419,14 +378,12 @@ jobs:
   review:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
-    # A "Re-run all jobs" on an already-green CI run emits a second workflow_run
-    # completed/success for the same head, and a dispatch can race an in-flight run.
-    # Ungrouped, that is a duplicate review and a second merge attempt, the loser of
-    # which fails the step against an already-merged PR.
+    # A "Re-run all jobs" on an already-green CI run emits a second workflow_run for the same
+    # head, and a dispatch can race an in-flight run. Ungrouped, that is a duplicate review and
+    # a second merge attempt whose loser fails against an already-merged PR.
     #
-    # This matters MORE on a hosted runner than on a single self-hosted one, where a
-    # second run simply queued behind the first. Hosted runners are allocated per job,
-    # so without this group the duplicate runs concurrently.
+    # This matters MORE on hosted runners, which are allocated per job, so the duplicate runs
+    # concurrently rather than queueing.
     concurrency:
       group: bot-review-${{ github.repository }}-${{ needs.resolve.outputs.number }}
       cancel-in-progress: false
@@ -458,11 +415,9 @@ jobs:
           CONVENTIONS_PATH: ${{ inputs.conventions_path }}
         run: |
           set -euo pipefail
-          # NOT --depth=1. That re-shallows the full clone the checkout above
-          # asked for with fetch-depth: 0 - it writes .git/shallow, and from
-          # there `git merge-base` and `git diff origin/<branch>...HEAD` both die
-          # with "no merge base", which is the review's main way of reading the
-          # diff.
+          # NOT --depth=1: it re-shallows the full clone `fetch-depth: 0` asked for by writing
+          # .git/shallow, and from there `git merge-base` and `git diff origin/<branch>...HEAD` both
+          # die with "no merge base" - the review's main way of reading the diff.
           git fetch origin "$DEFAULT_BRANCH"
           mkdir -p "$RULES_DIR"
           git show "origin/${DEFAULT_BRANCH}:${GUIDE_PATH}" > "$RULES_DIR/pr-review-guide.md"
@@ -470,22 +425,13 @@ jobs:
           echo "dir=$RULES_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Review with Claude
-        # A bound of its own, BELOW the job's. Without it the agent runs until timeout-minutes
-        # cancels the whole job, and cancellation skips every ordinary step after it - Binge#2009
-        # died that way and its "Push and reply" shows completed/skipped, so nothing was pushed
-        # and nothing was said. An always() step still runs on a cancel, but it runs inside the
-        # runner's post-cancel grace window, competing with cleanup, which is a poor place to be
-        # uploading anything.
+        # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
+        # cancellation skips every ordinary step after it. An always() step does still run, but
+        # inside the runner's post-cancel grace window, competing with cleanup - a poor place to be
+        # uploading anything. A step timeout FAILS the step and leaves the job alive.
         #
-        # A step timeout instead FAILS the step and leaves the job alive, so everything below
-        # gets its ordinary budget: the reporter comments, the diagnostics upload, and on the
-        # author jobs the push of whatever the agent had finished.
-        #
-        # This is a step key, NOT a `with:` input. Binge#2011 wrote it under `with:`, where it is
-        # silently dropped - claude-code-action declares no timeout input, and a composite action
-        # ignores what it does not declare. So the bound never existed, and #2021's response was
-        # still governed by the job's timeout-minutes: cancelled mid-step, with "Push and reply"
-        # never scheduled and the agent's log lost.
+        # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
+        # composite action silently drops what it does not declare, so the bound never exists.
         timeout-minutes: ${{ inputs.agent_timeout_minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         env:
@@ -493,37 +439,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # See the `show_full_output` input for the tradeoff. Without it the SDK stream is
-          # suppressed and the step logs an init line, then nothing until it ends - so a run
-          # that dies is undiagnosable after the fact. author-comments.yml records the run that
-          # made the case: a cancelled step with 26 minutes of blank log between init and the
-          # cancel, and no way to tell stuck from nearly-done.
+          # See `show_full_output`. Without it the SDK stream is suppressed and the step logs an init
+          # line, then nothing until it ends - so a run that dies is undiagnosable after the fact.
           show_full_output: ${{ inputs.show_full_output }}
-          # Without a token of its own the action mints one by exchanging a GitHub OIDC token,
-          # which needs `id-token: write` - a broader grant than anything else in these
-          # workflows, in a job that executes agent code. Hand it the app token this job already
-          # minted: setupGitHubToken returns an overridden token before it reaches the OIDC path
-          # at all.
+          # Without a token of its own the action mints one via GitHub OIDC, needing `id-token:
+          # write` - a broader grant than anything else here, in a job that executes agent code.
           github_token: ${{ steps.token.outputs.token }}
-          # As in author-ci-fix.yml: checkHumanActor throws for a non-User actor unless listed
-          # here. This is a workflow_run, so the actor is the one behind the CI run - the author
-          # bot whenever it was the one that pushed the fix. Without this, precisely the commits
-          # this system exists to produce are the ones that never get reviewed.
+          # checkHumanActor throws for a non-User actor unless listed here. This is a workflow_run, so
+          # the actor is whoever caused the CI run - the author bot whenever it pushed the fix.
+          # Without this, precisely the commits this system exists to produce never get reviewed.
           allowed_bots: ${{ inputs.author_bot }}
-          # Write is not optional: the prompt below ends by asking for a JSON file, and
-          # "Submit the review" hard-fails when it is missing.
+          # Write is not optional: the prompt ends by asking for a JSON file, and "Submit the review"
+          # hard-fails when it is missing.
           #
-          # --disallowedTools, because --allowedTools did not hold. That list names five tools
-          # and the subagent one is not among them, yet Binge#2251's review started a background
-          # `general-purpose` agent regardless - `started_in_background: 1, completed: 0` in that
-          # run's result JSON - and then ended its turn to wait for it. So the whitelist gates
-          # which tools may run unprompted, not which exist; denying the tool is what expresses
-          # the same intent as a rule.
-          #
-          # Both names it has shipped under, because an unmatched entry here is inert and a
-          # missed one is this failure again. If a future version renames it a third time the
-          # prompt below is the guard that still applies, which is why the fix is in both places
-          # rather than whichever seemed likelier to work.
+          # --disallowedTools, because --allowedTools did not hold: the allowlist gates what may run
+          # UNPROMPTED, not what exists, and omitting the subagent tool did not stop a review starting
+          # one. Both names it has shipped under, since an unmatched entry is inert and a missed one
+          # is the failure again. If a future version renames it a third time the prompt below is the
+          # guard that still applies.
           claude_args: >-
             --allowedTools "Bash,Read,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
@@ -626,9 +559,8 @@ jobs:
           PAYLOAD: ${{ runner.temp }}/review-payload.json
         run: |
           set -euo pipefail
-          # The concurrency group above serialises a duplicate trigger rather
-          # than dropping it, so the queued run can arrive after the first one
-          # merged. A second review on a closed PR is noise, not a finding.
+          # The concurrency group serialises a duplicate trigger rather than dropping it, so a queued
+          # run can arrive after the first one merged. A second review on a closed PR is noise.
           pr_state=$(gh pr view "$PR" --json state --jq .state)
           [ "$pr_state" = "OPEN" ] || { echo "PR #$PR is $pr_state - not posting a review."; exit 0; }
 
@@ -709,12 +641,9 @@ jobs:
           jq -r '"Posted review \(.id), pinned to \(.commit_id)."' < "$POST_LOG" || cat "$POST_LOG"
           : > "$POST_LOG"
 
-      # Merge discipline. Only on a clean pass, and only with every guard met.
-      #
-      # Skipped wholesale when a caller leaves auto_merge off (the default) — the review and
-      # every guard above still run, the PR just waits for a human to press merge. The logic
-      # stays intact rather than being deleted so that turning it on is one input and not a
-      # re-derivation; every guard in it was earned.
+      # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
+      # every guard above still run, the PR just waits for a human. The logic stays intact rather
+      # than being deleted so that turning it on is one input and not a re-derivation.
       - name: Merge if the bar is met
         id: merge
         if: inputs.auto_merge
@@ -729,20 +658,17 @@ jobs:
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
         run: |
           set -euo pipefail
-          # Same reason as in "Submit the review": the queued duplicate can get
-          # here after the run ahead of it merged, and every guard below reports
-          # its refusal on the PR.
+          # As in "Submit the review": the queued duplicate can arrive after the run ahead of it
+          # merged, and every guard below reports its refusal on the PR.
           pr_state=$(gh pr view "$PR" --json state --jq .state)
           [ "$pr_state" = "OPEN" ] || { echo "PR #$PR is $pr_state - nothing to merge."; exit 0; }
 
-          # One comment per distinct reason. Held PRs are held for a long time, and
-          # an unconditional comment here means one "Not merging" note per push for
-          # the rest of the PR's life.
+          # One comment per distinct reason. Held PRs are held a long time, and an unconditional
+          # comment means one "Not merging" note per push for the rest of the PR's life.
           #
-          # $2 is that reason's dedup key, and a reason whose text carries a SHA
-          # or a state MUST pass one: hashing the message itself would mint a
-          # fresh marker on every occurrence, and the reasons that vary are
-          # exactly the ones that recur on every push.
+          # $2 is that reason's dedup key, and a reason whose text carries a SHA or a state MUST pass
+          # one: hashing the message would mint a fresh marker on every occurrence, and the reasons
+          # that vary are exactly the ones that recur on every push.
           hold() {
             echo "HOLD: $1"
             marker="<!-- hold:$(printf '%s' "${2:-$1}" | sha1sum | cut -c1-12) -->"
@@ -756,11 +682,9 @@ jobs:
 
           [ "$(jq -r '.verdict' "$VERDICT_FILE")" = "approve" ] || hold "review requested changes."
 
-          # A review that no CI run vouched for has no green build behind it and no reliable way
-          # to date the push, so the unaddressed-feedback guard below has nothing trustworthy to
-          # compare against. Reviewing on that basis is worth doing; merging on it is not. Both
-          # doors that skip the build come through here - a manual dispatch, and the `labeled`
-          # trigger a docs-only PR arrives by.
+          # A review no CI run vouched for has no green build behind it and no reliable way to date
+          # the push, so the unaddressed-feedback guard has nothing trustworthy to compare against.
+          # Reviewing on that basis is worth doing; merging on it is not.
           [ "$VOUCHED" = "true" ] \
             || hold "no CI run vouched for this head - reviewing, but merging is yours to do." unvouched
 
@@ -773,23 +697,20 @@ jobs:
           [ "$base" = "$DEFAULT_BRANCH" ] \
             || hold "it targets \`$base\`, not \`$DEFAULT_BRANCH\` - its parent lands first."
 
-          # The head must not have moved since review: the CI success we demanded
-          # was against REVIEWED_SHA, and nothing has vouched for a newer commit.
+          # The head must not have moved since review: the CI success demanded was against
+          # REVIEWED_SHA, and nothing has vouched for a newer commit.
           head_now=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
           [ "$head_now" = "$REVIEWED_SHA" ] \
             || hold "the head moved since review ($REVIEWED_SHA -> $head_now)." head-moved
 
-          # Unaddressed human feedback blocks. Bot chatter doesn't.
+          # Unaddressed human feedback blocks. Bot chatter does not.
           #
-          # --paginate is load-bearing: /reviews pages at 30, oldest first, so a
-          # CHANGES_REQUESTED past the first page would be invisible here and the
-          # merge would go straight through it.
+          # --paginate is load-bearing: /reviews pages at 30, oldest first, so a CHANGES_REQUESTED
+          # past the first page would be invisible and the merge would go straight through it.
           #
-          # Only the LATEST review per person counts, which is what GitHub's own
-          # merge box does. The endpoint returns every review ever submitted, so
-          # without this a maintainer who requests changes, gets them fixed and
-          # then approves leaves a block that can never clear. COMMENTED is
-          # dropped first: it does not supersede a prior verdict.
+          # Only the LATEST review per person counts, as GitHub's own merge box does - otherwise a
+          # maintainer who requests changes, gets them fixed and then approves leaves a block that can
+          # never clear. COMMENTED is dropped first: it does not supersede a prior verdict.
           human_blocks=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate \
             --jq '.[] | select(.user.type != "Bot") | select(.state != "COMMENTED")
                       | {login: .user.login, state: .state, at: .submitted_at}' \
@@ -797,42 +718,27 @@ jobs:
                       | select(.state == "CHANGES_REQUESTED")] | length')
           [ "$human_blocks" = "0" ] || hold "a human review requests changes."
 
-          # Anything a human left after the head was pushed is unaddressed by
-          # definition. It can land in three places, and reading only the third is
-          # how a review carrying inline objections gets merged over: a review
-          # submitted as COMMENTED lives in /reviews, its inline notes live in
-          # the review threads, and only top-level chat lives in /issues/{n}/comments.
+          # Anything a human left after the head was pushed is unaddressed by definition, and it lands
+          # in three places. Reading only the third is how a review carrying inline objections gets
+          # merged over: a COMMENTED review lives in /reviews, its inline notes in the review threads,
+          # and only top-level chat in /issues/{n}/comments.
           #
-          # These page at 30 and return OLDEST first, so unpaginated the newest feedback -
-          # the only kind this guard exists to find - is the first thing off the end. These
-          # bots post a marker comment per CI failure and a note per hold reason, so 30 is
-          # not a hypothetical ceiling. --jq runs once per page, hence the awk sum.
+          # These page at 30, oldest first, so unpaginated the newest feedback - the only kind this
+          # guard exists to find - is the first thing off the end. --jq runs once per page, hence the
+          # awk sum.
           #
-          # A top-level comment has no resolved state, so until Binge#2192 it had no way to say
-          # "addressed" at all: answering the reviewer bot parked the PR until unrelated code
-          # happened to be pushed. That is the same penalty-for-explaining #2081 removed from the
-          # thread path, and it stranded #2157, #2168 and #2181 - the last of them held by a comment
-          # posted thirteen seconds after the head commit, whose only content was that it had been
-          # fixed. `<!-- answered -->` is the top-level counterpart of resolving a thread: something
-          # the author sets deliberately, on one comment, leaving every unmarked comment blocking as
-          # before. Reviews do not honour it - a review body is the objection itself, not a note
-          # about one - which is why the filter is per-endpoint rather than shared.
+          # Two exemptions, on different grounds. `<!-- answered -->` is a top-level comment's
+          # counterpart to resolving a thread, since it has no resolved state of its own: without it,
+          # answering the reviewer bot parked the PR until unrelated code happened to be pushed. It is
+          # set deliberately, per comment, and reviews do not honour it - a review body is the
+          # objection itself, not a note about one.
           #
-          # The Claude Code footer is exempt for a different reason (Binge#2314): an agent session
-          # posts as the repo owner, so `author_association` reads OWNER and this guard cannot tell
-          # its comments from the maintainer's. That collides head-on with the drive-to-green
-          # convention, which *requires* a comment when standing down on a CI failure that is not
-          # the PR's own - so on #2313 an agent doing exactly the right thing (diagnosing a 429 in
-          # the reviewer's own run, establishing it was not the diff) turned a green, approved,
-          # unheld PR into a human-merge-only one. Every correct diagnosis did that.
-          #
-          # The footer is mandated on every agent-authored comment, so this keys on a signal already
-          # required and already present - which is what separates it from `<!-- answered -->` above,
-          # a marker the author has to set deliberately per comment. A human who pastes the footer is
-          # skipped too; that fails safe, because the only consequence is a merge the reviewer had
-          # already approved, and an agent that means to block has `hold` or simply not approving.
-          # Review threads need no equivalent: an agent answering one resolves it, and the
-          # isResolved check below already honours that.
+          # The Claude Code footer is exempt because an agent session posts as the repo owner, so
+          # `author_association` reads OWNER and this guard cannot tell its comments from a
+          # maintainer's - which collides with the convention that REQUIRES a comment when standing
+          # down on a CI failure that is not the PR's own. It keys on a signal already mandated on
+          # every agent-authored comment. A human who pastes it is skipped too, and that fails safe:
+          # the only consequence is a merge the reviewer had already approved.
           newer=0
           for endpoint in "pulls/${PR}/reviews" "issues/${PR}/comments"; do
             answered='select(true)'
@@ -850,31 +756,21 @@ jobs:
             newer=$((newer + ${n:-0}))
           done
 
-          # Inline notes are counted by THREAD rather than by comment, which is why they are read
-          # from GraphQL instead of joining the loop above.
+          # Inline notes are counted by THREAD, not by comment, which is why they come from GraphQL.
+          # A thread's RESOLVED state is the question: resolved means addressed, whoever resolved it,
+          # and an unresolved thread counts however its newest comment is shaped. Counting replies
+          # instead penalised the reviews that were ANSWERED - push the fix, say so on the thread, and
+          # that reply is always newer than the head - while exempting replies let a reviewer's
+          # escalation on their own thread go unseen.
           #
-          # Counting every reply held Binge#2060 for good - approved, clean, every thread resolved -
-          # because the ordinary way of working is to push the fix and then say so on the thread,
-          # and such a reply is always newer than the head. It penalised the reviews that were
-          # answered: a silent force-push merged, an explained one did not. #2081 cut that by
-          # exempting anything carrying `in_reply_to_id`, which fixed the symptom and opened a
-          # worse hole - a reviewer escalating on their own thread ("no, this still doesn't work")
-          # writes a reply too, so the guard stopped seeing the objections it exists to catch. #2087.
+          # `isResolved` is GraphQL-only, absent from the REST payload, which is why this reads
+          # differently from the two endpoints above.
           #
-          # A thread's resolved state is the question that shape was standing in for. Resolved
-          # means addressed, whoever resolved it and whichever comment carried the last word; an
-          # unresolved thread counts however its newest comment is shaped, so a fresh objection
-          # blocks whether it opens a thread or continues one. `isResolved` is GraphQL-only - it is
-          # absent from the REST comment payload, which is why this reads differently from the two
-          # endpoints above.
-          #
-          # The one case this does not see is a reply added to a thread that is already resolved and
-          # left resolved. Telling that from #2081's own sequence - reviewer comments, author pushes,
-          # author replies, someone resolves - needs a resolution timestamp to order against, and
-          # there is none to be had: #2126 checked the published schema end to end, and `resolvedAt`
-          # does not exist on any type in it, while `PullRequestTimelineItems` carries the thread
-          # itself but no resolve/unresolve event. `resolvedBy` says who, never when. Un-resolving is
-          # the affordance for reopening a point, and a reviewer who does that is counted again here.
+          # The one case this misses is a reply added to an already-resolved thread and left resolved.
+          # Telling that apart needs a resolution timestamp, and the published schema has none:
+          # `resolvedAt` is on no type, the timeline carries the thread but no resolve event, and
+          # `resolvedBy` says who and never when. Un-resolving is the affordance for reopening a
+          # point, and a reviewer who does that is counted again here.
           n=$(gh api graphql --paginate \
             -f owner="${GH_REPO%%/*}" -f name="${GH_REPO##*/}" -F pr="$PR" \
             -f query='
@@ -911,14 +807,13 @@ jobs:
           [ "$state" = "CLEAN" ] || hold "mergeStateStatus is $state, not CLEAN." merge-state
 
           title=$(gh pr view "$PR" --json title --jq .title)
-          # Kept so "Report a failed review" can name WHY a merge failed instead of pointing at
-          # a log. A refusal is usually one line from the API, and it is the line that decides
-          # whether a maintainer retries or merges by hand. Binge#2052.
+          # Kept so "Report a failed review" can name WHY a merge failed instead of pointing at a log.
+          # A refusal is usually one line from the API, and it is the line that decides whether a
+          # maintainer retries or merges by hand.
           #
-          # Truncated on the success path, because the reporter's test is `-s` and this redirect
-          # captures gh's success output too. Left in place, a non-empty log would mean "the merge
-          # was reached" rather than "the merge errored", and only the reporter's own PR-is-OPEN
-          # guard would keep a successful merge from being announced as a failed one.
+          # Truncated on success, because the reporter's test is `-s` and this redirect captures gh's
+          # success output too. Left in place, a non-empty log would mean "the merge was reached"
+          # rather than "the merge errored".
           merge_log="${{ runner.temp }}/merge-error.txt"
           if ! gh pr merge "$PR" --squash --subject "$title (#$PR)" \
               --body "$(gh pr view "$PR" --json body --jq .body)" > "$merge_log" 2>&1; then
@@ -930,12 +825,9 @@ jobs:
           echo "Merged #$PR."
 
       # The step log is the only trace of an agent run that outlives its container, and it does
-      # not carry the files the run produced. On this job that is the verdict file, whose absence
-      # is the one thing "Submit the review" cannot tell apart from a review that decided
-      # nothing. No working tree to keep - the reviewer only reads.
-      #
-      # Only on a run that went wrong: on a good one the posted review IS the record, and this
-      # would be storage for nothing.
+      # not carry the files the run produced - here the verdict file, whose absence is the one
+      # thing "Submit the review" cannot tell apart from a review that decided nothing. Only on a
+      # run that went wrong.
       - name: Collect diagnostics
         if: always() && job.status != 'success' && needs.resolve.outputs.number != ''
         env:
@@ -956,13 +848,11 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      # Every workflow in this set reports a failed run on the PR. This one did not, until
-      # Binge#1969's review died on an exhausted turn budget and left the PR green, labelled and
-      # silent - indistinguishable from one the bots had not reached yet.
+      # A review that dies leaves the PR green, labelled and silent - indistinguishable from one
+      # the bots have not reached yet.
       #
-      # always(), not failure(), so a job cancelled by timeout-minutes is caught too.
-      # Deduped on the reviewed head, since a conflict-free PR can sit at one SHA
-      # across several triggers and one note per attempt would be one per CI run.
+      # always(), not failure(), so a job cancelled by timeout-minutes is caught. Deduped on the
+      # reviewed head, since a conflict-free PR can sit at one SHA across several triggers.
       - name: Report a failed review
         if: always() && job.status != 'success' && needs.resolve.outputs.number != ''
         env:
@@ -981,29 +871,22 @@ jobs:
           state=$(gh pr view "$PR" --json state --jq .state)
           [ "$state" = "OPEN" ] || exit 0
 
-          # WHERE the job died changes what the reader should do next, so it cannot be one
-          # sentence. Binge#2051 died in the merge with an approving review already on the PR, and
-          # was told "nothing was reviewed" - which reads as "go get a review" when the only
-          # thing outstanding was the merge. #2052.
+          # WHERE the job died changes what the reader should do next, so it cannot be one sentence: a
+          # job that died in the MERGE with an approving review already posted must not be told
+          # "nothing was reviewed", which reads as "go get a review".
           #
-          # "Submit the review" succeeding is the discriminator for the first split, and it is a
-          # real one: it is skipped outright when the agent step fails, so its outcome cannot say
-          # success unless a review was posted (or the PR had already closed, which the guard
-          # above has ruled out by here).
+          # "Submit the review" succeeding is the first discriminator, and a real one - it is skipped
+          # outright when the agent step fails, so its outcome cannot say success unless a review was
+          # posted.
           #
-          # The second split is the merge LOG, not the merge step's outcome, because the step can
-          # fail well before `gh pr merge` is reached - a transient `gh` call in the guard
-          # section, or in `hold`'s own comment POST. Then the hold-label, human-CHANGES_REQUESTED
-          # and mergeStateStatus guards never finished, so telling a maintainer to merge by hand
-          # would be advice from a gate that did not run. The log file is written immediately
-          # before the merge call and nowhere else, so its presence is exactly "the merge itself
-          # was attempted and errored".
+          # The second split is the merge LOG, not the merge step's outcome, because the step can fail
+          # well before `gh pr merge` is reached, leaving the guards unfinished - and telling a
+          # maintainer to merge by hand would then be advice from a gate that did not run. The log is
+          # written immediately before the merge call and nowhere else.
           #
-          # The third branch tests MERGED = failure rather than != success, because `skipped` is
-          # what the merge step reports when a caller leaves auto_merge off. That is not a
-          # failure, and calling it one would tell every review-only caller its merge step broke.
-          # It falls through to the last branch instead, which says the PR is in the state the
-          # review left it - exactly right when merging was never on the table.
+          # The third branch tests MERGED = failure rather than != success: `skipped` is what the merge
+          # step reports when a caller leaves auto_merge off, and calling that a failure would tell
+          # every review-only caller its merge step broke.
           if [ "$SUBMITTED" != "success" ]; then
             # "Re-running CI on this commit will try again" is wrong for one ordinary way this
             # branch is reached: a force-push between resolve and submit takes the reviewed
@@ -1044,10 +927,9 @@ jobs:
             body=$(printf 'The review of `%s` was submitted and is on this PR. The merge step then failed ([log](%s)) **before it reached the merge itself**, so its guards did not all run - treat the merge as not attempted rather than as declined, and read the log before merging by hand.' \
               "${SHA:0:7}" "$RUN_URL")
           else
-            # NOT review-failed: that marker means "nothing was reviewed", and this branch means
-            # very nearly the opposite. Sharing it would dedupe the correction away on a SHA that
-            # already carries the first note, leaving the PR holding the wrong account of itself -
-            # the #2052 shape, reintroduced by the fix for it.
+            # NOT review-failed:. That marker means "nothing was reviewed", and this branch means very
+            # nearly the opposite - sharing it would dedupe the correction away on a SHA that already
+            # carries the first note, leaving the PR holding the wrong account of itself.
             marker="<!-- run-failed:${SHA} -->"
             body=$(printf 'The review of `%s` was submitted, but the run still failed ([log](%s)). Whatever went wrong is after the review, so the PR itself should be in the state the review left it.' \
               "${SHA:0:7}" "$RUN_URL")
