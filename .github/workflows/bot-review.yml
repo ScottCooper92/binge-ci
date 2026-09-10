@@ -619,8 +619,11 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.number }}
+          REVIEWED_SHA: ${{ needs.resolve.outputs.sha }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
           BODY_FILE: ${{ runner.temp }}/review-body.md
+          POST_LOG: ${{ runner.temp }}/review-post-error.txt
+          PAYLOAD: ${{ runner.temp }}/review-payload.json
         run: |
           set -euo pipefail
           # The concurrency group above serialises a duplicate trigger rather
@@ -641,10 +644,70 @@ jobs:
           fi
 
           case "$verdict" in
-            approve)         gh pr review "$PR" --approve --body-file "$BODY_FILE" ;;
-            request_changes) gh pr review "$PR" --request-changes --body-file "$BODY_FILE" ;;
+            approve)         event=APPROVE ;;
+            request_changes) event=REQUEST_CHANGES ;;
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
+
+          # The SHA is named twice - in commit_id and in the body - because neither alone works.
+          #
+          # commit_id is why this is the REST endpoint: `gh pr review` sends none, so GitHub
+          # stamps the review against whatever the head is NOW, and a review takes minutes
+          # while the author bots push whenever CI or a reviewer asks them to.
+          #
+          # The body line is what makes it visible. `outdated` is a field on
+          # PullRequestReviewComment with no counterpart on PullRequestReview - the GraphQL
+          # schema exposes only `commit` there - so a body-only verdict renders identically
+          # whether its commit is the head or six pushes back. Unconditional, because "no
+          # line" would otherwise mean both "current" and "posted by an older version of
+          # this workflow".
+          #
+          # Merge safety is not at stake either way: "Merge if the bar is met" holds on
+          # head-moved.
+          printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}" | cat - "$BODY_FILE" > "$BODY_FILE.pinned"
+
+          # The API's refusal is kept, on the same reasoning as $MERGE_LOG below: this file is
+          # written immediately before the POST and nowhere else, so its presence is exactly
+          # "the review was written and GitHub would not take it". "Report a failed review"
+          # quotes it rather than reconstructing what the refusal was.
+          # BOTH streams, which is the whole point and easy to get wrong: on a non-2xx `gh api`
+          # puts the JSON error body on STDOUT and only a summary line on stderr. Keeping stderr
+          # alone yields `gh: Unprocessable Entity (HTTP 422)`, which cannot tell a rejected
+          # commit_id from an over-long body. Stdout carries the sentence that can - checked
+          # against gh 2.98.0: `{"errors":["The commitOID is not part of the pull request"]}`.
+          #
+          # `refused` is set HERE and read by "Report a failed review", rather than that step
+          # inferring it from `-s "$POST_LOG"`. Since the redirect above is unconditional, a file
+          # with bytes in it means "the POST wrote something", not "the POST was refused" - and
+          # the two come apart exactly when it matters: a cancel or a timeout between the call
+          # and the truncation, or a gh failure after GitHub had already created the review,
+          # would have the PR say it was refused with the review sitting on it. An output written
+          # on the failing path itself cannot drift from the path it describes.
+          # Built first rather than piped in, so that `refused` means the POST was refused and
+          # nothing else. Wrapping the whole pipeline in `if !` put a jq failure - an unwritable
+          # $BODY_FILE.pinned, a full disk - on the same branch as a 422, and the PR would have
+          # said "GitHub refused to post it" about a request GitHub never saw. Near-unreachable
+          # given the empty-body guard above, and still the exact fault this workflow is being
+          # fixed for: a notice asserting something that did not happen.
+          #
+          # `set -e` covers the build: if it fails the step dies here, before the output is
+          # written, and the reporter takes its generic branch.
+          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
+            '{commit_id: $c, event: $e, body: $b}' > "$PAYLOAD"
+
+          if ! gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input "$PAYLOAD" \
+                 > "$POST_LOG" 2>&1; then
+            cat "$POST_LOG" >&2
+            echo "refused=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # Which SHA the review was pinned to is the one fact this whole mechanism exists to
+          # establish, and without this the run log does not carry it. One line rather than the
+          # created review's full JSON, which repeats the body verbatim; `cat` is the fallback
+          # if the response is not the shape expected.
+          jq -r '"Posted review \(.id), pinned to \(.commit_id)."' < "$POST_LOG" || cat "$POST_LOG"
+          : > "$POST_LOG"
 
       # Merge discipline. Only on a clean pass, and only with every guard met.
       #
@@ -909,8 +972,10 @@ jobs:
           SHA: ${{ needs.resolve.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SUBMITTED: ${{ steps.submit.outcome }}
+          REFUSED: ${{ steps.submit.outputs.refused }}
           MERGED: ${{ steps.merge.outcome }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
+          POST_LOG: ${{ runner.temp }}/review-post-error.txt
         run: |
           set -euo pipefail
           state=$(gh pr view "$PR" --json state --jq .state)
@@ -940,9 +1005,36 @@ jobs:
           # It falls through to the last branch instead, which says the PR is in the state the
           # review left it - exactly right when merging was never on the table.
           if [ "$SUBMITTED" != "success" ]; then
-            marker="<!-- review-failed:${SHA} -->"
-            body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
-              "${SHA:0:7}" "$RUN_URL")
+            # "Re-running CI on this commit will try again" is wrong for one ordinary way this
+            # branch is reached: a force-push between resolve and submit takes the reviewed
+            # commit off the PR, and the pinned POST then 422s on a commit_id GitHub cannot
+            # find. Retrying that commit cannot succeed.
+            #
+            # Which refusal it was is NOT reconstructed. Every way of asking after the fact
+            # answers a slightly different question - /pulls/{n}/commits caps at 250 whatever
+            # --paginate says, /commits/{sha} still returns 200 for a commit force-pushed off a
+            # branch, and either can fail for reasons of its own, which is a third case to tell
+            # apart from the two that matter. The refusal itself is already in hand, so it is
+            # quoted, and the reader gets the real reason rather than this job's guess at it.
+            #
+            # A marker of its own, NOT review-failed:. The two branches say the same thing about
+            # the review and opposite things about the remedy, so sharing one would let whichever
+            # fired first on this SHA silence the other - a generic failure deduping away the
+            # accurate 422 note that follows it, leaving the PR telling the reader to re-run CI on
+            # a commit that is no longer on it - the same shape the else branch below is about,
+            # one level down.
+            if [ "$REFUSED" = "true" ]; then
+              marker="<!-- review-refused:${SHA} -->"
+              # head, not tail. Under `2>&1` the informative JSON body lands FIRST and the
+              # one-line `gh: ... (HTTP 422)` summary last, so tail keeps the half that says
+              # nothing. Verified against gh 2.98.0.
+              body=$(printf 'The automatic review of `%s` was written, but GitHub refused to post it ([log](%s)). Nothing was posted to this PR and nothing was merged - the verdict itself is in that run'"'"'s `agent-diagnostics-review-%s` artifact.\n\nIf that commit was force-pushed away while the review was running, there is nothing to retry on it - a review would have to come from the current head. This run will not retry by itself either way.\n\n```\n%s\n```' \
+                "${SHA:0:7}" "$RUN_URL" "$PR" "$(head -c 500 "$POST_LOG")")
+            else
+              marker="<!-- review-failed:${SHA} -->"
+              body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
+                "${SHA:0:7}" "$RUN_URL")
+            fi
           elif [ -s "$MERGE_LOG" ]; then
             marker="<!-- merge-failed:${SHA} -->"
             body=$(printf 'The review of `%s` was submitted and is on this PR. The **merge** was attempted and failed ([log](%s)), so this PR is reviewed but unmerged - it needs merging by hand, or another run once the cause is gone.\n\n```\n%s\n```' \
