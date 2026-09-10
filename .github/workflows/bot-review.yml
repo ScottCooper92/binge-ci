@@ -592,6 +592,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.number }}
+          REVIEWED_SHA: ${{ needs.resolve.outputs.sha }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
           BODY_FILE: ${{ runner.temp }}/review-body.md
         run: |
@@ -614,10 +615,29 @@ jobs:
           fi
 
           case "$verdict" in
-            approve)         gh pr review "$PR" --approve --body-file "$BODY_FILE" ;;
-            request_changes) gh pr review "$PR" --request-changes --body-file "$BODY_FILE" ;;
+            approve)         event=APPROVE ;;
+            request_changes) event=REQUEST_CHANGES ;;
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
+
+          # Pinned to the commit that was actually read, which is why this is the REST
+          # endpoint and not `gh pr review`. That command sends no commit_id, so GitHub
+          # stamps the review against whatever the head is NOW - and a review takes
+          # minutes while the author bots push whenever CI or a reviewer asks them to.
+          #
+          # Binge#2434 is the worked example: the run woken by CI on 0573040e resolved
+          # that head at 15:15:19, a74f4467 landed at 15:15:26, and the verdict posted at
+          # 15:21:38 carried a74f4467 - a tree it never checked out. Its own run then
+          # reviewed it properly, so the PR showed two CHANGES_REQUESTED against one
+          # commit, one of them an account of a different commit.
+          #
+          # Nothing merged wrongly - "Merge if the bar is met" holds on head-moved - so
+          # what this costs is the PR's account of itself, which is the whole output.
+          # Posting against the older SHA is honest and self-describing: GitHub marks the
+          # review outdated, which is exactly what it is.
+          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE" \
+            '{commit_id: $c, event: $e, body: $b}' \
+            | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - >/dev/null
 
       # Merge discipline. Only on a clean pass, and only with every guard met.
       #
