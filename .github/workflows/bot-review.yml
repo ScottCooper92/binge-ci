@@ -595,6 +595,7 @@ jobs:
           REVIEWED_SHA: ${{ needs.resolve.outputs.sha }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
           BODY_FILE: ${{ runner.temp }}/review-body.md
+          POST_LOG: ${{ runner.temp }}/review-post-error.txt
         run: |
           set -euo pipefail
           # The concurrency group above serialises a duplicate trigger rather
@@ -644,9 +645,18 @@ jobs:
           # Nothing merged wrongly in #2434 - "Merge if the bar is met" holds on head-moved.
           # What it cost was the PR's account of itself, which is this workflow's whole output.
           printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}" | cat - "$BODY_FILE" > "$BODY_FILE.pinned"
-          jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
-            '{commit_id: $c, event: $e, body: $b}' \
-            | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - >/dev/null
+
+          # The API's refusal is kept, on the same reasoning as $MERGE_LOG below: this file is
+          # written immediately before the POST and nowhere else, so its presence is exactly
+          # "the review was written and GitHub would not take it". "Report a failed review"
+          # quotes it rather than reconstructing what the refusal was.
+          if ! jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
+                 '{commit_id: $c, event: $e, body: $b}' \
+               | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - \
+                 >/dev/null 2>"$POST_LOG"; then
+            cat "$POST_LOG" >&2
+            exit 1
+          fi
 
       # Merge discipline. Only on a clean pass, and only with every guard met.
       #
@@ -913,6 +923,7 @@ jobs:
           SUBMITTED: ${{ steps.submit.outcome }}
           MERGED: ${{ steps.merge.outcome }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
+          POST_LOG: ${{ runner.temp }}/review-post-error.txt
         run: |
           set -euo pipefail
           state=$(gh pr view "$PR" --json state --jq .state)
@@ -943,20 +954,20 @@ jobs:
           # review left it - exactly right when merging was never on the table.
           if [ "$SUBMITTED" != "success" ]; then
             marker="<!-- review-failed:${SHA} -->"
-            # "Re-running CI on this commit" is the wrong advice for one ordinary way this
+            # "Re-running CI on this commit will try again" is wrong for one ordinary way this
             # branch is reached: a force-push between resolve and submit takes the reviewed
-            # commit off the PR, and the pinned review POST then 422s on a commit_id GitHub
-            # cannot find. Telling the reader to retry a commit that no longer exists sends
-            # them after something that cannot succeed.
+            # commit off the PR, and the pinned POST then 422s on a commit_id GitHub cannot
+            # find. Retrying that commit cannot succeed.
             #
-            # A lookup failure falls through to the generic wording rather than the specific
-            # one - being vague about the remedy is recoverable, asserting the commit is gone
-            # when the API merely hiccuped is not.
-            on_pr=$(gh api "repos/${GH_REPO}/pulls/${PR}/commits?per_page=100" --paginate \
-              --jq '.[].sha' 2>/dev/null | grep -cFx "$SHA" || true)
-            if [ "${on_pr:-1}" = "0" ]; then
-              body=$(printf 'The automatic review of `%s` did not complete ([log](%s)), and that commit is no longer on this PR - it was force-pushed away while the review was running. Nothing was reviewed and nothing was merged. There is nothing to retry on `%s`; the current head gets its own review when its CI reports.' \
-                "${SHA:0:7}" "$RUN_URL" "${SHA:0:7}")
+            # Which refusal it was is NOT reconstructed. Every way of asking after the fact
+            # answers a slightly different question - /pulls/{n}/commits caps at 250 whatever
+            # --paginate says, /commits/{sha} still returns 200 for a commit force-pushed off a
+            # branch, and either can fail for reasons of its own, which is a third case to tell
+            # apart from the two that matter. The refusal itself is already in hand, so it is
+            # quoted, and the reader gets the real reason rather than this job's guess at it.
+            if [ -s "$POST_LOG" ]; then
+              body=$(printf 'The automatic review of `%s` was written, but GitHub refused to post it ([log](%s)). Nothing was reviewed and nothing was merged.\n\nIf that commit was force-pushed away while the review was running, there is nothing to retry on it - a review would have to come from the current head. This run will not retry by itself either way.\n\n```\n%s\n```' \
+                "${SHA:0:7}" "$RUN_URL" "$(tail -c 500 "$POST_LOG")")
             else
               body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
                 "${SHA:0:7}" "$RUN_URL")
