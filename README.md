@@ -73,7 +73,7 @@ opts *out*. A repo that forgets to configure something gets the safe behaviour.
 
 | Input | Default | Why |
 | --- | --- | --- |
-| `runner` | `["ubuntu-latest"]` | Ephemeral, so the `agent` label means code execution on a throwaway VM. |
+| `runner` | `["ubuntu-latest"]` | Ephemeral, so the `agent` label means code execution on a throwaway VM. Self-hosted needs `git`, `gh` and `jq` on PATH. |
 | `auto_merge` | `false` | Bot merging should be a decision a caller made, not one it inherited. |
 | `show_full_output` | `false` | The agent's log stream carries what it read and ran; public logs are world-readable. |
 | `default_branch` | `main` | Binge is the only `master`. |
