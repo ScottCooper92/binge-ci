@@ -650,13 +650,22 @@ jobs:
           # written immediately before the POST and nowhere else, so its presence is exactly
           # "the review was written and GitHub would not take it". "Report a failed review"
           # quotes it rather than reconstructing what the refusal was.
+          # BOTH streams, which is the whole point and easy to get wrong: on a non-2xx `gh api`
+          # puts the JSON error body on STDOUT and only a summary line on stderr. Keeping stderr
+          # alone yields `gh: Unprocessable Entity (HTTP 422)`, which cannot tell a rejected
+          # commit_id from an over-long body. Stdout carries the sentence that can - checked
+          # against gh 2.98.0: `{"errors":["The commitOID is not part of the pull request"]}`.
+          #
+          # Truncated on success, so `-s "$POST_LOG"` stays exactly "the POST was refused"
+          # rather than being true of the created review's JSON as well. Same as $MERGE_LOG.
           if ! jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
                  '{commit_id: $c, event: $e, body: $b}' \
                | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - \
-                 >/dev/null 2>"$POST_LOG"; then
+                 > "$POST_LOG" 2>&1; then
             cat "$POST_LOG" >&2
             exit 1
           fi
+          : > "$POST_LOG"
 
       # Merge discipline. Only on a clean pass, and only with every guard met.
       #
@@ -953,7 +962,6 @@ jobs:
           # It falls through to the last branch instead, which says the PR is in the state the
           # review left it - exactly right when merging was never on the table.
           if [ "$SUBMITTED" != "success" ]; then
-            marker="<!-- review-failed:${SHA} -->"
             # "Re-running CI on this commit will try again" is wrong for one ordinary way this
             # branch is reached: a force-push between resolve and submit takes the reviewed
             # commit off the PR, and the pinned POST then 422s on a commit_id GitHub cannot
@@ -965,10 +973,19 @@ jobs:
             # branch, and either can fail for reasons of its own, which is a third case to tell
             # apart from the two that matter. The refusal itself is already in hand, so it is
             # quoted, and the reader gets the real reason rather than this job's guess at it.
+            #
+            # A marker of its own, NOT review-failed:. The two branches say the same thing about
+            # the review and opposite things about the remedy, so sharing one would let whichever
+            # fired first on this SHA silence the other - a generic failure deduping away the
+            # accurate 422 note that follows it, leaving the PR telling the reader to re-run CI on
+            # a commit that is no longer on it. The #2052 shape the else branch below is about,
+            # one level down.
             if [ -s "$POST_LOG" ]; then
+              marker="<!-- review-refused:${SHA} -->"
               body=$(printf 'The automatic review of `%s` was written, but GitHub refused to post it ([log](%s)). Nothing was reviewed and nothing was merged.\n\nIf that commit was force-pushed away while the review was running, there is nothing to retry on it - a review would have to come from the current head. This run will not retry by itself either way.\n\n```\n%s\n```' \
                 "${SHA:0:7}" "$RUN_URL" "$(tail -c 500 "$POST_LOG")")
             else
+              marker="<!-- review-failed:${SHA} -->"
               body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
                 "${SHA:0:7}" "$RUN_URL")
             fi
