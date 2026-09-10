@@ -1,35 +1,25 @@
 name: Author - resolve merge conflicts
 
-# There is no GitHub event for "this PR became conflicted". Mergeability is
-# computed lazily and asynchronously: GET /pulls/{n} returns mergeable=null
-# while a background job runs, so a single call right after a push tells you
-# nothing. Hence: trigger on the thing that CAUSES conflicts (the base moving),
+# There is no GitHub event for "this PR became conflicted". Mergeability is computed
+# lazily: GET /pulls/{n} returns mergeable=null while a background job runs, so a single
+# call after a push tells you nothing. Trigger on what CAUSES conflicts - the base moving -
 # then poll each open PR until the answer settles.
 #
-# That trigger is CI completing on the default branch, NOT the push itself,
-# because claude-code-action rejects a push outright - "Unsupported event type:
-# push". Its supported set is issue_comment, pull_request(_target), the two
-# review events, workflow_dispatch, repository_dispatch, schedule and
-# workflow_run, so this is the same door bot-review.yml and author-ci-fix.yml
-# already come through. Two consequences worth knowing: the scan trails a merge
-# by one CI run, and a commit CI does not run on raises no scan at all -
-# workflow_dispatch is the way in for that case.
+# The trigger is CI completing on the default branch, NOT the push, because
+# claude-code-action rejects a push outright ("Unsupported event type: push"). Two
+# consequences: the scan trails a merge by one CI run, and a commit CI does not run on
+# raises no scan at all - workflow_dispatch is the way in for that.
 #
-# The CI conclusion is deliberately NOT required to be success: the base has
-# moved either way, and a PR conflicts with it regardless of whether its build
-# went green.
+# The CI conclusion is deliberately not required to be success: the base has moved either
+# way, and a PR conflicts with it regardless of whether its build went green.
 #
-# Reusable. The caller owns the triggers and must forward `dispatched`, because a
-# reusable workflow cannot declare a trigger of its own and `github.event_name`
-# inside a called workflow reports the CALLER's event.
+# The caller must forward `dispatched`: `github.event_name` inside a called workflow
+# reports the CALLER's event.
 #
-# TRUST BOUNDARY. The resolve job checks out PR code and runs an agent with Bash,
-# Edit and Write plus a contents:write app token. The `agent` label is what admits
-# a PR to it, so the label is maintainers-only: applying it grants code execution
-# with that repository's secrets in scope. Fork PRs are filtered out of the scan -
-# on a PUBLIC caller that filter is the control, not a formality. `runner` defaults
-# to an ephemeral hosted VM; a caller pointing it at a persistent self-hosted
-# runner is making the label a sharper grant.
+# TRUST BOUNDARY. The resolve job checks out PR code and runs an agent with Bash, Edit and
+# Write plus a contents:write app token. The `agent` label is what admits a PR, so that
+# label is maintainers-only. Fork PRs are filtered out of the scan - on a PUBLIC caller
+# that filter is the control, not a formality.
 on:
   workflow_call:
     inputs:
@@ -145,15 +135,14 @@ env:
 
 jobs:
   find-conflicted:
-    # CI runs on pull_request too, and a PR's build finishing says nothing about
-    # the base having moved - without this every PR build in the repo would kick
-    # off a full mergeability scan.
+    # CI runs on pull_request too, and a PR's own build finishing says nothing about the base
+    # having moved.
     if: >
       inputs.dispatched ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == inputs.default_branch)
-    # A timeout here loses the WHOLE scan, so the scan below carries its own deadline and
-    # stops early rather than letting this one fire. See scan_deadline_minutes.
+    # A timeout here loses the WHOLE scan, so the scan carries its own deadline and stops early
+    # rather than letting this one fire.
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.scan_timeout_minutes }}
     outputs:
@@ -177,9 +166,15 @@ jobs:
         run: |
           set -euo pipefail
           conflicted="[]"
-          # A partial scan is strictly better than the none a timeout would produce: the PRs
-          # found so far still get their resolve jobs, and the ones not reached are picked up
-          # by the next push to the base, which is the same cadence they would have had anyway.
+          # A partial scan beats the none a timeout would produce: PRs found so far still get their
+          # resolve jobs, and the rest are picked up by the next push to the base.
+          #
+          # --base is load-bearing. For a stacked PR, dirty means it conflicts with its OWN base, and
+          # the resolve job only knows how to merge the default branch - which would drag unrelated
+          # commits into the diff without touching the conflict that was reported.
+          #
+          # Drafts are staging; their conflicts are resolved on the first push to the base after they
+          # are marked ready.
           deadline=$(( SECONDS + DEADLINE_MINUTES * 60 ))
           # --base is load-bearing, not a tidy-up. For a stacked PR, dirty means it conflicts
           # with its OWN base, and the resolve job below only knows how to merge the default
@@ -198,9 +193,8 @@ jobs:
               echo "::warning::Conflict scan hit its ${DEADLINE_MINUTES}-minute deadline before reaching PR #$pr; the rest of the queue is left for the next push to $DEFAULT_BRANCH."
               break
             fi
-            # mergeable is null while GitHub computes it - poll until it settles.
-            # Take both fields off one call, on separate lines: @tsv renders a
-            # null as an empty field, which would shift the columns.
+            # mergeable is null while GitHub computes it - poll until it settles. Both fields off one
+            # call but on separate lines: @tsv renders a null as an empty field and shifts the columns.
             state=""
             for _ in 1 2 3 4 5 6; do
               info=$(gh api "repos/${GH_REPO}/pulls/${pr}" \
@@ -224,9 +218,8 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     strategy:
-      # One PR's failure must not cancel the queue. max-parallel: 1 runs them
-      # strictly in sequence, so with the default fail-fast a single unlucky PR
-      # early in the list silently skips every conflicted PR behind it.
+      # One PR's failure must not cancel the queue. With max-parallel: 1 and the default
+      # fail-fast, one unlucky PR early in the list silently skips every conflicted PR behind it.
       fail-fast: false
       max-parallel: 1
       matrix:
@@ -254,8 +247,8 @@ jobs:
           [ -n "${AUTHOR_BOT_ID:-}" ] \
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
-          # An empty name here would send the checkout to the default branch, and
-          # every step after it would merge the base onto the base and report success.
+          # An empty name would send the checkout to the default branch, and every step after it
+          # would merge the base onto the base and report success.
           IFS=$'\037' read -r name sha < <(gh pr view ${{ matrix.pr }} \
             --json headRefName,headRefOid --jq '[.headRefName, .headRefOid] | join("\u001f")')
           [ -n "$name" ] || { echo "::error::No head branch for #${{ matrix.pr }}."; exit 1; }
@@ -288,17 +281,15 @@ jobs:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
           set -uo pipefail
-          # Only the clean-merge path below relies on this; once the agent step
-          # runs, configureGitAuth overwrites both values from the bot_name and
-          # bot_id passed to the action.
+          # Only the clean-merge path relies on this; once the agent step runs, configureGitAuth
+          # overwrites both values.
           git config user.name "$AUTHOR_BOT"
           git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
-          # The branch tip before any merging, so the next step can diff the
-          # resolution against it whether or not the agent committed the merge.
+          # The branch tip before any merging, so the next step can diff the resolution against it
+          # whether or not the agent committed the merge.
           echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # -e is deliberately off here (the merge below is expected to fail),
-          # so the fetch needs its own guard: unnoticed, it would merge a stale
-          # origin ref and report success.
+          # -e is off here (the merge is expected to fail), so the fetch needs its own guard:
+          # unnoticed, it would merge a stale origin ref and report success.
           git fetch origin "$DEFAULT_BRANCH" \
             || { echo "::error::Could not fetch origin/$DEFAULT_BRANCH."; exit 1; }
           if git merge "origin/$DEFAULT_BRANCH" --no-edit; then
@@ -310,39 +301,29 @@ jobs:
               exit 1
             fi
           else
-            # The conflicted branch only. The clean arm above has already pushed by here, so an
-            # `exit 1` below it would red the job for a PR that was in fact resolved and landed.
+            # The conflicted branch only: the clean arm has already pushed, so an `exit 1` below it
+            # would red the job for a PR that was in fact resolved and landed.
             #
-            # A CONFLICT in a path that governs the agents is not one the agent can be asked to
-            # resolve. claude-code-action rewrites .claude, CLAUDE.md and friends to the default
-            # branch's copy in the working tree before it starts, because the PR head is
-            # untrusted - and here it lands on top of a conflicted file. The markers vanish and
-            # the agent is shown the base's side as though it were already resolved, so
-            # `git add`ing it silently drops this PR's side. The marker scan in "Commit or bail
-            # out" cannot catch that: the resolution IS clean, it is just the wrong side of a
-            # choice nobody made. Binge#2041.
+            # A CONFLICT in a governed path is not one the agent can be asked to resolve.
+            # claude-code-action rewrites those paths to the base's copy in the working tree before it
+            # starts, landing on top of a conflicted file: the markers vanish and the agent is shown the
+            # base's side as though already resolved, so `git add` silently drops this PR's side. The
+            # marker scan in "Commit or bail out" cannot catch it - the resolution IS clean, just the
+            # wrong side of a choice nobody made.
             #
-            # Same call this job already makes on an unarbitrable conflict - hand it back rather
-            # than guess. Two reasons it is read HERE and not later: the rewrite stages the file
-            # and clears its unmerged state, so after the agent there is nothing left to detect;
-            # and resolving the rest is wasted anyway, since one unmerged path left behind sends
-            # "Commit or bail out" down its abort path regardless.
+            # Read HERE and not later for two reasons: the rewrite stages the file and clears its
+            # unmerged state, so afterwards there is nothing left to detect; and resolving the rest is
+            # wasted anyway, since one unmerged path sends "Commit or bail out" down its abort path.
             #
-            # The list comes from the governed-paths action, which ships with THIS repository
-            # rather than the caller's - so the PR head sitting conflicted in the working tree
-            # cannot narrow the guard that is about to refuse it. One definition for every
-            # consuming repo, which is Binge#2050's point carried across repositories.
-            #
-            # Not `mapfile < <(bash ...)`: process substitution discards the exit status, so a
-            # script that failed would read as a script that named nothing.
+            # Not `mapfile < <(bash ...)`: process substitution discards the exit status, so a script
+            # that failed would read as a script that named nothing.
             out=$(bash "$GOVERNED_SCRIPT" --list) \
               || { echo "::error::restore-agent-governed-paths.sh --list failed."; exit 1; }
             mapfile -t governed_paths <<<"$out"
 
-            # The status is not enough on its own: a script that printed prose on stdout would
-            # give junk "paths" that pass a count check, match no pathspec, and hand a conflicted
-            # CLAUDE.md to the agent with no refusal. So the shape is checked, not just the
-            # length: every governed path is a bare path, and prose is not.
+            # The status alone is not enough: a script printing prose on stdout would give junk "paths"
+            # that pass a count check, match no pathspec, and hand a conflicted CLAUDE.md to the agent.
+            # So the shape is checked, not just the length.
             [ ${#governed_paths[@]} -gt 0 ] \
               || { echo "::error::No governed paths were named - refusing to run without the guard."; exit 1; }
             for path in "${governed_paths[@]}"; do
@@ -361,8 +342,8 @@ jobs:
             if [ -n "$governed" ]; then
               echo "::notice::Conflict in a path that governs the agents ($governed) - not resolving."
               echo "governed=true" >> "$GITHUB_OUTPUT"
-              # "Commit or bail out" reads this and posts it under the conflict-bailed marker, so
-              # the refusal reaches the PR in the same shape as the agent's own.
+              # Read by "Commit or bail out" and posted under the conflict-bailed marker, so the refusal
+              # reaches the PR in the same shape as the agent's own.
               {
                 printf 'The conflict is in%s, which governs the agents, so I have left the whole merge alone.\n\n' \
                   "$(printf ' `%s`,' $governed | sed 's/,$//')"
@@ -374,15 +355,12 @@ jobs:
               exit 0
             fi
 
-            # Past the refusal, every governed path merged CLEANLY, so what is in the working
-            # tree right now is the merge's own result for it - the thing that should be
-            # committed. The agent never gets to see that: claude-code-action overwrites these
-            # paths with the base's copy before it starts, and stages them, so neither the tree
-            # nor the index still holds it by the time "Commit or bail out" runs. Binge#2073.
+            # Past the refusal, every governed path merged CLEANLY, so the working tree holds the
+            # merge's own result for it - the thing that should be committed. The agent never sees it:
+            # claude-code-action overwrites and stages those paths before it starts.
             #
-            # Reconstructing it afterwards is not possible from either side alone - a path both
-            # sides touched merged into something that is neither - so it is copied aside here
-            # instead, while it still exists.
+            # It cannot be reconstructed afterwards from either side alone - a path both sides touched
+            # merged into something that is neither - so it is copied aside here, while it still exists.
             snapshot="${{ runner.temp }}/governed-snapshot"
             rm -rf "$snapshot"
             mkdir -p "$snapshot"
@@ -397,45 +375,31 @@ jobs:
 
       - name: Resolve with Claude
         if: steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
-        # A bound of its own, BELOW the job's. Without it the agent runs until timeout-minutes
-        # cancels the whole job, and cancellation skips every ordinary step after it -
-        # Binge#2009 died that way and its "Push and reply" shows completed/skipped, so nothing
-        # was pushed and nothing was said.
+        # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
+        # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
+        # the job alive, so the reporter, the diagnostics upload and the push all still run.
         #
-        # A step timeout instead FAILS the step and leaves the job alive, so everything below
-        # gets its ordinary budget: the reporter comments, the diagnostics upload, and the push
-        # of whatever the agent had finished.
-        #
-        # This is a step key, NOT a `with:` input. Binge#2011 wrote it under `with:`, where it
-        # is silently dropped - claude-code-action declares no timeout input, and a composite
-        # action ignores what it does not declare.
+        # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
+        # composite action silently drops what it does not declare.
         timeout-minutes: ${{ inputs.agent_timeout_minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # See the `show_full_output` input. Without it the SDK stream is suppressed and the
-          # step logs an init line, then nothing until it ends - so a run that dies is
-          # undiagnosable after the fact, and this is the only trace that outlives the job.
+          # See `show_full_output`. Without it the SDK stream is suppressed and a run that dies is
+          # undiagnosable - this log is the only trace that outlives the job.
           show_full_output: ${{ inputs.show_full_output }}
-          # Without a token of its own the action mints one by exchanging a GitHub OIDC token,
-          # which needs `id-token: write` - a broader grant than anything else in these
-          # workflows, in a job that executes agent code. Hand it the app token this job already
-          # minted: setupGitHubToken returns an overridden token before it reaches the OIDC path.
+          # Without a token of its own the action mints one via GitHub OIDC, needing `id-token:
+          # write` - a broader grant than anything else here, in a job that executes agent code.
           github_token: ${{ steps.token.outputs.token }}
           allowed_bots: ${{ inputs.reviewer_bot }}
-          # configureGitAuth rewrites user.name/user.email when the agent starts,
-          # defaulting to claude[bot]. Setting them here rather than after the
-          # fact covers BOTH ways this merge can be committed - by the agent
-          # itself, or by "Commit or bail out" below - where a re-set afterwards
-          # only ever covers the second.
+          # configureGitAuth rewrites these when the agent starts, defaulting to claude[bot]. Set
+          # here rather than after, so it covers BOTH ways this merge can be committed - by the agent
+          # itself, or by "Commit or bail out" - where a re-set afterwards covers only the second.
           bot_name: ${{ inputs.author_bot }}
           bot_id: ${{ inputs.author_bot_id }}
-          # --disallowedTools "Task,Agent", ported from bot-review.yml. The whitelist already
-          # omits the subagent tool, and Binge#2251 is the evidence that omitting it does not
-          # stop it being used: that run started a background `general-purpose` agent and ended
-          # its turn to wait for one. The whitelist gates what may run unprompted, not what
-          # exists. Both names it has shipped under, because an unmatched entry is inert and a
-          # missed one is the failure again.
+          # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent tool
+          # does not stop an agent starting one. Both names it has shipped under, since an unmatched
+          # entry is inert and a missed one is the failure again.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
@@ -488,14 +452,14 @@ jobs:
             git merge --abort || true
             note=$(cat "${{ runner.temp }}/note.md" 2>/dev/null || echo "Conflicts were too ambiguous to resolve safely.")
 
-            # Declining is a correct outcome, so the job stays green - but then a run that left
-            # the PR conflicted looks exactly like one that resolved it. These two carry the
-            # difference: a status script reads the marker below, a human reads the notice.
+            # Declining is a correct outcome, so the job stays green - but then a run that left the PR
+            # conflicted looks like one that resolved it. A status script reads the marker, a human
+            # reads the notice.
             echo "bailed=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Declined to resolve the conflicts on #${{ matrix.pr }} - the branch is untouched and needs a human."
 
-            # Deduped on the PR head, not on the note: the note varies with the conflict, and
-            # hashing it would mint a fresh marker for the same refusal on every push to the base.
+            # Deduped on the PR head, not the note: the note varies with the conflict, so hashing it
+            # would mint a fresh marker for the same refusal on every push to the base.
             marker="<!-- conflict-bailed:${SHA} -->"
             comments=$(gh api "repos/${GH_REPO}/issues/${{ matrix.pr }}/comments?per_page=100" \
               --paginate --jq '.[].body')
@@ -509,32 +473,28 @@ jobs:
             exit 0
           fi
 
-          # Undo claude-code-action's rewrite of the governed paths, back to what the merge
-          # itself produced, before any of this commits them. Without it this job lands the
-          # base's copy of CLAUDE.md in the merge commit as though the agent had resolved it
-          # that way, and reports a clean automatic resolution - Binge#2029, in the third author
-          # bot (#2073).
+          # Undo claude-code-action's rewrite of the governed paths, back to what the merge itself
+          # produced, before any of this commits them. Without it the base's copy of CLAUDE.md lands
+          # in the merge commit as though the agent had resolved it that way.
           #
-          # This is why author-ci-fix and author-comments cannot simply share their restore
-          # step: theirs restores to `origin/$BRANCH`, which is right when the commit is a
-          # working-tree change on top of the PR head. Here the commit is a MERGE, and the right
-          # content is the merge's own result - the PR's side only when the base left the path
-          # alone. Hence the snapshot taken in "Start the merge".
+          # This is why author-ci-fix and author-comments cannot share their restore step: theirs
+          # restores to `origin/$BRANCH`, right when the commit is a working-tree change on top of the
+          # PR head. Here the commit is a MERGE, and the right content is the merge's own result -
+          # the PR's side only when the base left the path alone. Hence the snapshot above.
           governed_restored=""
           snapshot="${{ runner.temp }}/governed-snapshot"
           if [ -f "$snapshot/.paths" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] || continue
               if [ -e "$snapshot/$path" ]; then
-                # Against the SNAPSHOT, not the index. The action stages its rewrite, so
-                # `git diff -- $path` compares two copies of the base's version and reports no
-                # change - which is what a first cut of this did, and it restored nothing at all.
+                # Against the SNAPSHOT, not the index. The action stages its rewrite, so `git diff -- $path`
+                # compares two copies of the base's version and reports no change.
                 diff -rq "$snapshot/$path" "$path" >/dev/null 2>&1 && continue
                 rm -rf "${path:?}"
                 cp -a "$snapshot/$path" "$path" || { echo "::error::Could not restore $path."; exit 1; }
               elif [ -e "$path" ]; then
-                # The merge produced no such path and one exists now: the action recreated
-                # something this PR had deleted.
+                # The merge produced no such path and one exists now: the action recreated something this
+                # PR had deleted.
                 rm -rf "${path:?}"
               else
                 continue
@@ -549,9 +509,8 @@ jobs:
           fi
           [ -n "$governed_restored" ] && echo "::notice::Restored governed paths to the merge's own result:$governed_restored"
 
-          # No unmerged paths is not proof of a resolution: the agent may have
-          # committed the merge itself, or aborted it. Both leave the index clean,
-          # and only one of them has anything to push.
+          # No unmerged paths is not proof of a resolution: the agent may have committed the merge
+          # itself, or aborted it. Both leave the index clean, and only one has anything to push.
           if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
             if ! git commit --no-edit; then
               echo "::error::A merge is in progress but there is nothing staged to commit."
@@ -559,23 +518,20 @@ jobs:
               exit 1
             fi
           elif [ -n "$(git diff --cached --name-only)" ]; then
-            # The agent committed the merge itself, so the rewrite is already in that commit and
-            # the restore above is staged on top of it. Amended rather than added as a second
-            # commit: this job's contract is one merge commit, and --amend keeps both parents.
+            # The agent committed the merge itself, so the restore is staged on top of that commit.
+            # Amended rather than added: this job's contract is one merge commit, and --amend keeps
+            # both parents.
             git commit --amend --no-edit \
               || { echo "::error::Could not amend the agent's merge commit with the governed-path restore."; exit 1; }
           fi
 
-          # `git ls-files -u` catches only files left UNMERGED. One the agent
-          # staged - or committed - with the markers still in the body reads as
-          # perfectly resolved; in compiled code that surfaces as a CI failure,
-          # but for the .md, .xml and allowlist files these conflicts most often
-          # touch, nothing downstream would catch it. Diffed from the pre-merge
-          # tip rather than --cached, so it covers the agent-committed path
-          # above too. Not a pipeline into grep -q: that would SIGPIPE git diff,
-          # and pipefail would read the 141 as "no markers found". ======= is
-          # deliberately out of the pattern - it is ordinary markdown, and no
-          # real conflict lacks the other two.
+          # `git ls-files -u` catches only files left UNMERGED. One the agent staged - or committed -
+          # with the markers still in the body reads as perfectly resolved, and for the .md, .xml and
+          # allowlist files these conflicts most often touch, nothing downstream would catch it.
+          # Diffed from the pre-merge tip rather than --cached, so it covers the agent-committed path
+          # too. Not a pipeline into grep -q: that would SIGPIPE git diff, and pipefail would read the
+          # 141 as "no markers found". ======= is deliberately out of the pattern - it is ordinary
+          # markdown, and no real conflict lacks the other two.
           merged=$(git diff -U0 "$BEFORE" HEAD)
           if grep -qE '^\+(<{7}|>{7}|\|{7})' <<<"$merged"; then
             echo "::error::Conflict markers left in the resolution."
@@ -584,20 +540,17 @@ jobs:
             exit 0
           fi
 
-          # Same as the fetch in the previous step: -e is off, and an unnoticed
-          # failure here would compare HEAD against a stale FETCH_HEAD.
+          # As with the earlier fetch: -e is off, and an unnoticed failure would compare HEAD against
+          # a stale FETCH_HEAD.
           git fetch origin "$BRANCH" || { echo "::error::Could not fetch origin/$BRANCH."; exit 1; }
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ]; then
             gh pr comment ${{ matrix.pr }} --body "Tried to merge \`$DEFAULT_BRANCH\` into this PR but came away with nothing to push, so it is still conflicted. Over to you."
             exit 0
           fi
 
-          # The checkout predates the agent run, so the branch can have moved
-          # under us - a human, or the ci-fix bot. Letting the rejection stand
-          # would throw the resolution away and say NOTHING on the PR, which
-          # reads from the outside as the conflict simply never being handled.
-          # Merging the new tip in is the retry: a rebase would replay the merge
-          # commit this step exists to create.
+          # The branch can have moved under us. Letting the rejection stand would throw the resolution
+          # away and say NOTHING on the PR. Merging the new tip in is the retry; a rebase would replay
+          # the merge commit this step exists to create.
           if ! git push; then
             git fetch origin "$BRANCH" || true
             if git merge "origin/$BRANCH" --no-edit && git push; then
@@ -611,8 +564,8 @@ jobs:
           fi
           {
             printf 'Merged `%s` in and resolved the conflicts automatically.\n' "$DEFAULT_BRANCH"
-            # Silence here would be the #2029 failure again: the rewrite reverted, but nothing on
-            # the PR saying the bot had touched those paths at all.
+            # Silence here would be the original failure again: the rewrite reverted, but nothing on the
+            # PR saying the bot had touched those paths at all.
             if [ -n "$governed_restored" ]; then
               printf '\n_Note: %s %s rewritten to `%s`'"'"'s copy before I ran - a PR does not get to change what governs the agent reading it - so I put the merge'"'"'s own result back before committing. Your version of %s is intact._\n' \
                 "$(printf '`%s`,' $governed_restored | sed 's/,$//')" \
@@ -623,12 +576,8 @@ jobs:
           } | gh pr comment ${{ matrix.pr }} --body-file -
 
       # The step log is the only trace of an agent run that outlives its container, and it does
-      # not carry the files the run produced. On this job that is the note explaining an
-      # abandoned resolution, and the half-resolved merge itself. Named per matrix PR, since v4
-      # onwards rejects two uploads sharing a name within one run.
-      #
-      # Only on a run that went wrong: on a good one the pushed merge IS the record, and this
-      # would be storage for nothing.
+      # not carry the files the run produced. Named per matrix PR, since upload-artifact v4
+      # rejects two uploads sharing a name in one run. Only on a run that went wrong.
       - name: Collect diagnostics
         if: always() && job.status != 'success'
         env:
@@ -637,10 +586,8 @@ jobs:
           set -uo pipefail
           mkdir -p "$OUT"
           [ -f "${{ runner.temp }}/note.md" ] && cp "${{ runner.temp }}/note.md" "$OUT/" || true
-          # The whole question a timeout raises is how far the agent got, and the working tree
-          # answers it in one look: the fix written but unpushed reads completely differently
-          # from a tree the agent never touched. Untracked files show as ?? in the status;
-          # gitignored ones are excluded by default.
+          # How far the agent got is what a timeout raises, and the working tree answers it: a fix
+          # written but unpushed reads differently from a tree never touched.
           git status --porcelain > "$OUT/git-status.txt" 2>&1 || true
           { git diff; git diff --cached; } > "$OUT/working-tree.diff" 2>&1 || true
           git log --oneline -5 > "$OUT/git-log.txt" 2>&1 || true
@@ -656,23 +603,18 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      # Every other outcome in this job reports itself on the PR; a failure
-      # before "Commit or bail out" reported nothing at all, and that step is
-      # skipped on failure. Two runs died at the agent step leaving Binge#1954
-      # conflicted with no sign either had tried.
+      # Every other outcome reports itself on the PR; a failure before "Commit or bail out"
+      # reported nothing, and that step is skipped on failure - leaving a PR conflicted with no
+      # sign anything had tried.
       #
-      # always(), not failure(), so a job cancelled by timeout-minutes is caught
-      # too - resolving a large conflict is exactly the kind of thing that runs
-      # long. Deduped on the PR's head sha: a conflict persists across pushes to
-      # the base, and one note per attempt would be one per merge.
+      # always(), not failure(), so a job cancelled by timeout-minutes is caught: resolving a
+      # large conflict runs long. Deduped on the PR's head sha, since a conflict persists across
+      # pushes to the base and one note per attempt would be one per merge.
       #
       # NOT gated on that sha being known. It is looked up by "Look up the branch", so gating on
-      # it made a failure in that step - or in the token mint before it - report nothing at all,
-      # which is the exact silence this step exists to close. The PR number comes from the matrix
-      # and is always available, and the scan already established the PR is open and labelled, so
-      # there is nothing else to establish before speaking. The run id stands in as the dedup key
-      # when there is no sha: per-run rather than per-head is the right granularity for a failure
-      # that happened before the head was even read.
+      # it made a failure there - or in the token mint before it - report nothing at all, which is
+      # the silence this step exists to close. The run id stands in as the dedup key when there is
+      # no sha.
       - name: Report a failed resolution
         if: always() && job.status != 'success'
         env:
