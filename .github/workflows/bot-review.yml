@@ -656,15 +656,27 @@ jobs:
           # commit_id from an over-long body. Stdout carries the sentence that can - checked
           # against gh 2.98.0: `{"errors":["The commitOID is not part of the pull request"]}`.
           #
-          # Truncated on success, so `-s "$POST_LOG"` stays exactly "the POST was refused"
-          # rather than being true of the created review's JSON as well. Same as $MERGE_LOG.
+          # `refused` is set HERE and read by "Report a failed review", rather than that step
+          # inferring it from `-s "$POST_LOG"`. Since the redirect above is unconditional, a file
+          # with bytes in it means "the POST wrote something", not "the POST was refused" - and
+          # the two come apart exactly when it matters: a cancel or a timeout between the call
+          # and the truncation, or a gh failure after GitHub had already created the review,
+          # would have the PR say it was refused with the review sitting on it. An output written
+          # on the failing path itself cannot drift from the path it describes.
           if ! jq -n --arg c "$REVIEWED_SHA" --arg e "$event" --rawfile b "$BODY_FILE.pinned" \
                  '{commit_id: $c, event: $e, body: $b}' \
                | gh api --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input - \
                  > "$POST_LOG" 2>&1; then
             cat "$POST_LOG" >&2
+            echo "refused=true" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+
+          # Which SHA the review was pinned to is the one fact this whole mechanism exists to
+          # establish, and without this the run log does not carry it. One line rather than the
+          # created review's full JSON, which repeats the body verbatim; `cat` is the fallback
+          # if the response is not the shape expected.
+          jq -r '"Posted review \(.id), pinned to \(.commit_id)."' < "$POST_LOG" || cat "$POST_LOG"
           : > "$POST_LOG"
 
       # Merge discipline. Only on a clean pass, and only with every guard met.
@@ -930,6 +942,7 @@ jobs:
           SHA: ${{ needs.resolve.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SUBMITTED: ${{ steps.submit.outcome }}
+          REFUSED: ${{ steps.submit.outputs.refused }}
           MERGED: ${{ steps.merge.outcome }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
@@ -980,10 +993,13 @@ jobs:
             # accurate 422 note that follows it, leaving the PR telling the reader to re-run CI on
             # a commit that is no longer on it. The #2052 shape the else branch below is about,
             # one level down.
-            if [ -s "$POST_LOG" ]; then
+            if [ "$REFUSED" = "true" ]; then
               marker="<!-- review-refused:${SHA} -->"
-              body=$(printf 'The automatic review of `%s` was written, but GitHub refused to post it ([log](%s)). Nothing was reviewed and nothing was merged.\n\nIf that commit was force-pushed away while the review was running, there is nothing to retry on it - a review would have to come from the current head. This run will not retry by itself either way.\n\n```\n%s\n```' \
-                "${SHA:0:7}" "$RUN_URL" "$(tail -c 500 "$POST_LOG")")
+              # head, not tail. Under `2>&1` the informative JSON body lands FIRST and the
+              # one-line `gh: ... (HTTP 422)` summary last, so tail keeps the half that says
+              # nothing. Verified against gh 2.98.0.
+              body=$(printf 'The automatic review of `%s` was written, but GitHub refused to post it ([log](%s)). Nothing was posted to this PR and nothing was merged - the verdict itself is in that run'"'"'s `agent-diagnostics-review-%s` artifact.\n\nIf that commit was force-pushed away while the review was running, there is nothing to retry on it - a review would have to come from the current head. This run will not retry by itself either way.\n\n```\n%s\n```' \
+                "${SHA:0:7}" "$RUN_URL" "$PR" "$(head -c 500 "$POST_LOG")")
             else
               marker="<!-- review-failed:${SHA} -->"
               body=$(printf 'The automatic review of `%s` did not complete - the workflow run itself failed ([log](%s)). Nothing was reviewed and nothing was merged; re-running CI on this commit will try again.' \
