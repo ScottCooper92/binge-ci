@@ -62,6 +62,10 @@ on:
           its own runner, and should give reviews one SEPARATE from its author jobs — this
           workflow builds nothing, so it needs far less memory than an agent runner, and a
           shared runner makes every review queue behind whatever build is in front of it.
+
+          A self-hosted runner needs `git`, `gh` and `jq` on PATH. Hosted images carry all
+          three; `jq` is the one worth checking, because `gh` bundles its own query engine
+          and reads as sufficient right up until the step that shells out to `jq` fails.
         type: string
         default: '["ubuntu-latest"]'
       default_branch:
@@ -350,9 +354,18 @@ jobs:
             # spliced is a trap, and no static check can catch it: check-callers.sh validates that
             # an input exists, not what a jq compiler will make of it.
             #
-            # `gh --jq` takes no --arg, so the array comes out of gh and the filter goes into real
-            # jq. Same jq, so the regex flavour is unchanged - grep -Ev would have been one process
-            # fewer and a silent switch from Oniguruma to POSIX ERE.
+            # `gh --jq` takes no --arg, so the array comes out of gh and the filter goes into
+            # `jq` proper. That DOES change the regex engine, and in the widening direction:
+            # gh embeds gojq, which uses Go's regexp package, while jq uses Oniguruma. A pattern
+            # gojq rejects can be accepted here - `(?<=a)x` is the short demonstration - but every
+            # pattern gojq accepted still means what it did, which is what makes the swap safe for
+            # a path filter. `grep -Ev` would have been one process fewer and a change in the
+            # other direction: POSIX ERE has neither engine's extensions, so a caller's `\d` would
+            # quietly stop being a digit.
+            #
+            # jq is a dependency of THIS step as a result, where `gh` alone sufficed before. Hosted
+            # runners carry it; the `runner` input's docs say so for a caller pointing this at its
+            # own machines.
             unbuilt=$(gh pr view "$num" --json files --jq '[.files[].path]' \
               | jq --arg re "$UNBUILT_REGEX" '[.[] | select(test($re) | not)] | length')
             [ "$unbuilt" = "0" ] \
