@@ -71,6 +71,11 @@ jobs:
       - name: shellcheck the composite actions
         run: ./tools/check-action-shell.sh
 
+      # actionlint validates a `uses:` it can resolve, which a self-reference at a tag is not
+      # from inside a PR. This covers the two ways one goes wrong here.
+      - name: Check this repo's references to its own actions
+        run: ./tools/check-internal-refs.sh
+
       # The governed-paths script is a plain file rather than a run block, so it is checked
       # directly. It is the single definition of that list for every consuming repo.
       - name: shellcheck the governed-paths script

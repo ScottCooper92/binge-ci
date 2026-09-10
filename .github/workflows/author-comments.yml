@@ -330,12 +330,17 @@ jobs:
           git show "origin/${DEFAULT_BRANCH}:${CONVENTIONS_PATH}" > "$RULES_DIR/conventions.md"
           echo "dir=$RULES_DIR" >> "$GITHUB_OUTPUT"
 
-      # Ships with this repo rather than the caller's, so a PR cannot touch the guard that is
-      # about to discard its own changes - see the action's header.
+      # By full repo ref, not `uses: ./`. Inside a reusable workflow `./` resolves against the
+      # CALLER's workspace, not this repository - no consumer has these directories, so it fails
+      # with "Can't find 'action.yml' ... Did you forget to run actions/checkout".
+      #
+      # Pinned to an exact patch tag rather than the moving `v1`, so a caller that pins `@v1.0.N`
+      # for stability gets the actions that shipped with it. `uses:` takes no expression, so this
+      # cannot be derived - see tools/check-internal-refs.sh, which fails when the five disagree.
       - name: Provide the governed-paths script
         id: governed
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ./.github/actions/governed-paths
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.3
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -354,7 +359,7 @@ jobs:
         if: >
           inputs.toolchain == 'android' &&
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ./.github/actions/ci-setup
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.3
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           # A hosted runner mounts nothing, and a self-hosted agent container mounts no
