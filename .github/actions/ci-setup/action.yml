@@ -21,10 +21,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # The runner writes RUNNER_ENVIRONMENT itself, so the branches below follow the machine the
-    # job actually landed on rather than a label a caller has to remember to pass. Anything
-    # unrecognised is treated as self-hosted, which keeps the values this file has always written
-    # for a caller's own runners byte-identical.
+    # RUNNER_ENVIRONMENT is written by the runner, so this follows the machine the job landed
+    # on rather than a label a caller must remember to pass. Unrecognised reads as self-hosted.
     - name: Identify the runner
       id: runner
       shell: bash
@@ -35,18 +33,15 @@ runs:
           echo "hosted=false" >> "$GITHUB_OUTPUT"
         fi
 
-        # The memory this runner can actually use. Both sizing decisions below depend on it — the
-        # Gradle daemon heap and the screenshot worker count — so it is derived once, here.
-        #
-        # /proc/meminfo is NOT namespaced: inside a container it reports the host's RAM, not the
-        # container's cap. That mismatch sized a 20 GiB runner as though it had 46 GB, and the
-        # cgroup killed the daemon mid-validate on three PRs at once (#1998). Take the smaller.
+        # /proc/meminfo is NOT namespaced: in a container it reports the HOST's RAM, not the
+        # container's cap, so a capped runner sizes itself as though it had the whole machine and
+        # the cgroup kills the daemon mid-build. Take the smaller of the two.
         mem_gb=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1024 / 1024 ))
         for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes; do
           [ -r "$f" ] || continue
           limit=$(cat "$f" 2>/dev/null || echo "")
-          # cgroup v2 writes the literal "max" when uncapped; v1 writes a number near 2^63, which
-          # divides down to something absurd rather than failing, so both need excluding.
+          # v2 writes the literal "max" when uncapped; v1 writes a number near 2^63, which
+          # divides down to something absurd rather than failing. Both need excluding.
           case "$limit" in ''|max|*[!0-9]*) continue;; esac
           limit_gb=$(( limit / 1024 / 1024 / 1024 ))
           if [ "$limit_gb" -gt 0 ] && [ "$limit_gb" -lt 1048576 ] && [ "$limit_gb" -lt "$mem_gb" ]; then
@@ -55,19 +50,13 @@ runs:
           fi
           break
         done
-        # 0 means "not detected", and it is deliberately NOT resolved here. The two consumers below
-        # have opposite safe directions: undersizing the daemon heap is what produced the G1
-        # evac-fail crashes, while OVERsizing the worker count is what produced the cgroup OOM kill
-        # (#1998). A single sentinel cannot be safe for both — 999 would have asked an undetectable
-        # runner for 6 workers, the exact configuration #1998 removed. Each branch applies its own.
+        # 0 means "not detected", deliberately unresolved here: the two consumers have OPPOSITE
+        # safe directions. Undersizing the daemon heap crashes the JVM; oversizing the worker
+        # count gets it OOM-killed. No single sentinel is safe for both, so each branch picks.
         echo "mem_gb=$mem_gb" >> "$GITHUB_OUTPUT"
 
-    # SHA-pinned, not tag-pinned. This action is now also used by author-comments.yml and
-    # author-ci-fix.yml, which pin every action they run because those jobs execute an agent with
-    # Bash, Edit and Write plus a contents:write token on a PERSISTENT self-hosted runner. A
-    # mutable tag inside that boundary is a supply-chain hole the rest of those files deliberately
-    # close; CI already ran these on the same host, but "already exposed" is not a reason to leave
-    # the discipline uneven.
+    # SHA-pinned like everything the author workflows run: they execute an agent with Bash,
+    # Edit and Write plus a contents:write token, and this action runs inside that boundary.
     - name: Set up JDK 17
       uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
       with:
@@ -77,73 +66,57 @@ runs:
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
       with:
-        # A runner with a persistent ~/.gradle makes GitHub's cache service a redundant
-        # upload/download round-trip. A runner without one — a hosted runner, or an agent runner,
-        # which turns out to mount nothing at all — starts empty every run, where that same
-        # round-trip is the difference between resolving the dependency graph once and resolving
-        # it every time. Persistence is a property of the container, not of "self-hosted", so the
-        # caller states it rather than this file guessing from the runner label.
+        # Persistence is a property of the container, not of "self-hosted", so the caller states
+        # it. With a persistent ~/.gradle the cache service is a redundant round-trip; without
+        # one it is the difference between resolving the dependency graph once and every run.
         cache-disabled: ${{ steps.runner.outputs.hosted == 'false' && inputs.persistent-gradle-home == 'true' }}
 
-    # Needed on both. A self-hosted runner ships no Android SDK at all; a hosted image ships one
-    # but not `compileSdk = 37`. Installs cmdline-tools + accepts licenses; AGP fetches the rest.
+    # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
     - name: Set up Android SDK
       uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
       with:
         log-accepted-android-sdk-licenses: false
 
-    # Overrides the project's dev-machine gradle.properties for CI only. MUST be
-    # written to $GRADLE_USER_HOME: the job runs as root (HOME=/root) but the container
-    # pins GRADLE_USER_HOME=/home/runner/.gradle, so writing to ~/.gradle lands in
-    # /root/.gradle which Gradle never reads -- the override silently no-ops and CI falls
-    # back to the project's -Xmx8g, which lintDebug's Kotlin-UAST pass overflows (G1
-    # evacuation-failure SIGSEGV / DaemonDisappearedException). 10g + ParallelGC fixes it;
-    # the build job's concurrency group keeps one daemon on the host so it can back 10g.
+    # MUST be written to $GRADLE_USER_HOME, not ~/.gradle. A container that runs the job as
+    # root while pinning GRADLE_USER_HOME elsewhere makes ~/.gradle a directory Gradle never
+    # reads: the override silently no-ops and the build falls back to the project's own heap,
+    # which lint's Kotlin-UAST pass overflows.
     #
-    # A GitHub-hosted standard runner has 7 GB of RAM total, so it cannot host that daemon at
-    # all — the numbers are not a preference there, they are what fits. Both branches keep
-    # ParallelGC: the crash it replaced was G1's evacuation failure, and a smaller heap makes
-    # that likelier rather than less likely.
+    # ParallelGC on both branches: the crash it replaced was a G1 evacuation failure, and a
+    # smaller heap makes that likelier, not less.
     - name: Tune Gradle for CI runners
       shell: bash
       run: |
         GUH="${GRADLE_USER_HOME:-$HOME/.gradle}"
         mkdir -p "$GUH"
-        # Stale daemon-registry entries from prior ephemeral jobs pile up in the persistent
-        # GRADLE_USER_HOME and can never be reused (their container is gone), so every run logged
-        # "N busy/incompatible daemons could not be reused" and paid to scan them. Clear the
-        # registry so each job starts its one daemon clean.
+        # Registry entries from prior ephemeral jobs pile up in a persistent GRADLE_USER_HOME
+        # and can never be reused - their container is gone - so every run pays to scan them.
         rm -rf "$GUH/daemon"
-        # Same reasoning for hs_err: the runner image's JAVA_TOOL_OPTIONS points every JVM's
-        # -XX:ErrorFile here (see the "Capture daemon diagnostics" step in ci.yml), and nothing
-        # ever deleted a file that step didn't run for (a job that failed for an unrelated reason,
-        # or didn't fail at all). Left in place, the next crash-diagnostics run would re-find and
-        # re-report someone else's old crash as this job's.
+        # Same for hs_err files: JAVA_TOOL_OPTIONS points every JVM's -XX:ErrorFile here, and
+        # left in place the next crash-diagnostics run re-reports an old crash as this job's.
         rm -f "$GUH"/hs_err_*.log
         tune_gb=${{ steps.runner.outputs.mem_gb }}
 
         if [ "${{ steps.runner.outputs.hosted }}" = "true" ]; then
           {
-            # 4g + 1g + the JVM's own overhead leaves the OS ~1.5g of the 7. Raising either
-            # number is what starts the OOM-killer, not what fixes a slow run.
+            # Sized to what a hosted runner has. Raising either number starts the OOM-killer
+            # rather than fixing a slow run.
             echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
             echo "kotlin.daemon.jvmargs=-Xmx1g"
-            # 2 workers for the 2 vCPUs. The project's own org.gradle.parallel=true still holds.
+            # One worker per vCPU. The project's own org.gradle.parallel=true still holds.
             echo "org.gradle.workers.max=2"
           } > "$GUH/gradle.properties"
         elif [ "$tune_gb" -eq 0 ] || [ "$tune_gb" -ge 24 ]; then
           {
             echo "org.gradle.jvmargs=-Xmx10g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
             echo "kotlin.daemon.jvmargs=-Xmx2g"
-            # 5 workers to match the runner's 5-CPU quota (was 4). Safe now that ParallelGC +
-            # the 10g daemon heap stopped the G1 evac-fail crashes.
+            # Matched to the CPU quota; safe only because ParallelGC replaced G1 above.
             echo "org.gradle.workers.max=5"
           } > "$GUH/gradle.properties"
         else
-          # The agent runners: a 12 GiB container that also has to hold the agent process which
-          # started the build. 6g+1g leaves it room; the CI numbers above would leave it none.
-          # Only reached on a runner whose memory was actually detected — undetected takes the
-          # branch above, because a daemon too small is the crash this file already fixed once.
+          # An agent runner also holds the agent process that started the build, so it gets less
+          # than a CI runner of the same size. Only reached when memory was detected - undetected
+          # takes the branch above, since too small a daemon is the crash, not too big.
           {
             echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
             echo "kotlin.daemon.jvmargs=-Xmx1g"
@@ -153,21 +126,13 @@ runs:
         echo "Gradle tuning written to $GUH/gradle.properties:"
         cat "$GUH/gradle.properties"
 
-    # Size the screenshot step's --max-workers from the runner's RAM, because that cap is a
-    # MEMORY bound, not a CPU one (see the Validate screenshots step in ci.yml). Each of the 17
-    # screenshot modules forks one 2g Test JVM plus layoutlib's native heap, competing with the
-    # 10g Gradle daemon + 2g Kotlin daemon on the same box. The self-hosted fleet is uneven — a
-    # 46 GB Debian host and a 32 GB PC — so a flat cap would either waste the big host or OOM the
-    # small one. Deriving from the memory the runner can actually use — the smaller of its cgroup cap
-    # and MemTotal — self-tunes to whichever runner picks the job up:
-    #   >=40 GB -> 6 (6 workers matches the big host's 6 CPUs, ~16 GB slack, 3 fork waves)
-    #   >=28 GB -> 4 (the 32 GB PC; the value proven green, ~6 GB slack)
-    #   else    -> 4 (hosted's 2 is caught before this ladder starts)
-    # A `default 4` fallback covers an unreadable /proc/meminfo (mem_gb=0 falls through to the
-    # final branch). Deliberately the MIDDLE value, not the generous one: too many workers is what
-    # the cgroup OOM-killed in #1998, so this consumer's safe direction is the opposite of the
-    # daemon heap's above — which is why `Identify the runner` emits 0 rather than resolving it.
-    # Read in ci.yml via $GITHUB_ENV.
+    # The screenshot cap is a MEMORY bound, not a CPU one: each module forks a Test JVM plus
+    # layoutlib's native heap, competing with the Gradle and Kotlin daemons on the same box. A
+    # flat number either wastes a large runner or OOMs a small one, so it is derived from usable
+    # memory and self-tunes to whichever runner picks the job up.
+    #
+    # An undetectable runner falls through to the MIDDLE value, not the generous one: too many
+    # workers is the OOM kill, the opposite safe direction to the daemon heap above.
     - name: Size screenshot workers to runner RAM
       shell: bash
       run: |
@@ -184,9 +149,8 @@ runs:
         echo "SCREENSHOT_MAX_WORKERS=$workers" >> "$GITHUB_ENV"
         echo "Screenshot workers: $workers (usable ${mem_gb} GB, hosted=${{ steps.runner.outputs.hosted }})"
 
-    # TMDB credentials are read from local.properties by core/network/build.gradle.kts.
-    # env-var expansion (not inline ${{ }}) keeps the values masked even if a
-    # debug step ever enables set -x.
+    # env-var expansion rather than inline ${{ }}, so the values stay masked if a debug step
+    # ever enables set -x.
     - name: Write local.properties
       shell: bash
       env:
