@@ -622,29 +622,21 @@ jobs:
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
 
-          # The reviewed SHA is named TWICE, in the body and in commit_id, because neither
-          # alone does the job.
+          # The SHA is named twice - in commit_id and in the body - because neither alone works.
           #
-          # commit_id is why this is the REST endpoint and not `gh pr review`: that command
-          # sends none, so GitHub stamps the review against whatever the head is NOW - and a
-          # review takes minutes while the author bots push whenever CI or a reviewer asks
-          # them to. Binge#2434 is the worked example: the run woken by CI on 0573040e
-          # resolved that head at 15:15:19, a74f4467 landed at 15:15:26, and the verdict
-          # posted at 15:21:38 carried a74f4467, a tree it never checked out. That commit's
-          # own run then reviewed it properly, so the PR carried two CHANGES_REQUESTED
-          # against one commit, one of them an account of a different one.
+          # commit_id is why this is the REST endpoint: `gh pr review` sends none, so GitHub
+          # stamps the review against whatever the head is NOW, and a review takes minutes
+          # while the author bots push whenever CI or a reviewer asks them to.
           #
-          # But commit_id is not VISIBLE. `outdated` is a field on PullRequestReviewComment
-          # and there is no counterpart on PullRequestReview - checked against the GraphQL
-          # schema, which exposes only `commit` there - so a body-only verdict is rendered
-          # the same whether its commit is the head or six pushes back. Pinning alone makes
-          # the API record honest and leaves the #2434 symptom on screen exactly as it was.
-          # The body line is what a reader actually sees, so it is not conditional on the
-          # head having moved: "no line" would then mean both "current" and "posted by an
-          # older version of this workflow".
+          # The body line is what makes it visible. `outdated` is a field on
+          # PullRequestReviewComment with no counterpart on PullRequestReview - the GraphQL
+          # schema exposes only `commit` there - so a body-only verdict renders identically
+          # whether its commit is the head or six pushes back. Unconditional, because "no
+          # line" would otherwise mean both "current" and "posted by an older version of
+          # this workflow".
           #
-          # Nothing merged wrongly in #2434 - "Merge if the bar is met" holds on head-moved.
-          # What it cost was the PR's account of itself, which is this workflow's whole output.
+          # Merge safety is not at stake either way: "Merge if the bar is met" holds on
+          # head-moved.
           printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}" | cat - "$BODY_FILE" > "$BODY_FILE.pinned"
 
           # The API's refusal is kept, on the same reasoning as $MERGE_LOG below: this file is
@@ -1002,7 +994,7 @@ jobs:
             # the review and opposite things about the remedy, so sharing one would let whichever
             # fired first on this SHA silence the other - a generic failure deduping away the
             # accurate 422 note that follows it, leaving the PR telling the reader to re-run CI on
-            # a commit that is no longer on it. The #2052 shape the else branch below is about,
+            # a commit that is no longer on it - the same shape the else branch below is about,
             # one level down.
             if [ "$REFUSED" = "true" ]; then
               marker="<!-- review-refused:${SHA} -->"
