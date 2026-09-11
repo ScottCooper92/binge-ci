@@ -259,6 +259,9 @@ jobs:
         with:
           ref: ${{ steps.branch.outputs.name }}
           fetch-depth: 0
+          # A consumer may build from a git submodule (binge-seerr includes binge-integrations
+          # as one), and an agent that cannot build the checkout cannot fix or judge it.
+          submodules: recursive
           token: ${{ steps.token.outputs.token }}
 
       # Ships with this repo rather than the caller's, so a PR cannot touch the guard that is
@@ -266,7 +269,7 @@ jobs:
       # GOVERNED_EXTRA_PATHS for the steps below and hands back the script's path.
       - name: Provide the governed-paths script
         id: governed
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.3
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.4
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
