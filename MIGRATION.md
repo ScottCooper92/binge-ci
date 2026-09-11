@@ -126,27 +126,26 @@ Successful runs in the two public consumers, at the time of writing:
 | `bot-review` | 3 | 5 |
 | `author-conflicts` | 5 | 4 |
 | `author-comments` | 0 | 1 |
-| `author-ci-fix` | **0** | **0** |
+| `author-ci-fix` | 1 | **0** |
 | `author-retarget` | **never invoked** | **never invoked** |
 
-So two of the five have never completed a real run here. `author-ci-fix` has been invoked
-and has never got past a guard since its permissions were fixed: CI going red on a labelled
-PR is simply rare, so it is untested by luck rather than by omission. `author-retarget` has
-never been invoked at all, because a two-PR stack has not happened in either repo yet.
+`author-ci-fix`'s single run is a deliberate exercise: a PR carrying one wrong indent,
+opened and closed for the purpose. It fixed exactly that line and nothing else, and CI went
+green. So the hosted path carries it, and the `toolchain: jvm` input is right — which was
+the thing worth checking, because a toolchain input is exactly the sort of thing that is
+correct in one repo and wrong in another.
 
-Neither is a suspected bug — both work in the private consumer. The gap is that the hosted
-path has never carried them, and a toolchain input is exactly the sort of thing that is
-wrong in one repo and right in another.
+**Its loop cap is still untested.** The next invocation was skipped because CI had gone
+green, not because a second attempt was refused. Proving the cap needs a failure the bot
+cannot fix, which is a more invasive exercise than a stray indent.
 
-To exercise the two:
+`author-retarget` has never been invoked in either repo, because no two-PR stack has
+happened in one. Exercising it means merging a base PR by hand, and there is no change in
+either repo worth merging for the purpose — putting a throwaway commit on `main` to trigger
+a bot that already works in the private consumer is the worse trade. It waits for a real
+stack.
 
-| Bot | Do this |
-| --- | --- |
-| `author-ci-fix` | Open a labelled PR with a ktlint violation. Check it makes exactly one repair attempt and then stops. |
-| `author-retarget` | Open a two-PR stack and merge the base by hand. |
-
-Both are cheapest in binge-seerr: pre-alpha, no release train, and `auto_merge: false`, so
-nothing a bot does there can merge itself.
+Neither is a suspected bug. The gap is coverage of the hosted path, not correctness.
 
 ## 6. Then the Seerr extraction
 
