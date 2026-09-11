@@ -12,8 +12,9 @@ three were missing the same 23 fixes, and the original had grown 43% past the ve
 shared. The comments in these files record what each fix was for, which is most of why
 they are worth keeping in one place.
 
-> **Status: nothing calls these yet.** See [MIGRATION.md](MIGRATION.md) for the order to
-> land it in.
+> **Status: all three repositories call these.** What is not yet proven is every bot —
+> see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
+> ever been skipped by a guard.
 
 ## The five workflows
 

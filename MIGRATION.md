@@ -1,7 +1,9 @@
 # Applying this
 
-No repo calls these workflows yet and there is no `v1` tag. This is the order to land
-it in, smallest reversible step first.
+**All three repositories call these workflows.** The steps below are kept as the record of
+how it landed and why each choice was made, rather than as a plan — what is still open is
+at the bottom, and it is which bots have actually been exercised rather than which are
+wired.
 
 Three decisions were settled on 2026-09-09 and the steps below assume them:
 
@@ -23,7 +25,7 @@ Done, 2026-09-09. All five are current as of Binge `30e2c6c66`; see the status t
   a mutable tag, in a job that hands an agent Bash, Edit, Write and a contents:write token.
   Every SHA in the repo now resolves — one reached for first did not exist.
 
-## 2. Create and tag `binge-ci`
+## 2. Create and tag `binge-ci` ✅
 
 Public, under `ScottCooper92`. Public matters: `binge-integrations` and `binge-seerr`
 are public, and a public repo calling a reusable workflow from a private one both needs
@@ -42,7 +44,7 @@ Until step 3 is green, `v1` may be force-moved freely - nothing calls it yet, so
 nothing to break. After that, treat it as published: land the fix, tag `v1.0.N`, then move
 `v1`. A `v1` that moves under a caller mid-review is the drift problem again, wearing a tag.
 
-## 3. Prove it on binge-seerr
+## 3. Prove it on binge-seerr ✅
 
 binge-seerr is pre-alpha, has one open PR, no release train, and `auto_merge: false`, so
 a bad review cannot merge anything. A break there costs nothing. It also exercises the
@@ -55,21 +57,14 @@ Move `callers/binge-seerr/*.yml` into `binge-seerr/.github/workflows/`, replacin
 five full copies it was scaffolded with on 2026-09-06. Leave its `ci.yml` alone — CI
 stays per-repo.
 
-Then watch one PR through the full loop. The three author bots have **never actually
-run** in that repo — every invocation to date was skipped by a guard, which proves the
-trigger wiring and nothing else. So drive each one deliberately:
+Done. The permissions trap in [README.md](README.md) was found here and nowhere else: three
+runs died as `startup_failure` before the caller declared `actions: read`, and every run
+since has behaved. A wrong `default_branch` shows up the same way, immediately, as "path
+does not exist in origin/main".
 
-| To exercise | Do this |
-| --- | --- |
-| `bot-review` | Already proven on binge-seerr#1. Re-run it and check the verdict still posts. |
-| `author-ci-fix` | Open a labelled PR with a ktlint violation. Check it makes exactly one repair attempt. |
-| `author-comments` | Leave an inline review comment on a labelled PR. This is the one whose three-event fan-out is easiest to get wrong. |
-| `author-retarget` | Open a two-PR stack, merge the base by hand. Zero runs to date, and it was rewritten as `pull_request_target` after the `pull_request` form could not fire in Binge. |
-| `author-conflicts` (resolve) | Make the two stacked PRs touch the same file. Only its scan job has ever run. |
+What it did **not** settle is whether each bot works, which is the open item below.
 
-A wrong `default_branch` shows up immediately as "path does not exist in origin/main".
-
-## 4. Move Binge over
+## 4. Move Binge over ✅
 
 Binge is the risky one — it ships daily, runs on self-hosted runners, and its bot merges
 labelled PRs in about fifteen minutes. Go second, with binge-seerr already green.
@@ -83,15 +78,22 @@ change one line in `Binge/.github/workflows/ci.yml`:
 +        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1
 ```
 
-Then delete `Binge/.github/actions/ci-setup/`. Keeping a second copy for `ci.yml` alone
-is the drift this whole exercise exists to prevent — and it is a copy the agent
-workflows would *not* be using, so the two would diverge invisibly.
+Then delete the local `ci-setup`. Keeping a second copy for `ci.yml` alone is the drift
+this whole exercise exists to prevent — and it is a copy the agent workflows would *not*
+be using, so the two would diverge invisibly.
+
+Two corrections from doing it. It is **three** workflows, not one: the two device lanes use
+the same setup, and the local copy cannot go until all three point here. And by the time it
+was removed the two had already diverged — by a comment, where the shared one says "a
+caller's own runners" and the copy named the hosts. That difference is deliberate, because
+this repository is public and the consumer is not, but a difference nobody chose to keep in
+two places is how the rest of it starts.
 
 Binge's caller opts back out of every public-safe default: self-hosted `runner`,
 `auto_merge: true`, `show_full_output: true`, `default_branch: master`, and the
 `unbuilt_paths` pair that its six-pattern `paths-ignore` needs.
 
-## 5. Write binge-integrations' governing docs, then wire it
+## 5. Write binge-integrations' governing docs, then wire it ✅
 
 This is the real work in that repo, and it is authoring, not plumbing. Three documents
 on `main`, none of them copies of Binge's:
@@ -105,7 +107,45 @@ on `main`, none of them copies of Binge's:
 The bots are only as good as these. Porting the workflows without them produces an agent
 reviewing a proto repo against a screenshot gate that does not exist.
 
-Then replace its five 09-01 copies with `callers/binge-integrations/*.yml`.
+Done, along with replacing its five copies with `callers/binge-integrations/*.yml`.
+
+## What is still open: exercising the bots
+
+Wired is not proven. A workflow that is skipped by a guard proves the trigger and nothing
+else, and most invocations are skipped by design — that is what the guards are for.
+
+All five have real, successful runs in the private consumer, so none of them is unproven
+as *code*. What is unproven is two of them on the path the public repos take, which is a
+different one: hosted runners and a JVM toolchain rather than self-hosted and Android,
+against a `ci.yml` that is one job rather than a matrix.
+
+Successful runs in the two public consumers, at the time of writing:
+
+| Bot | binge-seerr | binge-integrations |
+| --- | --- | --- |
+| `bot-review` | 3 | 5 |
+| `author-conflicts` | 5 | 4 |
+| `author-comments` | 0 | 1 |
+| `author-ci-fix` | 1 | **0** |
+| `author-retarget` | **never invoked** | **never invoked** |
+
+`author-ci-fix`'s single run is a deliberate exercise: a PR carrying one wrong indent,
+opened and closed for the purpose. It fixed exactly that line and nothing else, and CI went
+green. So the hosted path carries it, and the `toolchain: jvm` input is right — which was
+the thing worth checking, because a toolchain input is exactly the sort of thing that is
+correct in one repo and wrong in another.
+
+**Its loop cap is still untested.** The next invocation was skipped because CI had gone
+green, not because a second attempt was refused. Proving the cap needs a failure the bot
+cannot fix, which is a more invasive exercise than a stray indent.
+
+`author-retarget` has never been invoked in either repo, because no two-PR stack has
+happened in one. Exercising it means merging a base PR by hand, and there is no change in
+either repo worth merging for the purpose — putting a throwaway commit on `main` to trigger
+a bot that already works in the private consumer is the worse trade. It waits for a real
+stack.
+
+Neither is a suspected bug. The gap is coverage of the hosted path, not correctness.
 
 ## 6. Then the Seerr extraction
 
