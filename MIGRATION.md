@@ -114,6 +114,11 @@ Done, along with replacing its five copies with `callers/binge-integrations/*.ym
 Wired is not proven. A workflow that is skipped by a guard proves the trigger and nothing
 else, and most invocations are skipped by design — that is what the guards are for.
 
+All five have real, successful runs in the private consumer, so none of them is unproven
+as *code*. What is unproven is two of them on the path the public repos take, which is a
+different one: hosted runners and a JVM toolchain rather than self-hosted and Android,
+against a `ci.yml` that is one job rather than a matrix.
+
 Successful runs in the two public consumers, at the time of writing:
 
 | Bot | binge-seerr | binge-integrations |
@@ -122,15 +127,18 @@ Successful runs in the two public consumers, at the time of writing:
 | `author-conflicts` | 5 | 4 |
 | `author-comments` | 0 | 1 |
 | `author-ci-fix` | **0** | **0** |
-| `author-retarget` | **0** | **0** |
+| `author-retarget` | **never invoked** | **never invoked** |
 
-So two of the five have never completed a real run anywhere public. `author-ci-fix` has
-been invoked and has never got past a guard since its permissions were fixed; CI going red
-on a labelled PR is simply rare. `author-retarget` has zero, and it is the one rewritten as
-`pull_request_target` after the `pull_request` form could not fire — a rewrite nothing has
-confirmed.
+So two of the five have never completed a real run here. `author-ci-fix` has been invoked
+and has never got past a guard since its permissions were fixed: CI going red on a labelled
+PR is simply rare, so it is untested by luck rather than by omission. `author-retarget` has
+never been invoked at all, because a two-PR stack has not happened in either repo yet.
 
-To exercise the two that are untested:
+Neither is a suspected bug — both work in the private consumer. The gap is that the hosted
+path has never carried them, and a toolchain input is exactly the sort of thing that is
+wrong in one repo and right in another.
+
+To exercise the two:
 
 | Bot | Do this |
 | --- | --- |
