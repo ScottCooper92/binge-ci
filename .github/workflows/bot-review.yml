@@ -95,13 +95,28 @@ on:
         default: the linters and other checks CI already runs
       auto_merge:
         description: >
-          Whether a clean review may squash-merge. False keeps the verdict and
+          Whether a clean review may merge. False keeps the verdict and
           every guard but stops short of merging — the right setting for a repo
           publishing a wire contract other people build against, and the default
           because turning merging ON should be a decision a caller made rather
           than one it inherited.
         type: boolean
         default: false
+      merge_method:
+        description: >
+          How a clean review merges: squash, merge or rebase. Squash is the default because it
+          is what this workflow has always done and it keeps a linear history.
+
+          A caller landing STACKED PRs should pass `merge`. Squash and rebase both rewrite the
+          parent's commits into new SHAs, so the moment the parent lands, the child's branch
+          holds commits that are nowhere in the base's history - the merge base falls back to
+          before the parent's work, both sides read as having changed the same files, and every
+          child in the stack needs a hand-resolved merge (binge-seerr #99 to #115). A merge
+          commit keeps the parent's SHAs, so each child's base is a real ancestor and catching
+          it up is close to a no-op. The repository must also allow the method, which is a
+          setting outside this workflow.
+        type: string
+        default: squash
       unbuilt_paths:
         description: >
           Newline-separated mirror of the caller's ci.yml `paths-ignore`, enabling the
@@ -732,9 +747,18 @@ jobs:
           PUSHED_AT: ${{ needs.resolve.outputs.pushed_at }}
           VOUCHED: ${{ needs.resolve.outputs.vouched }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
         run: |
           set -euo pipefail
+          # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
+          # typo would otherwise surface as a merge refusal at the end of a review, and anything
+          # else a string can carry has no business being spliced into that command.
+          case "$MERGE_METHOD" in
+            squash|merge|rebase) ;;
+            *) echo "::error::merge_method must be squash, merge or rebase - got '$MERGE_METHOD'."; exit 1 ;;
+          esac
+
           # As in "Submit the review": the queued duplicate can arrive after the run ahead of it
           # merged, and every guard below reports its refusal on the PR.
           pr_state=$(gh pr view "$PR" --json state --jq .state)
@@ -892,7 +916,7 @@ jobs:
           # success output too. Left in place, a non-empty log would mean "the merge was reached"
           # rather than "the merge errored".
           merge_log="${{ runner.temp }}/merge-error.txt"
-          if ! gh pr merge "$PR" --squash --subject "$title (#$PR)" \
+          if ! gh pr merge "$PR" "--${MERGE_METHOD}" --subject "$title (#$PR)" \
               --body "$(gh pr view "$PR" --json body --jq .body)" > "$merge_log" 2>&1; then
             cat "$merge_log" >&2
             exit 1

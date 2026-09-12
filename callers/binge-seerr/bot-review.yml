@@ -54,6 +54,11 @@ jobs:
     with:
       dispatch_pr: ${{ inputs.pr }}
       auto_merge: true
+      # STACKED PRs land here (#99 through #115), and squash rewrites the parent's commits into a
+      # new SHA. The moment the parent merges, every child holds commits that are nowhere in main's
+      # history, so the merge base falls back to before the parent's work and each child needs a
+      # hand-resolved merge. A merge commit keeps those SHAs and the children catch up on their own.
+      merge_method: merge
       gated_checks: ktlint or Android lint
       # ci.yml here declares no paths-ignore - deliberately, since bot-review needs a
       # successful run against the head and a skipped run is a PR that is never
