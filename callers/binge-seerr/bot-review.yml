@@ -1,5 +1,19 @@
 name: Bot review
 
+# Which PR this run is for. A workflow_run run is attributed to the default branch, so without
+# this every run of this workflow carries the same branch and the same title, and telling two
+# apart means opening one. run-name is evaluated before any job, so it cannot use the number the
+# called workflow resolves - it comes off the event, and falls back to the head branch, which is
+# what that resolution looks the PR up by anyway.
+run-name: >-
+  ${{ github.event.workflow_run.pull_requests[0].number
+        && format('#{0} · {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_branch)
+      || github.event.pull_request.number
+        && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
+      || inputs.pr && format('#{0} · dispatched', inputs.pr)
+      || github.event.workflow_run.head_branch
+      || github.ref_name }}
+
 # Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
 #
 # PUBLIC repository, and the reference companion app: what lands on main is read

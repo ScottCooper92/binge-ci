@@ -1,5 +1,13 @@
 name: Author - catch up a retargeted PR
 
+# Which PR this run is for. This one triggers on pull_request_target, so unlike the workflow_run
+# bots its run is already associated with the PR; the title still helps in the Actions list, where
+# the runs otherwise differ only by timestamp.
+run-name: >-
+  ${{ github.event.pull_request.number
+        && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
+      || github.ref_name }}
+
 # Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
 #
 # `pull_request_target`, NOT `pull_request`, and this is load-bearing: a

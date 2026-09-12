@@ -421,6 +421,27 @@ jobs:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
+      # Says on the PR that a review is running, and - the half that is not cosmetic - CLEARS
+      # whatever this run's predecessor left on this SHA. A crashed review leaves a `failure`
+      # check behind, and the merge gate below holds on anything that is not CLEAN, so without
+      # this a re-run over the same commit would be held by its own last attempt.
+      #
+      # Posted as COMPLETED/success even though the review has not started, because the only
+      # alternatives are worse: a queued or in_progress check holds mergeStateStatus at UNSTABLE
+      # for the whole run, which is the same gate, held every time.
+      - name: Show the review as running
+        if: needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          conclusion: success
+          title: Reviewing this commit
+          summary: A review is running against this commit. This check is replaced with the verdict when it finishes.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
@@ -606,6 +627,10 @@ jobs:
             request_changes) event=REQUEST_CHANGES ;;
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
+
+          # Read by the check run at the end of the job. Written HERE rather than after the post,
+          # so a verdict that was reached but refused by GitHub still reports as the verdict it was.
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
 
           # The SHA is named twice - in commit_id and in the body - because neither alone works.
           #
@@ -966,3 +991,36 @@ jobs:
           if ! grep -qF "$marker" <<<"$comments"; then
             printf '%s\n%s\n' "$marker" "$body" | gh pr comment "$PR" --body-file -
           fi
+
+      # The PR's own record that this ran. A workflow_run run is attributed to the default branch,
+      # so it is not on the PR to be found: until this, the only trace a review left was the review
+      # itself, and a run that decided to do nothing left none at all.
+      #
+      # LAST, and after the merge step rather than before it. The action posts an already-completed
+      # check run for a reason (see its header) - a pending one holds mergeStateStatus at UNSTABLE,
+      # which the gate above reads as not CLEAN - and a conclusion written before the gate would be
+      # reporting a verdict on a merge that had not been attempted yet.
+      - name: Record this run on the PR
+        if: always() && needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          # `request_changes` is NEUTRAL on purpose: a red check on this SHA would hold any later
+          # merge, a human's included, for a verdict the review already carries as blocking.
+          conclusion: >-
+            ${{ job.status != 'success' && 'failure'
+              || steps.submit.outputs.verdict == 'approve' && 'success'
+              || 'neutral' }}
+          title: >-
+            ${{ job.status != 'success' && 'The review run failed'
+              || steps.submit.outputs.verdict == 'approve' && 'Approved'
+              || steps.submit.outputs.verdict == 'request_changes' && 'Changes requested'
+              || 'No review posted' }}
+          summary: >-
+            ${{ job.status != 'success' && 'This run did not finish; the log says where it stopped.'
+              || steps.submit.outputs.verdict != '' && 'The verdict above was posted as a review on this PR.'
+              || 'The run finished without posting a review - the PR was not open, or there was nothing to review.' }}
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

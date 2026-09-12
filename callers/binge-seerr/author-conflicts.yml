@@ -1,5 +1,13 @@
 name: Author - resolve merge conflicts
 
+# What set this run off. This one sweeps every conflicted PR rather than acting on one, so it is
+# named for the branch whose CI finished - a PR number here would name whichever PR happened to be
+# first in the matrix. Without it, a workflow_run run reads as the default branch every time.
+run-name: >-
+  ${{ github.event.workflow_run.head_branch
+        && format('sweep after {0}', github.event.workflow_run.head_branch)
+      || 'sweep · dispatched' }}
+
 # Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
 #
 # PUBLIC repository: the fork filter inside the scan is the control here, not a

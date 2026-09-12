@@ -1,0 +1,120 @@
+name: PR check run
+description: >
+  Records a bot's run on the pull request itself, as a check run against the PR's head
+  commit.
+
+# A workflow_run run is not associated with the pull request that caused it. It is attributed
+# to the default branch, so it never appears in the PR's checks list and `gh pr checks` never
+# mentions it - which is why bot-status.sh exists in Binge, and why every "Bot review" run in
+# the Actions list reads the same head branch and the same title. The Checks API is the way
+# across that gap: a check run is addressed by commit SHA, so it lands on the PR even though
+# the run that created it does not.
+#
+# IT REPORTS, IT DOES NOT GATE. Three consequences, each deliberate:
+#
+#  - A run is posted ALREADY COMPLETED, never queued or in_progress. A pending check on the
+#    head SHA puts the PR at mergeStateStatus UNSTABLE, and bot-review's merge gate holds on
+#    anything that is not CLEAN - so a bot that announced itself that way would hold the merge
+#    on every PR it touched, for the whole length of its own run. A caller wanting to say "this
+#    is running" posts a completed check saying so, and overwrites it when it finishes.
+#
+#  - The run is created ONCE per (name, head SHA) and UPDATED in place. Two check runs sharing
+#    a name both show on the PR, so a stale conclusion would sit beside the live one with
+#    nothing saying which is which - and a stale `failure` would hold that same merge gate
+#    until something cleared it. Updating in place is what lets a caller clear its own last
+#    attempt by posting again at the start of the next one.
+#
+#  - A failure of this action NEVER fails the caller. Checks write is granted to the reviewer
+#    app in its App settings, which is a click outside this repository: a step that hard-failed
+#    on a missing grant would take every bot down for a reason no log here explains. It warns.
+
+inputs:
+  token:
+    description: >
+      A token with `checks: write`. The reviewer app's, as minted by the calling job - the
+      workflow's own GITHUB_TOKEN would need `checks: write` added to the reusable workflow
+      AND to every caller's permissions block, and a caller that missed the bump would die as
+      startup_failure with no log.
+    required: true
+  repository:
+    description: owner/name the check run is posted to.
+    required: true
+  sha:
+    description: >
+      The PR's head commit. This is what carries the check run onto the PR, so a wrong or
+      empty value is the one input that makes this silently do nothing.
+    required: true
+  name:
+    description: >
+      Check run name, and the identity it is updated under. Stable per bot ("Bot review"),
+      because a second run posted under the same name on the same SHA does not replace the
+      first - both show, forever.
+    required: true
+  conclusion:
+    description: success, failure, neutral, cancelled, skipped, timed_out or action_required.
+    required: false
+    default: neutral
+  title:
+    description: One line, shown next to the check on the PR.
+    required: true
+  summary:
+    description: Markdown body. Markdown, so a run link belongs here as well as in details-url.
+    required: false
+    default: ''
+  details-url:
+    description: Where the check's "Details" link goes. The workflow run, normally.
+    required: false
+    default: ''
+
+outputs:
+  id:
+    description: The check run's id, or empty when none was posted.
+    value: ${{ steps.post.outputs.id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Post the check run
+      id: post
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repository }}
+        SHA: ${{ inputs.sha }}
+        NAME: ${{ inputs.name }}
+        CONCLUSION: ${{ inputs.conclusion }}
+        TITLE: ${{ inputs.title }}
+        SUMMARY: ${{ inputs.summary }}
+        DETAILS_URL: ${{ inputs.details-url }}
+      run: |
+        # Deliberately not `set -e`: see the header. Every exit below is 0.
+        set -uo pipefail
+
+        skip() { echo "::warning::Not reporting on the PR: $*"; echo "id=" >> "$GITHUB_OUTPUT"; exit 0; }
+
+        [ -n "$SHA" ] || skip "no head SHA was passed."
+
+        # Update in place rather than posting a second run under the same name. Two runs with
+        # one name both show on the PR, so a stale conclusion would sit next to the current one
+        # with nothing saying which is live.
+        existing=$(gh api --method GET "repos/${REPO}/commits/${SHA}/check-runs" \
+          -f check_name="$NAME" -f per_page=1 --jq '.check_runs[0].id // empty' 2>/dev/null) || existing=""
+
+        payload=$(jq -n \
+          --arg name "$NAME" --arg conclusion "$CONCLUSION" \
+          --arg title "$TITLE" --arg summary "$SUMMARY" --arg url "$DETAILS_URL" \
+          '{name: $name, status: "completed", conclusion: $conclusion,
+            output: {title: $title, summary: (if $summary == "" then $title else $summary end)}}
+           | if $url == "" then . else .details_url = $url end')
+
+        if [ -n "$existing" ]; then
+          # head_sha is not a field PATCH accepts, which is why it is added only on the POST.
+          id=$(gh api --method PATCH "repos/${REPO}/check-runs/${existing}" \
+                 --input - --jq .id <<<"$payload" 2>&1) || skip "could not update check run ${existing}: ${id}"
+        else
+          id=$(jq --arg sha "$SHA" '.head_sha = $sha' <<<"$payload" \
+                 | gh api --method POST "repos/${REPO}/check-runs" --input - --jq .id 2>&1) || skip "could not create the check run: ${id}"
+        fi
+
+        echo "Reported '${NAME}' (${CONCLUSION}) on ${SHA} as check run ${id}."
+        echo "id=$id" >> "$GITHUB_OUTPUT"

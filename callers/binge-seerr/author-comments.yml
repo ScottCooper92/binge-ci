@@ -1,5 +1,12 @@
 name: Author - respond to comments
 
+# Which PR this run is for, from the comment that triggered it - the run itself is attributed to
+# the default branch, so the list gives no other clue which conversation it belongs to.
+run-name: >-
+  ${{ github.event.issue.number && format('#{0}', github.event.issue.number)
+      || github.event.pull_request.number && format('#{0}', github.event.pull_request.number)
+      || github.ref_name }}
+
 # Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
 #
 # All THREE events, because wiring only `issue_comment` is the usual mistake and it
