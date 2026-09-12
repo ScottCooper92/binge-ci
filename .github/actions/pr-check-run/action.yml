@@ -97,8 +97,19 @@ runs:
         # Update in place rather than posting a second run under the same name. Two runs with
         # one name both show on the PR, so a stale conclusion would sit next to the current one
         # with nothing saying which is live.
-        existing=$(gh api --method GET "repos/${REPO}/commits/${SHA}/check-runs" \
-          -f check_name="$NAME" -f per_page=1 --jq '.check_runs[0].id // empty' 2>/dev/null) || existing=""
+        #
+        # A FAILED lookup is not an absent one, and the difference matters: treating a 5xx as
+        # "nothing here" takes the create branch and leaves a SECOND run on this SHA - the exact
+        # outcome the paragraph above is avoiding. `filter=latest` then hides one of the two for
+        # good, and a stranded `failure` pins the merge gate where no later run can clear it. So a
+        # call that fails posts nothing at all. The assignment's own exit status is the
+        # discriminator, since --jq prints nothing for a clean empty result either way.
+        if existing=$(gh api --method GET "repos/${REPO}/commits/${SHA}/check-runs" \
+             -f check_name="$NAME" -f per_page=1 --jq '.check_runs[0].id // empty' 2>/dev/null); then
+          :
+        else
+          skip "could not read the existing check runs for ${SHA}; creating one blind would leave a second '${NAME}' on this commit."
+        fi
 
         payload=$(jq -n \
           --arg name "$NAME" --arg conclusion "$CONCLUSION" \

@@ -426,9 +426,11 @@ jobs:
       # check behind, and the merge gate below holds on anything that is not CLEAN, so without
       # this a re-run over the same commit would be held by its own last attempt.
       #
-      # Posted as COMPLETED/success even though the review has not started, because the only
-      # alternatives are worse: a queued or in_progress check holds mergeStateStatus at UNSTABLE
-      # for the whole run, which is the same gate, held every time.
+      # COMPLETED, because a queued or in_progress check holds mergeStateStatus at UNSTABLE for
+      # the whole run - the same gate, held every time. NEUTRAL rather than success, because a
+      # runner that dies here would otherwise leave a green check vouching for a review that
+      # never reached a verdict, and a false green on the gate is worse than no check at all.
+      # It never meets the merge gate: the verdict below replaces it before that step runs.
       - name: Show the review as running
         if: needs.resolve.outputs.sha != ''
         uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
@@ -437,7 +439,7 @@ jobs:
           repository: ${{ github.repository }}
           sha: ${{ needs.resolve.outputs.sha }}
           name: Bot review
-          conclusion: success
+          conclusion: neutral
           title: Reviewing this commit
           summary: A review is running against this commit. This check is replaced with the verdict when it finishes.
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -628,10 +630,6 @@ jobs:
             *) echo "::error::Unrecognised verdict '$verdict'"; exit 1 ;;
           esac
 
-          # Read by the check run at the end of the job. Written HERE rather than after the post,
-          # so a verdict that was reached but refused by GitHub still reports as the verdict it was.
-          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
-
           # The SHA is named twice - in commit_id and in the body - because neither alone works.
           #
           # commit_id is why this is the REST endpoint: `gh pr review` sends none, so GitHub
@@ -691,6 +689,34 @@ jobs:
           # if the response is not the shape expected.
           jq -r '"Posted review \(.id), pinned to \(.commit_id)."' < "$POST_LOG" || cat "$POST_LOG"
           : > "$POST_LOG"
+
+          # AFTER the post, never before it. The check run keys off this, and a verdict that was
+          # reached but refused by GitHub is not one this PR carries - reporting it would put an
+          # approval on a commit whose review never landed.
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+      # BEFORE the merge, and reporting only the review. Putting it after meant a run whose review
+      # succeeded and whose MERGE failed posted a red check titled "the review run failed" - wrong
+      # on its face, contradicting the accurate comment posted beside it, and dropping this SHA out
+      # of CLEAN, which holds the very merge it is reporting on. That is what the neutral below
+      # exists to avoid, so the failure path must not route around it.
+      #
+      # A merge that fails is reported by "Report a failed review", which is where it belongs: this
+      # check is named for the review, and the review is what it now answers for.
+      - name: Record the verdict on the PR
+        if: always() && steps.submit.outputs.verdict != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          # `request_changes` is NEUTRAL on purpose: a red check on this SHA would hold any later
+          # merge, a human's included, for a verdict the review already carries as blocking.
+          conclusion: ${{ steps.submit.outputs.verdict == 'approve' && 'success' || 'neutral' }}
+          title: ${{ steps.submit.outputs.verdict == 'approve' && 'Approved' || 'Changes requested' }}
+          summary: The verdict above was posted as a review on this PR.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
@@ -992,35 +1018,26 @@ jobs:
             printf '%s\n%s\n' "$marker" "$body" | gh pr comment "$PR" --body-file -
           fi
 
-      # The PR's own record that this ran. A workflow_run run is attributed to the default branch,
-      # so it is not on the PR to be found: until this, the only trace a review left was the review
-      # itself, and a run that decided to do nothing left none at all.
+      # The one outcome the verdict check above cannot report: a run that never reached a verdict
+      # at all. Without this the SHA would keep the neutral "Reviewing this commit" from the start
+      # of the job, which says a review is in flight when none is.
       #
-      # LAST, and after the merge step rather than before it. The action posts an already-completed
-      # check run for a reason (see its header) - a pending one holds mergeStateStatus at UNSTABLE,
-      # which the gate above reads as not CLEAN - and a conclusion written before the gate would be
-      # reporting a verdict on a merge that had not been attempted yet.
-      - name: Record this run on the PR
-        if: always() && needs.resolve.outputs.sha != ''
+      # Guarded on the verdict being EMPTY, so a run that reviewed and then failed later - in the
+      # merge, in a reporter - keeps the verdict it earned.
+      - name: Record a run that reached no verdict
+        if: always() && steps.submit.outputs.verdict == '' && needs.resolve.outputs.sha != ''
         uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
           sha: ${{ needs.resolve.outputs.sha }}
           name: Bot review
-          # `request_changes` is NEUTRAL on purpose: a red check on this SHA would hold any later
-          # merge, a human's included, for a verdict the review already carries as blocking.
-          conclusion: >-
-            ${{ job.status != 'success' && 'failure'
-              || steps.submit.outputs.verdict == 'approve' && 'success'
-              || 'neutral' }}
-          title: >-
-            ${{ job.status != 'success' && 'The review run failed'
-              || steps.submit.outputs.verdict == 'approve' && 'Approved'
-              || steps.submit.outputs.verdict == 'request_changes' && 'Changes requested'
-              || 'No review posted' }}
+          # Both no-verdict endings, told apart by the job: one broke, the other decided there was
+          # nothing to review - a PR closed under it, say. Neither is a failure of the PR's code,
+          # so only the first is red.
+          conclusion: ${{ job.status != 'success' && 'failure' || 'neutral' }}
+          title: ${{ job.status != 'success' && 'The review run failed' || 'No review posted' }}
           summary: >-
-            ${{ job.status != 'success' && 'This run did not finish; the log says where it stopped.'
-              || steps.submit.outputs.verdict != '' && 'The verdict above was posted as a review on this PR.'
+            ${{ job.status != 'success' && 'This run did not finish and posted no review; the log says where it stopped.'
               || 'The run finished without posting a review - the PR was not open, or there was nothing to review.' }}
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
