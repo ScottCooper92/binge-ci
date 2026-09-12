@@ -793,6 +793,20 @@ jobs:
           labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
           echo ",$labels," | grep -q ",hold," && hold "the \`hold\` label is set."
 
+          # The same rule as that label, for the one case the label cannot cover. An author bot's
+          # edit to a governed path is now rebased onto the PR rather than discarded, and a PR that
+          # never touched the file merges it by construction - so a change to CLAUDE.md or .claude
+          # can enter a PR AFTER `hold` was decided, on a PR nobody would have thought to label. The
+          # bot's own note carries the marker; the convention is that such a change is merged by a
+          # human, and this is what keeps that true.
+          #
+          # Checked here rather than by having the author jobs add `hold`: a label has to exist in
+          # the repository to be applied, and one that silently fails to apply restores nothing.
+          governed=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
+            --paginate --jq '.[].body' | grep -c -- '<!-- governed-merged -->' || true)
+          [ "${governed:-0}" = "0" ] \
+            || hold "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
+
           # Stacks merge bottom-up: only a PR based on the default branch is mergeable.
           base=$(gh pr view "$PR" --json baseRefName --jq .baseRefName)
           [ "$base" = "$DEFAULT_BRANCH" ] \
@@ -908,6 +922,14 @@ jobs:
           [ "$state" = "CLEAN" ] || hold "mergeStateStatus is $state, not CLEAN." merge-state
 
           title=$(gh pr view "$PR" --json title --jq .title)
+          # GitHub ignores a commit title and message on a REBASE merge, and gh sends them anyway -
+          # there is no validation in cli/cli rejecting the pair, so they go into the payload and
+          # are dropped server-side. Passing them only where they mean something keeps the command
+          # honest about what it is asking for.
+          message=()
+          if [ "$MERGE_METHOD" != "rebase" ]; then
+            message=(--subject "$title (#$PR)" --body "$(gh pr view "$PR" --json body --jq .body)")
+          fi
           # Kept so "Report a failed review" can name WHY a merge failed instead of pointing at a log.
           # A refusal is usually one line from the API, and it is the line that decides whether a
           # maintainer retries or merges by hand.
@@ -916,8 +938,7 @@ jobs:
           # success output too. Left in place, a non-empty log would mean "the merge was reached"
           # rather than "the merge errored".
           merge_log="${{ runner.temp }}/merge-error.txt"
-          if ! gh pr merge "$PR" "--${MERGE_METHOD}" --subject "$title (#$PR)" \
-              --body "$(gh pr view "$PR" --json body --jq .body)" > "$merge_log" 2>&1; then
+          if ! gh pr merge "$PR" "--${MERGE_METHOD}" "${message[@]}" > "$merge_log" 2>&1; then
             cat "$merge_log" >&2
             exit 1
           fi

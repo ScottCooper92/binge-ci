@@ -11,7 +11,8 @@
 #   <ref> is what the job checked out - the PR as pushed, so always the right content here.
 #   An edit the agent made on top of the rewrite is REBASED onto the PR's copy by a three-way
 #   merge - the agent's edit is a delta against the base, which is what such a merge takes -
-#   and only discarded when the two sides touch the same lines. Either way it prints a markdown
+#   and discarded when the two sides collide. merge-file is conservative about that: adjacent
+#   lines collide, not just the same one. Either way it prints a markdown
 #   note on stdout; a governed path never changes without one. Progress goes to stderr.
 #
 # Usage: restore-agent-governed-paths.sh --list
@@ -100,32 +101,24 @@ for path in "${governed[@]}"; do
   # deletion: it only restores paths $ref HAS. A file the PR deleted and the rewrite
   # recreated survives it silently, or aborts the script on the pathspec if $path is that
   # file itself.
-  path_restored=false
-  path_merged=false
-  path_discarded=false
-
   while IFS= read -r file; do
     [ -n "$file" ] || continue
 
     # Byte-identical to the base means the action's rewrite and nothing else; anything
     # further is an edit the agent made on top of it.
     if [ -n "$base" ] && git diff --quiet "$base" -- "$file"; then
-      path_restored=true
+      restored+=("$file")
       restore_from_ref "$file"
       continue
     fi
 
     if [ -n "$base" ] && merge_agent_edit "$file"; then
-      path_merged=true
+      merged+=("$file")
     else
-      path_discarded=true
+      discarded+=("$file")
       restore_from_ref "$file"
     fi
   done < <(git diff --name-only "$ref" -- "$path")
-
-  [ "$path_restored" = true ] && restored+=("$path")
-  [ "$path_merged" = true ] && merged+=("$path")
-  [ "$path_discarded" = true ] && discarded+=("$path")
 
   # Something the agent added fresh. Left in place - deleting it would be a fresh silent
   # loss, which is the fault being fixed. A file the rewrite recreated is staged rather than
@@ -151,7 +144,11 @@ note=""
 if [ ${#merged[@]} -gt 0 ]; then
   echo "Rebased agent edits onto the PR's copy: ${merged[*]}" >&2
   list=$(printf '`%s`, ' "${merged[@]}")
-  note+=$'\n'"_Note: I changed ${list%, }. Those paths govern the agents and are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so I never saw your version. My edit applied cleanly on top of it and is in this commit; read that part of the diff, because I was not shown what I was editing around._"$'\n'
+  # A marker, because this note is the only trace that a bot put a governed-path change into
+  # this PR. bot-review's merge gate holds on it: `hold` is decided when a PR is opened, and
+  # this is the one route that adds such a change AFTER that decision was taken.
+  note+=$'\n'"<!-- governed-merged -->"$'\n'
+  note+="_Note: I changed ${list%, }. Those paths govern the agents and are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so I never saw your version. My edit applied cleanly on top of it and is in this commit; read that part of the diff, because I was not shown what I was editing around._"$'\n'
 fi
 
 # The edit and the PR's own change touched the same lines, so there is no version of this file

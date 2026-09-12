@@ -112,6 +112,7 @@ opts *out*. A repo that forgets to configure something gets the safe behaviour.
 | --- | --- | --- |
 | `runner` | `["ubuntu-latest"]` | Ephemeral, so the `agent` label means code execution on a throwaway VM. Self-hosted needs `git`, `gh` and `jq` on PATH. |
 | `auto_merge` | `false` | Bot merging should be a decision a caller made, not one it inherited. |
+| `merge_method` | `squash` | What this workflow has always done, and it keeps a linear history. A caller landing **stacked** PRs passes `merge`: squash and rebase rewrite the parent's commits, so every child is left holding commits absent from the base and needs a hand-resolved merge. The repository must allow the method too. |
 | `show_full_output` | `false` | The agent's log stream carries what it read and ran; public logs are world-readable. |
 | `default_branch` | `main` | Binge is the only `master`. |
 
