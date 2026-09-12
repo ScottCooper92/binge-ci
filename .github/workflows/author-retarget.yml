@@ -165,6 +165,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
+          # A consumer may build from a git submodule (binge-seerr includes binge-integrations
+          # as one), and an agent that cannot build the checkout cannot fix or judge it.
+          submodules: recursive
           token: ${{ steps.token.outputs.token }}
 
       - name: Merge the base in, if the branch is behind

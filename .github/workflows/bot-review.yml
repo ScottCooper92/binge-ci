@@ -402,6 +402,9 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
+          # A consumer may build from a git submodule (binge-seerr includes binge-integrations
+          # as one), and an agent that cannot build the checkout cannot fix or judge it.
+          submodules: recursive
 
       # The review rules must come from the default branch, not from the branch under
       # review. Reading them out of the PR checkout would let a PR edit the guide that
