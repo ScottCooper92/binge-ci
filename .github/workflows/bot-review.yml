@@ -23,14 +23,20 @@ name: Bot review
 # The governing docs are read from the default branch, never from the PR checkout, so a PR
 # cannot rewrite the rules it is judged by.
 #
-# THE THIRD DOOR (`pull_request: [labeled]`) exists because the first cannot open for every
-# PR: a caller whose CI declares `paths-ignore` produces no run, no `workflow_run` and no
-# review for a PR whose every path matches - the label silently doing nothing while every
-# visible signal reads as tended.
+# THE THIRD DOOR (`pull_request: [labeled]`) exists because the first opens only for a PR
+# already opted in when its CI finishes, and two kinds of PR are not:
+#  - one labelled after a green run. A small CI finishes inside the minute between opening
+#    a PR and labelling it, and the run that should have reviewed it closed on "not opted
+#    in" (binge-integrations#8, #11). The label reopens this door, and that run vouches for
+#    the head exactly as it would have.
+#  - one CI will never run on: a caller whose CI declares `paths-ignore` produces no run, no
+#    `workflow_run` and no review for a PR whose every path matches - the label silently
+#    doing nothing while every visible signal reads as tended. That half is OFF unless the
+#    caller passes BOTH `unbuilt_paths` and `unbuilt_paths_regex`: a caller with no
+#    `paths-ignore` has no such PRs, and reviewing on it would be reviewing code mid-build.
 #
-# It is OFF unless the caller passes BOTH `unbuilt_paths` and `unbuilt_paths_regex`: a
-# caller with no `paths-ignore` has no such PRs, and the door would only review code
-# mid-build. A caller that passes them must also wire the `pull_request: [labeled]` trigger.
+# Every caller wires the `pull_request: [labeled]` trigger. A label on a head CI has not
+# reported on yet is left to the run, which finds the label in place when it finishes.
 on:
   workflow_call:
     inputs:
@@ -100,8 +106,10 @@ on:
         description: >
           Newline-separated mirror of the caller's ci.yml `paths-ignore`, enabling the
           `labeled` door for PRs CI will never run on. Empty (the default) disables that
-          door entirely. CHECKED against the caller's ci.yml at run time rather than
-          trusted, so drift closes the door loudly instead of narrowing it in silence.
+          half of the door; the other half, a PR labelled after its CI already reported,
+          needs nothing but the trigger. CHECKED against the caller's ci.yml at run time
+          rather than trusted, so drift closes the door loudly instead of narrowing it in
+          silence.
         type: string
         default: ''
       unbuilt_paths_regex:
@@ -181,7 +189,6 @@ jobs:
       inputs.dispatch_pr != '' ||
       (github.event_name == 'pull_request' &&
        github.event.label.name == inputs.agent_label &&
-       inputs.unbuilt_paths != '' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request' &&
@@ -271,18 +278,34 @@ jobs:
           ci=${run_info%%|*}
           pushed_at=${run_info##*|}
 
-          # Only a workflow_run review is vouched for by a green build; the other two doors are not,
-          # and "Merge if the bar is met" holds on that rather than merging on nothing.
+          # Only a green build vouches for a review. The workflow_run door always has one; the
+          # dispatch door never does; the label door only when it finds the build already there.
+          # "Merge if the bar is met" holds on the rest rather than merging on nothing.
           vouched=true
           if [ -n "${DISPATCH_PR:-}" ]; then
             vouched=false
             echo "Manual dispatch - not requiring a CI run (conclusion: '${ci:-none}')."
+          elif [ -n "${LABELED_PR:-}" ] && [ -n "$ci" ]; then
+            # CI reported on this head before the label landed, so the workflow_run door already
+            # opened for it and closed on "not opted in". That review is not coming. A green run
+            # still vouches for the head; a red one has nothing to review, and author-ci-fix has it.
+            [ "$ci" = "success" ] \
+              || skip "PR #$num's CI run on $sha did not succeed (conclusion: '$ci') - nothing to review."
+            # A label removed and put back must not buy a second review of the same head. The
+            # body's first line is the pin "Submit the review" writes, and the only durable mark.
+            reviewed=$(gh api "repos/${GH_REPO}/pulls/${num}/reviews?per_page=100" --paginate --jq '.[]' \
+              | jq -s --arg pin "Reviewed \`${sha:0:7}\`" \
+                  '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length')
+            [ "${reviewed:-0}" = "0" ] || skip "PR #$num was already reviewed at $sha."
+            echo "Labelled after CI reported on $sha - that run vouches for the head."
           elif [ -n "${LABELED_PR:-}" ]; then
             vouched=false
-            # Two ways this is the wrong door. A head CI has already reported on gets its review from
-            # that run, so reviewing here would double up; a head CI has NOT reported on is code
-            # mid-build, which this workflow's whole trigger choice exists to avoid.
-            [ -z "$ci" ] || skip "PR #$num already has a CI run on $sha - its review comes with that."
+            # No completed run on this head. For a caller with no paths-ignore that is code
+            # mid-build, which this workflow's trigger choice exists to avoid: the run's completion
+            # reopens the first door with the label now in place. For a caller with one, it may be
+            # a PR CI will never run on, which is what the rest of this door is for.
+            [ -n "$UNBUILT_PATHS" ] \
+              || skip "PR #$num has no completed CI run on $sha - its review comes with that run."
 
             # The mirror of the caller's paths-ignore lives in another repo's workflow, so it can drift:
             # an entry added there and not to `unbuilt_paths` puts that PR back in the silent limbo this

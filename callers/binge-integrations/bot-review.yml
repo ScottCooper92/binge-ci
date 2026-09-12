@@ -9,6 +9,8 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       pr:
@@ -41,8 +43,9 @@ jobs:
       # linter, no coverage floor and no screenshot suite - so naming one here would tell
       # the reviewer not to report what nothing actually catches.
       gated_checks: buf lint, buf breaking, or the Gradle build and its tests
-      # ci.yml here declares no paths-ignore, so every PR produces a run and the
-      # `labeled` door has nothing to open for. Leaving unbuilt_paths unset keeps it shut.
+      # ci.yml here declares no paths-ignore, so every PR produces a run and
+      # unbuilt_paths stays unset. The `labeled` trigger above is for the door's other
+      # case: a PR labelled after its run already finished (#8, #11 both were).
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
