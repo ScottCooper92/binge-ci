@@ -346,7 +346,7 @@ jobs:
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.4
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.5
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -362,7 +362,7 @@ jobs:
           inputs.toolchain == 'android' &&
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.4
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.5
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle, so leaving
