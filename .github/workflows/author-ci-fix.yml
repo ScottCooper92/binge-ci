@@ -88,6 +88,25 @@ on:
       log_tail_bytes:
         type: number
         default: 200000
+      reports_artifact:
+        description: >
+          The CI run's report artifact, read alongside the log. Gradle's console renderer
+          names a failed test's exception class and line and NOT its message, so the log
+          carries `java.lang.AssertionError at Foo.kt:229` where the useful half was
+          `expected:<Sending> but was:<Idle>`. The reports carry it. CHECK THE NAME your
+          ci.yml uploads under rather than assuming this default: a name that does not
+          exist is not an error, so a mismatch silently reads nothing. binge-seerr uses
+          `build-reports`, binge-integrations `test-reports`. Empty to skip, for a
+          caller whose CI uploads nothing.
+        type: string
+        default: build-reports
+      reports_cap_bytes:
+        description: >
+          Cap on the extracted text, not on the artifact. The artifact itself can be tens of
+          megabytes — kover and detekt HTML ride along with it — so what the agent reads is
+          the failure blocks pulled out of it.
+        type: number
+        default: 60000
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
@@ -134,8 +153,9 @@ concurrency:
 
 permissions:
   contents: read
-  # For reading the failing job's log. The author app's grant covers contents and pull
-  # requests but NOT Actions, so that call uses the workflow's own GITHUB_TOKEN.
+  # For reading the failing job's log and downloading its report artifact. The author
+  # app's grant covers contents and pull requests but NOT Actions, so both calls use
+  # the workflow's own GITHUB_TOKEN.
   actions: read
 
 env:
@@ -299,6 +319,86 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Gradle's console renderer prints a failed test as its exception class and location and
+      # NOT its message. An agent triaging from that has to guess which assertion went and why,
+      # and the guess is usually about a different bug: measured on binge-seerr#106, where the
+      # log said `java.lang.AssertionError at RequestDetailViewModelTest.kt:229` and this run's
+      # own reports said `expected:<Sending> but was:<Idle>` at a line ten further down. The
+      # attempt was spent, the PR sat blocked, and the note asked a human for the raw log —
+      # which has the same hole. Android lint and ktlint are the same shape: the console points
+      # at a report rather than quoting it.
+      #
+      # Best-effort by construction. No such artifact, an upload not yet finalized, a changed
+      # report layout: each leaves the log exactly as it was, and none is a reason to skip a
+      # failure the log alone might still fix.
+      - name: Capture the failing reports
+        id: reports
+        if: >
+          inputs.reports_artifact != '' && steps.pr.outputs.skip != 'true' &&
+          steps.guard.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          # An Actions API call, as the log is: the author app's grant does not cover Actions.
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ARTIFACT: ${{ inputs.reports_artifact }}
+          CAP_BYTES: ${{ inputs.reports_cap_bytes }}
+        run: |
+          set -uo pipefail
+          DIR="${{ runner.temp }}/ci-reports"
+          OUT="${{ runner.temp }}/ci-failure.reports.txt"
+          mkdir -p "$DIR"
+
+          # The race the log capture already retries for: workflow_run fires the instant CI
+          # completes, and the artifact finalizes asynchronously after that.
+          for attempt in 1 2 3; do
+            if gh run download "$RUN_ID" -n "$ARTIFACT" -D "$DIR" 2> "$DIR/.err"; then break; fi
+            echo "Attempt ${attempt}/3: artifact '${ARTIFACT}' not readable yet."
+            sed 's/^/gh: /' "$DIR/.err" || true
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+
+          # Gradle's per-test HTML holds "Failure details" and then the message and the stack.
+          # Only the files that actually failed: the artifact carries every passing class too,
+          # and on an Android caller the kover and detekt reports besides.
+          {
+            echo "Failure detail from the '${ARTIFACT}' artifact of CI run ${RUN_ID}."
+            echo "The console log names the exception and the line; this is where its message is."
+            echo
+            find "$DIR" -path '*reports/tests*' -name '*.html' -print0 2>/dev/null \
+              | while IFS= read -r -d '' f; do
+                  grep -q 'Failure details' "$f" || continue
+                  echo "--- ${f#"$DIR"/}"
+                  sed -e 's/<[^>]*>/\n/g' "$f" \
+                    | sed -e 's/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g' \
+                    | sed -e '/^[[:space:]]*$/d' \
+                    | sed -n '/Failure details/,$p' \
+                    | head -n 40
+                  echo
+                done
+          } > "$OUT" 2>/dev/null || true
+
+          # A header and nothing under it is worse than no file: it reads as "looked, found
+          # nothing wrong". The marker line is what says a block was actually extracted.
+          if [ -s "$OUT" ] && grep -q '^--- ' "$OUT"; then
+            head -c "$CAP_BYTES" "$OUT" > "$OUT.capped" && mv "$OUT.capped" "$OUT"
+            echo "Extracted $(wc -c < "$OUT") bytes of failure detail."
+            {
+              echo 'note<<PROMPT_EOF'
+              echo ''
+              echo "Gradle names a failed test's exception class and line but NOT its message, so"
+              echo "the log above cannot tell you which assertion went or what it compared."
+              echo "${{ runner.temp }}/ci-failure.reports.txt carries the message and the stack for"
+              echo "every test that failed in this run. Read it before forming a theory about a test"
+              echo "failure - a theory built on the log alone is usually about a different bug."
+              echo 'PROMPT_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            rm -f "$OUT"
+            echo "No failed-test reports in the artifact; the log is the only input."
+          fi
+
       # Says the run has started, and nothing more: a job with a long ceiling that is silent until
       # it finishes is indistinguishable from one that never picked the failure up.
       #
@@ -452,6 +552,7 @@ jobs:
           prompt: |
             CI failed on this branch. The failing job output is at
             ${{ runner.temp }}/ci-failure.trimmed.log — read it first.
+            ${{ steps.reports.outputs.note }}
 
             Use the triage table in ${{ steps.docs.outputs.dir }}/ci-triage.md to
             decide WHY it is red before touching anything. That table maps each
@@ -654,6 +755,8 @@ jobs:
           mkdir -p "$OUT"
           [ -f "${{ runner.temp }}/ci-failure.trimmed.log" ] \
             && cp "${{ runner.temp }}/ci-failure.trimmed.log" "$OUT/" || true
+          [ -f "${{ runner.temp }}/ci-failure.reports.txt" ] \
+            && cp "${{ runner.temp }}/ci-failure.reports.txt" "$OUT/" || true
           [ -f "${{ runner.temp }}/note.md" ] && cp "${{ runner.temp }}/note.md" "$OUT/" || true
           # How far the agent got is what a timeout raises, and the working tree answers it: a fix
           # written but unpushed reads differently from a tree never touched.

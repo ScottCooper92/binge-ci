@@ -41,6 +41,11 @@ jobs:
       toolchain: jvm
       java_version: '21'
       setup_buf: true
+      # This repo's ci.yml uploads its reports as `test-reports`; the input defaults to
+      # `build-reports`, which is what binge-seerr's ci.yml names. A name that does not
+      # exist is not an error - `gh run download` just finds nothing, three times - so
+      # the capture would fail silently and the agent would triage from the log alone.
+      reports_artifact: test-reports
       verify_guidance: >
         Verify by running only the check that failed — `buf lint`, `buf breaking`,
         `./gradlew :contracts:test` for the round-trip test. Do not run the whole
