@@ -217,6 +217,11 @@ jobs:
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$num has no '$AGENT_LABEL' label - leaving it alone."
 
+          # Written HERE, the moment opt-in is established, because that is what the failure
+          # reporters below read it as. Written at the end of the step instead, it meant "this
+          # step succeeded", so every hard failure in it silenced the reporters covering it.
+          echo "number=$num" >> "$GITHUB_OUTPUT"
+
           # The checkout is by branch name, while the failure log and the attempt marker are keyed to
           # SHA. Repairing a new tip from a stale log is worse than doing nothing, and the marker
           # would be recorded against a commit that is no longer head - handing the real head a fresh
@@ -229,7 +234,6 @@ jobs:
           [ -n "${AUTHOR_BOT_ID:-}" ] \
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
-          echo "number=$num" >> "$GITHUB_OUTPUT"
           # The governed paths are rewritten from the PR's BASE, not the default branch: on a
           # stacked PR the two differ, and a rewrite from the wrong one reverts the lower PR too.
           echo "base=$(gh pr view "$num" --json baseRefName --jq .baseRefName)" >> "$GITHUB_OUTPUT"

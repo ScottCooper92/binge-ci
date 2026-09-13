@@ -174,12 +174,16 @@ jobs:
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$PR has no '$AGENT_LABEL' label - not mine to answer."
 
+          # Written HERE, the moment opt-in is established, because that is what the failure
+          # reporter below reads it as. Written at the end of the step instead, it meant "this
+          # step succeeded", so every hard failure in it silenced the reporter covering it.
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+
           # See author-ci-fix.yml: an empty value is malformed in two different
           # ways depending on which path commits, and neither one fails.
           [ -n "${AUTHOR_BOT_ID:-}" ] \
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
-          echo "number=$PR" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           # claude-code-action rewrites the governed paths from the PR's BASE, not the default
           # branch, so the undo has to discriminate against the same ref - on a stacked PR the two
