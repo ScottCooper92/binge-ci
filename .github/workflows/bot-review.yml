@@ -450,6 +450,12 @@ jobs:
       always() &&
       (needs.resolve.result == 'failure' || needs.resolve.result == 'cancelled') &&
       (github.event.workflow_run.head_sha || github.event.pull_request.head.sha) != ''
+    # Keyed on the head, not the PR number resolve never produced: two doors failing together
+    # in the same outage would otherwise race pr-check-run's read-then-create and leave two
+    # notes on one commit.
+    concurrency:
+      group: bot-review-failed-${{ github.repository }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+      cancel-in-progress: false
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 5
     steps:
