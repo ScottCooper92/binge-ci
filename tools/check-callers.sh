@@ -8,7 +8,9 @@
 # against THAT, so each is checked against the workflow at the tag it pins, read with
 # `git show`. Checking a self caller against the tree would fail it for a signature it never
 # calls, and "fixing" it to match would be the startup_failure below at run time. ci.yml
-# fetches the tags for this.
+# fetches the tags for this. The one PR on which the tag cannot resolve is the release bump,
+# which pins the tag it is about to create; there the tree stands in, since the tag is cut
+# at that very commit.
 #
 # This exists because actionlint cannot see across a REMOTE reusable-workflow
 # reference. For a local `./.github/workflows/x.yml` call it validates the inputs;
@@ -59,11 +61,19 @@ for caller in callers/*/*.yml .github/workflows/self-*.yml; do
       fi
       ;;
     *)
-      if ! git show "${ref}:${target}" > "$pinned" 2>/dev/null; then
-        echo "FAIL $caller"; echo "     cannot read $target at $ref - tag not fetched, or the tag lacks it"; fail=1; continue
+      if git show "${ref}:${target}" > "$pinned" 2>/dev/null; then
+        reusable="$pinned"
+        against="$ref"
+      elif [ -f "$target" ]; then
+        # The release PR pins the tag it is about to create, and the tag is cut AFTER the
+        # merge - so on that PR the ref cannot resolve, and the tree is what the tag will
+        # contain. A pin naming a tag that never gets cut is tag-check.yml's to catch, on the
+        # tag push, where existence can be required.
+        reusable="$target"
+        against="the tree ($ref not cut yet)"
+      else
+        echo "FAIL $caller"; echo "     no reusable workflow at $target, at $ref or in the tree"; fail=1; continue
       fi
-      reusable="$pinned"
-      against="$ref"
       ;;
   esac
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
