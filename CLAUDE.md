@@ -7,22 +7,22 @@ it as the source of truth; so should you.
 
 The shared CI for Binge and its companions: five reusable workflows (a review bot and four
 author bots), the composite actions they need, the checks actionlint cannot do, and worked
-callers for the two public consumers. Read `README.md` for the shape of it and
+callers for the public consumers. Read `README.md` for the shape of it and
 `MIGRATION.md` for how the consumers got here.
 
-Nothing here builds. It is shell and YAML, and it runs inside three other repositories.
+Nothing here builds. It is shell and YAML, and it runs inside every repository that calls it.
 
 ## The one rule everything else serves
 
-**A change here is a change in three other repositories that will not notice until their
-next release.**
+**A change here is a change in every consuming repository, and none of them will notice
+until their next release.**
 
 A reusable workflow's inputs, outputs, secrets and required permissions are its public
 signature. A caller that no longer fits dies as `startup_failure` before a single step runs,
 with nothing on the PR. So a PR that changes one says so in its body, keeps the worked
 callers under `callers/` in step in the same commit, and names the consumer PRs that have to
-follow. `tools/check-callers.sh` catches the mechanical part for the two public consumers;
-Binge's callers live on its own `ci/binge-ci-callers` branch and it cannot see them. The
+follow. `tools/check-callers.sh` catches the mechanical part for the public consumers;
+Binge's callers live in its own `.github/workflows/` and it cannot see them. The
 `self-*.yml` callers are the exception: they pin a release tag and are checked against the
 workflow at that tag, so they change in the release bump and never with the workflow.
 

@@ -2,18 +2,19 @@
 
 Shared CI and agent workflows for the Binge repositories.
 
-Five GitHub Actions workflows run a review bot and three author bots across
-[Binge](https://github.com/ScottCooper92), [binge-integrations](https://github.com/ScottCooper92/binge-integrations)
-and [binge-seerr](https://github.com/ScottCooper92/binge-seerr). They live here once, and
-each repo calls them with a ~30-line caller.
+Five GitHub Actions workflows run a review bot and four author bots across
+[Binge](https://github.com/ScottCooper92), [binge-integrations](https://github.com/ScottCooper92/binge-integrations),
+[binge-seerr](https://github.com/ScottCooper92/binge-seerr) and
+[binge-design-system](https://github.com/ScottCooper92/binge-design-system). They live here
+once, and each repo calls them with a ~30-line caller.
 
 They used to be copied. That went the way copies go: by the time there were three, all
 three were missing the same 23 fixes, and the original had grown 43% past the version they
 shared. The comments in these files record what each fix was for, which is most of why
 they are worth keeping in one place.
 
-> **Status: all three repositories call these.** What is not yet proven is every bot —
-> see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
+> **Status: Binge, binge-seerr, binge-integrations and binge-design-system call these.**
+> What is not yet proven is every bot — see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
 > ever been skipped by a guard.
 
 ## The five workflows
@@ -79,7 +80,7 @@ jobs:
 
 The worked callers under `callers/` are the complete versions, one per workflow.
 
-Worked examples for two repos are in `callers/`. Every input is documented on the workflow
+Worked examples for the public repos are in `callers/`. Every input is documented on the workflow
 it belongs to.
 
 **What is shared is the mechanism**: the trust boundary, the label gate, the fork guard,
@@ -140,7 +141,7 @@ opts *out*. A repo that forgets to configure something gets the safe behaviour.
 
 Binge's callers are not in `callers/`. They name that repo's self-hosted runner labels, and
 this repository is public — a public staging area has no reason to carry infrastructure
-detail about a private repo. They live on the `ci/binge-ci-callers` branch in Binge itself.
+detail about a private repo. They live in Binge's own `.github/workflows/`.
 
 ## Layout
 
@@ -148,7 +149,7 @@ detail about a private repo. They live on the `ci/binge-ci-callers` branch in Bi
 .github/workflows/    The five reusable workflows, and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths and
                       pr-check-run (both below)
-callers/              Worked callers for the two public repos
+callers/              Worked callers for the public repos
 tools/                The checks actionlint cannot do
 ```
 
@@ -164,7 +165,7 @@ and every bot undoes it against the PR's base. Without that, an agent run on tho
 reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
 
 All three actions live here rather than in the consuming repos so a PR cannot edit the
-guard that is about to refuse it, and so the two public repos get one they never had.
+guard that is about to refuse it, and so the public repos get one they never had.
 
 They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`. Inside a
 reusable workflow a local action path resolves against the **caller's** workspace, where

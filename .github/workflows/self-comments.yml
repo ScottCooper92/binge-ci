@@ -58,7 +58,7 @@ jobs:
         pin - that is a release, made by a human in a commit of its own.
 
         A change to a reusable workflow's inputs, outputs, secrets or required
-        permissions is a change in three other repositories that will not notice
+        permissions is a change in every consuming repository, and none will notice
         until their next sync. Make it if asked, but say so in your reply, and keep
         the worked callers under callers/ in step with it in the same commit.
 
