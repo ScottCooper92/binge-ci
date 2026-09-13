@@ -47,6 +47,9 @@ on:
 permissions:
   contents: read
   actions: read
+  # For the check run the called workflow posts with GITHUB_TOKEN when its first job fails
+  # before the reviewer app's token exists - the one report that cannot use the app.
+  checks: write
 
 jobs:
   review:

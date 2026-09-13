@@ -89,12 +89,14 @@ appears on the PR itself: a check named *Bot review*, linking to the run, saying
 commit was approved, had changes requested, or the run failed. A check run is addressed by
 SHA, so it lands on the PR even though the run does not.
 
-> **Prerequisite: the reviewer GitHub App needs `checks: write`.** It is granted in the App's
-> settings, not here. The workflow's own `GITHUB_TOKEN` was the alternative and is worse: the
-> permission would have to be added to the reusable workflow *and* to every caller's
-> `permissions:` block, and a caller that missed the bump dies as `startup_failure` with no
-> log. Until the grant is in place the step warns and the bots carry on — it reports, it does
-> not gate.
+> **Prerequisite: the reviewer GitHub App needs `checks: write`**, granted in the App's
+> settings, not here. Until the grant is in place the step warns and the bots carry on — it
+> reports, it does not gate. **And every `bot-review` caller declares `checks: write` too**,
+> for the one report the app cannot make: when the first job fails before the app's token
+> exists (a GitHub outage minting it), a job posting with the workflow's own `GITHUB_TOKEN`
+> leaves a neutral *Bot review (run failed)* check on the head, under a name of its own
+> because a check run can only be updated by the app that created it. A caller that misses
+> that permission dies as `startup_failure` with no log — the trap described below.
 
 The action only ever posts an **already-completed** check, and `bot-review` posts one at the
 start of a review as well as at the end. Both are the same constraint: a queued or
@@ -173,9 +175,10 @@ review reads `CLAUDE.md` and `.ai/agents/` from `main`, exactly as it does in a 
 
 A reusable workflow cannot be granted more than its caller holds, and a caller with no
 `permissions:` block gets the repository default — `contents: read`, with no `actions`.
-`bot-review` and `author-ci-fix` both need `actions: read` for their CI-run lookup, so a
-caller that omits it dies as `startup_failure`: no log, no annotation, no job, and nothing
-on the PR beyond a red tick.
+`bot-review` and `author-ci-fix` both need `actions: read` for their CI-run lookup, and
+`bot-review` needs `checks: write` for the check it posts when its first job fails, so a
+caller that omits either dies as `startup_failure`: no log, no annotation, no job, and
+nothing on the PR beyond a red tick.
 
 This is the one way a caller differs from the copy it replaces. An ordinary workflow
 declaring `permissions: actions: read` simply gets it; a caller has to hold it first — which
