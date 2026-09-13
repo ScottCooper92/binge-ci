@@ -250,16 +250,21 @@ jobs:
             # itself declined. So the head's trailing run of commits authored by this bot - everything
             # since the last push that was not its own - is what one human push has already been
             # charged, and the attempts recorded against those commits are counted against the cap.
+            #
+            # A marker names the commit that was REPAIRED, so the attempt that produced the first bot
+            # commit is recorded against the human commit beneath it. That commit ends the walk, but
+            # its marker is read first: without it the first repair is never counted, and a cap of
+            # two lets three through.
             bot_email="${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
             commits=$(gh api "repos/${GH_REPO}/pulls/${PR}/commits?per_page=100" --paginate \
               --jq '.[] | "\(.sha)|\(.author.login // "")|\(.commit.author.email // "")"')
             spent=0
             while IFS='|' read -r sha login email; do
               [ -n "$sha" ] || continue
-              [ "$login" = "$AUTHOR_BOT" ] || [ "$email" = "$bot_email" ] || break
               if grep -qF "<!-- ci-fix-attempted:${sha} -->" <<<"$comments"; then
                 spent=$((spent + 1))
               fi
+              [ "$login" = "$AUTHOR_BOT" ] || [ "$email" = "$bot_email" ] || break
             done < <(tac <<<"$commits")
             if [ "$spent" -ge "$MAX_ATTEMPTS" ]; then
               echo "Already made $spent fix attempt(s) since the last push that was not this bot's. Stopping."
