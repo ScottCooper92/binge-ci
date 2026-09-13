@@ -8,7 +8,7 @@ press.
 ## 1. What CI has already decided
 
 CI is green on the head under review before a review starts. That means actionlint and
-shellcheck passed over every workflow, caller and script; the two public callers fit the
+shellcheck passed over every workflow, caller and script; the public callers fit the
 workflows in the tree and the `self-*.yml` callers fit the workflows at the tag they pin
 (`tools/check-callers.sh`); every composite action's `run:` blocks are shellcheck-clean
 (`tools/check-action-shell.sh`); and every self-reference pins one immutable tag with no

@@ -1,0 +1,62 @@
+name: Bot review
+
+# Which PR this run is for. A workflow_run run is attributed to the default branch, so without
+# this every run of this workflow carries the same branch and the same title, and telling two
+# apart means opening one. run-name is evaluated before any job, so it cannot use the number the
+# called workflow resolves - it comes off the event, and falls back to the head branch, which is
+# what that resolution looks the PR up by anyway.
+run-name: >-
+  ${{ github.event.workflow_run.pull_requests[0].number
+        && format('#{0} · {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_branch)
+      || github.event.pull_request.number
+        && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
+      || inputs.pr && format('#{0} · dispatched', inputs.pr)
+      || github.event.workflow_run.head_branch
+      || github.ref_name }}
+
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository, and one that two other builds include directly. `./gradlew build`
+# here cannot see the consumers, so a change that compiles fine in this repository can
+# still break Binge or a companion at their next sync - which is why auto_merge is off.
+# Turn it on when the carve has landed and the review has a track record here.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+# A reusable workflow cannot be granted MORE than its caller holds, and a caller with no
+# `permissions:` block gets the repository default - which is `contents: read` and does NOT
+# include `actions`. The called workflow needs `actions: read` for its CI-run lookup, so without
+# this the run dies as `startup_failure` before a single step executes: no log, no annotation, and
+# nothing on the PR.
+#
+# This is the one way a reusable workflow differs from the copy it replaced. An ordinary workflow
+# declaring `permissions: actions: read` simply gets it; a caller has to hold it first. Found by
+# running it (binge-seerr#1), not by actionlint, which has no way to see across the reference.
+permissions:
+  contents: read
+  actions: read
+  # For the check run the called workflow posts with GITHUB_TOKEN when its first job fails
+  # before the reviewer app's token exists - the one report that cannot use the app.
+  checks: write
+
+jobs:
+  review:
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
+    with:
+      dispatch_pr: ${{ inputs.pr }}
+      auto_merge: false
+      gated_checks: ktlint or Android lint
+      # ci.yml here declares no paths-ignore - deliberately, since bot-review needs a
+      # successful run against the head and a skipped run is a PR that is never
+      # reviewed. So there are no CI-less PRs and the `labeled` door stays shut.
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
