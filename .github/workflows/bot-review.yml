@@ -264,8 +264,11 @@ jobs:
             # `.[0]` among the matches is arbitrary, so a fork could stand in for the PR whose CI
             # run this is and have it skipped as "from a fork".
             num=$(gh pr list --head "$BRANCH" --state open --json number,isCrossRepository \
-              --jq '[.[] | select(.isCrossRepository | not)] | .[0].number')
+              --jq '[.[] | select(.isCrossRepository | not)] | .[0].number // empty')
           fi
+          # `// empty` above, not a test here: with no match `.[0].number` is jq null, which --jq
+          # prints as the four-character string "null" - non-empty, so the PR merged or closed
+          # between CI finishing and this run would pass this line and die in the view below.
           [ -n "$num" ] || skip "No open PR found - nothing to review."
 
           # Unit separator (0x1f), not tab. An unlabelled PR leaves an empty middle field, and tab is
@@ -859,10 +862,23 @@ jobs:
             # must not post it twice, and must not be reported as a refusal either: the pin is what
             # the reviewed-already check reads, so it is what is looked for here - on every failed
             # attempt, the last one included, before deciding whether there is anything to retry.
-            if gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' 2>/dev/null \
-                 | jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" \
-                     '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length' \
-                 | grep -qvx 0; then
+            #
+            # The lookup's own failure is a third state, not a zero: inside an `if`, a GET that
+            # died would feed jq nothing, count 0, and read as "not landed" - which retries into a
+            # duplicate, or reports a refusal over a review that is on the PR. So the fetch is an
+            # assignment checked on its own, and a failed one ends the run as unconfirmed: the
+            # reporter says to look, and a re-run checks the pin before posting anything.
+            if ! reviews=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' \
+                             2>>"$POST_LOG"); then
+              echo "Review POST attempt $attempt failed (HTTP ${status:-none}), and the lookup for whether it landed failed too; not retrying blind." >&2
+              cat "$POST_LOG" >&2
+              echo "unconfirmed=true" >> "$GITHUB_OUTPUT"
+              echo "refused_status=${status:-none}" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            if jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" \
+                 '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length' \
+                 <<<"$reviews" | grep -qvx 0; then
               echo "Review POST attempt $attempt failed (HTTP ${status:-none}) but the review is on the PR; not posting it again." >&2
               posted=true
               landed=true
@@ -1194,6 +1210,7 @@ jobs:
           SUBMITTED: ${{ steps.submit.outcome }}
           REFUSED: ${{ steps.submit.outputs.refused }}
           REFUSED_STATUS: ${{ steps.submit.outputs.refused_status }}
+          UNCONFIRMED: ${{ steps.submit.outputs.unconfirmed }}
           MERGED: ${{ steps.merge.outcome }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
@@ -1237,7 +1254,14 @@ jobs:
             # accurate 422 note that follows it, leaving the PR telling the reader to re-run CI on
             # a commit that is no longer on it - the same shape the else branch below is about,
             # one level down.
-            if [ "$REFUSED" = "true" ]; then
+            if [ "$UNCONFIRMED" = "true" ]; then
+              # Neither "nothing was posted" nor "it is on the PR" is known here, and the two
+              # notes below each assert one of them. This one asserts neither and says what to do.
+              marker="<!-- review-unconfirmed:${SHA} -->"
+              body=$(printf 'The automatic review of `%s` was sent, GitHub'"'"'s answer to it was lost (HTTP %s), and this run could not read the PR'"'"'s reviews back to tell whether it landed ([log](%s)). If a review pinned to `%s` is on this PR, it stands; if none is, re-running CI on this commit posts it - a run looks for the pin before posting, so it will not post twice. Nothing was merged.' \
+                "${SHA:0:7}" "$REFUSED_STATUS" "$RUN_URL" "${SHA:0:7}")
+              echo "check_summary=The review was sent but its answer was lost, and the run could not confirm whether it landed. Check the PR's reviews for one pinned to this commit; re-run CI on it if there is none." >> "$GITHUB_OUTPUT"
+            elif [ "$REFUSED" = "true" ]; then
               marker="<!-- review-refused:${SHA} -->"
               # head, not tail. Under `-i` and `2>&1` the status line and the informative JSON
               # body land FIRST and the one-line `gh: ... (HTTP 422)` summary last, so tail keeps
