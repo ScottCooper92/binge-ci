@@ -38,6 +38,10 @@ makes it that repo's:
 
 ```yaml
 name: Bot review
+run-name: >-
+  ${{ github.event.workflow_run.pull_requests[0].number
+        && format('#{0} · {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_branch)
+      || github.event.workflow_run.head_branch }}
 on:
   workflow_run:
     workflows: ["CI"]
@@ -67,6 +71,38 @@ silent" step each one ends with.
 screenshot gate; binge-integrations names buf and proto field numbers. A rule that fits
 both is usually too vague to bind either.
 
+## Seeing what the bots did
+
+A `workflow_run` run is not associated with the pull request that caused it. It is attributed
+to the default branch, so it never appears in the PR's checks list, `gh pr checks` never
+mentions it, and every run in the Actions list carries the same branch and the same title.
+Two things narrow that gap, and neither replaces the comments a bot posts when it needs a
+human.
+
+**`run-name` in the caller** puts the PR number and head branch in the Actions list. It has
+to live in the caller — a reusable workflow cannot name its caller's run — and it is
+evaluated before any job, so it reads the event rather than the number the called workflow
+later resolves. Every caller in `callers/` shows the shape for its own triggers.
+
+**`pr-check-run`** posts a check run against the PR's head commit, which is how `bot-review`
+appears on the PR itself: a check named *Bot review*, linking to the run, saying whether the
+commit was approved, had changes requested, or the run failed. A check run is addressed by
+SHA, so it lands on the PR even though the run does not.
+
+> **Prerequisite: the reviewer GitHub App needs `checks: write`.** It is granted in the App's
+> settings, not here. The workflow's own `GITHUB_TOKEN` was the alternative and is worse: the
+> permission would have to be added to the reusable workflow *and* to every caller's
+> `permissions:` block, and a caller that missed the bump dies as `startup_failure` with no
+> log. Until the grant is in place the step warns and the bots carry on — it reports, it does
+> not gate.
+
+The action only ever posts an **already-completed** check, and `bot-review` posts one at the
+start of a review as well as at the end. Both are the same constraint: a queued or
+in-progress check holds `mergeStateStatus` at `UNSTABLE`, and the merge gate holds on
+anything that is not `CLEAN`, so a reviewer that announced itself the obvious way would hold
+its own merge on every PR — and a `failure` left by a crashed run would hold the next attempt
+at the same commit. Posting a completed check at the start clears the predecessor's.
+
 ## Defaults are public-safe
 
 Two of the three consumers are public, so the defaults are the strict setting and a caller
@@ -76,6 +112,7 @@ opts *out*. A repo that forgets to configure something gets the safe behaviour.
 | --- | --- | --- |
 | `runner` | `["ubuntu-latest"]` | Ephemeral, so the `agent` label means code execution on a throwaway VM. Self-hosted needs `git`, `gh` and `jq` on PATH. |
 | `auto_merge` | `false` | Bot merging should be a decision a caller made, not one it inherited. |
+| `merge_method` | `squash` | What this workflow has always done, and it keeps a linear history. A caller landing **stacked** PRs passes `merge`: squash and rebase rewrite the parent's commits, so every child is left holding commits absent from the base and needs a hand-resolved merge. The repository must allow the method too. |
 | `show_full_output` | `false` | The agent's log stream carries what it read and ran; public logs are world-readable. |
 | `default_branch` | `main` | Binge is the only `master`. |
 
@@ -87,7 +124,8 @@ detail about a private repo. They live on the `ci/binge-ci-callers` branch in Bi
 
 ```
 .github/workflows/    The five reusable workflows, and this repo's own CI
-.github/actions/      ci-setup (Android build bootstrap), governed-paths (see below)
+.github/actions/      ci-setup (Android build bootstrap), governed-paths and
+                      pr-check-run (both below)
 callers/              Worked callers for the two public repos
 tools/                The checks actionlint cannot do
 ```

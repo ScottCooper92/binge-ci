@@ -95,13 +95,28 @@ on:
         default: the linters and other checks CI already runs
       auto_merge:
         description: >
-          Whether a clean review may squash-merge. False keeps the verdict and
+          Whether a clean review may merge. False keeps the verdict and
           every guard but stops short of merging — the right setting for a repo
           publishing a wire contract other people build against, and the default
           because turning merging ON should be a decision a caller made rather
           than one it inherited.
         type: boolean
         default: false
+      merge_method:
+        description: >
+          How a clean review merges: squash, merge or rebase. Squash is the default because it
+          is what this workflow has always done and it keeps a linear history.
+
+          A caller landing STACKED PRs should pass `merge`. Squash and rebase both rewrite the
+          parent's commits into new SHAs, so the moment the parent lands, the child's branch
+          holds commits that are nowhere in the base's history - the merge base falls back to
+          before the parent's work, both sides read as having changed the same files, and every
+          child in the stack needs a hand-resolved merge (binge-seerr #99 to #115). A merge
+          commit keeps the parent's SHAs, so each child's base is a real ancestor and catching
+          it up is close to a no-op. The repository must also allow the method, which is a
+          setting outside this workflow.
+        type: string
+        default: squash
       unbuilt_paths:
         description: >
           Newline-separated mirror of the caller's ci.yml `paths-ignore`, enabling the
@@ -421,6 +436,29 @@ jobs:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
+      # Says on the PR that a review is running, and - the half that is not cosmetic - CLEARS
+      # whatever this run's predecessor left on this SHA. A crashed review leaves a `failure`
+      # check behind, and the merge gate below holds on anything that is not CLEAN, so without
+      # this a re-run over the same commit would be held by its own last attempt.
+      #
+      # COMPLETED, because a queued or in_progress check holds mergeStateStatus at UNSTABLE for
+      # the whole run - the same gate, held every time. NEUTRAL rather than success, because a
+      # runner that dies here would otherwise leave a green check vouching for a review that
+      # never reached a verdict, and a false green on the gate is worse than no check at all.
+      # It never meets the merge gate: the verdict below replaces it before that step runs.
+      - name: Show the review as running
+        if: needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          conclusion: neutral
+          title: Reviewing this commit
+          summary: A review is running against this commit. This check is replaced with the verdict when it finishes.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.sha }}
@@ -667,6 +705,34 @@ jobs:
           jq -r '"Posted review \(.id), pinned to \(.commit_id)."' < "$POST_LOG" || cat "$POST_LOG"
           : > "$POST_LOG"
 
+          # AFTER the post, never before it. The check run keys off this, and a verdict that was
+          # reached but refused by GitHub is not one this PR carries - reporting it would put an
+          # approval on a commit whose review never landed.
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+      # BEFORE the merge, and reporting only the review. Putting it after meant a run whose review
+      # succeeded and whose MERGE failed posted a red check titled "the review run failed" - wrong
+      # on its face, contradicting the accurate comment posted beside it, and dropping this SHA out
+      # of CLEAN, which holds the very merge it is reporting on. That is what the neutral below
+      # exists to avoid, so the failure path must not route around it.
+      #
+      # A merge that fails is reported by "Report a failed review", which is where it belongs: this
+      # check is named for the review, and the review is what it now answers for.
+      - name: Record the verdict on the PR
+        if: always() && steps.submit.outputs.verdict != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          # `request_changes` is NEUTRAL on purpose: a red check on this SHA would hold any later
+          # merge, a human's included, for a verdict the review already carries as blocking.
+          conclusion: ${{ steps.submit.outputs.verdict == 'approve' && 'success' || 'neutral' }}
+          title: ${{ steps.submit.outputs.verdict == 'approve' && 'Approved' || 'Changes requested' }}
+          summary: The verdict above was posted as a review on this PR.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
       # than being deleted so that turning it on is one input and not a re-derivation.
@@ -681,9 +747,18 @@ jobs:
           PUSHED_AT: ${{ needs.resolve.outputs.pushed_at }}
           VOUCHED: ${{ needs.resolve.outputs.vouched }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
         run: |
           set -euo pipefail
+          # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
+          # typo would otherwise surface as a merge refusal at the end of a review, and anything
+          # else a string can carry has no business being spliced into that command.
+          case "$MERGE_METHOD" in
+            squash|merge|rebase) ;;
+            *) echo "::error::merge_method must be squash, merge or rebase - got '$MERGE_METHOD'."; exit 1 ;;
+          esac
+
           # As in "Submit the review": the queued duplicate can arrive after the run ahead of it
           # merged, and every guard below reports its refusal on the PR.
           pr_state=$(gh pr view "$PR" --json state --jq .state)
@@ -717,6 +792,32 @@ jobs:
           # An explicit escape hatch that beats everything below.
           labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')
           echo ",$labels," | grep -q ",hold," && hold "the \`hold\` label is set."
+
+          # The same rule as that label, for the one case the label cannot cover. An author bot's
+          # edit to a governed path is now rebased onto the PR rather than discarded, and a PR that
+          # never touched the file merges it by construction - so a change to CLAUDE.md or .claude
+          # can enter a PR AFTER `hold` was decided, on a PR nobody would have thought to label. The
+          # bot's own note carries the marker; the convention is that such a change is merged by a
+          # human, and this is what keeps that true.
+          #
+          # Checked here rather than by having the author jobs add `hold`: a label has to exist in
+          # the repository to be applied, and one that silently fails to apply restores nothing.
+          # The call is separate from the reading of it. `grep -c … || true` folded a failing
+          # gh api into the same `0` a clean "no marker" gives, so a 502 or a rate limit read as
+          # "no bot touched a governed path" and merged - on the one guard added to stop that.
+          # Every other guard in this step fails closed; so does this one now.
+          #
+          # Bot-authored comments only: the marker is a literal string, so a review quoting it or
+          # a maintainer asking what it does would otherwise park the PR for good.
+          #
+          # There is deliberately no way to lift it. The `hold` label can be taken off because a
+          # human decides it no longer applies; this says a bot put a change into the rules file,
+          # which stays true. It stops the BOT merging, and a human merging by hand is the point.
+          bot_comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
+            --paginate --jq '.[] | select(.user.type == "Bot") | .body')
+          if grep -q -- '<!-- governed-merged -->' <<<"$bot_comments"; then
+            hold "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
+          fi
 
           # Stacks merge bottom-up: only a PR based on the default branch is mergeable.
           base=$(gh pr view "$PR" --json baseRefName --jq .baseRefName)
@@ -833,6 +934,14 @@ jobs:
           [ "$state" = "CLEAN" ] || hold "mergeStateStatus is $state, not CLEAN." merge-state
 
           title=$(gh pr view "$PR" --json title --jq .title)
+          # GitHub ignores a commit title and message on a REBASE merge, and gh sends them anyway -
+          # there is no validation in cli/cli rejecting the pair, so they go into the payload and
+          # are dropped server-side. Passing them only where they mean something keeps the command
+          # honest about what it is asking for.
+          message=()
+          if [ "$MERGE_METHOD" != "rebase" ]; then
+            message=(--subject "$title (#$PR)" --body "$(gh pr view "$PR" --json body --jq .body)")
+          fi
           # Kept so "Report a failed review" can name WHY a merge failed instead of pointing at a log.
           # A refusal is usually one line from the API, and it is the line that decides whether a
           # maintainer retries or merges by hand.
@@ -841,8 +950,7 @@ jobs:
           # success output too. Left in place, a non-empty log would mean "the merge was reached"
           # rather than "the merge errored".
           merge_log="${{ runner.temp }}/merge-error.txt"
-          if ! gh pr merge "$PR" --squash --subject "$title (#$PR)" \
-              --body "$(gh pr view "$PR" --json body --jq .body)" > "$merge_log" 2>&1; then
+          if ! gh pr merge "$PR" "--${MERGE_METHOD}" "${message[@]}" > "$merge_log" 2>&1; then
             cat "$merge_log" >&2
             exit 1
           fi
@@ -966,3 +1074,27 @@ jobs:
           if ! grep -qF "$marker" <<<"$comments"; then
             printf '%s\n%s\n' "$marker" "$body" | gh pr comment "$PR" --body-file -
           fi
+
+      # The one outcome the verdict check above cannot report: a run that never reached a verdict
+      # at all. Without this the SHA would keep the neutral "Reviewing this commit" from the start
+      # of the job, which says a review is in flight when none is.
+      #
+      # Guarded on the verdict being EMPTY, so a run that reviewed and then failed later - in the
+      # merge, in a reporter - keeps the verdict it earned.
+      - name: Record a run that reached no verdict
+        if: always() && steps.submit.outputs.verdict == '' && needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review
+          # Both no-verdict endings, told apart by the job: one broke, the other decided there was
+          # nothing to review - a PR closed under it, say. Neither is a failure of the PR's code,
+          # so only the first is red.
+          conclusion: ${{ job.status != 'success' && 'failure' || 'neutral' }}
+          title: ${{ job.status != 'success' && 'The review run failed' || 'No review posted' }}
+          summary: >-
+            ${{ job.status != 'success' && 'This run did not finish and posted no review; the log says where it stopped.'
+              || 'The run finished without posting a review - the PR was not open, or there was nothing to review.' }}
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
