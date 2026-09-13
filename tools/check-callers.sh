@@ -28,9 +28,15 @@
 # declaring `actions: read` then dies as `startup_failure`: no log, no annotation, no job, and
 # nothing on the PR. Nothing else in the toolchain sees it. actionlint cannot, because the
 # reference is remote; the called workflow's own CI cannot, because it is not the caller.
+#
+# Permissions are compared as `name: level` pairs, not names: `actions: write` in the workflow
+# is not met by `actions: read` in the caller, and `contents: write` is not met by the default.
+# `write` satisfies `read`. Input TYPES are checked too - a caller passing `'50'` to a
+# `type: number` input, or `'false'` to a boolean, is the same startup_failure with no log.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
+shopt -s nullglob
 
 keys() { # $1=file  $2=start regex  $3=stop regex  $4=key indent  $5=key charclass
   awk -v start="$2" -v stop="$3" -v ind="$4" -v cc="$5" '
@@ -40,10 +46,44 @@ keys() { # $1=file  $2=start regex  $3=stop regex  $4=key indent  $5=key charcla
   ' "$1" | sort -u
 }
 
+# The top-level permissions block as `name:level` lines.
+perm_pairs() {
+  awk '
+    /^permissions:/ {f=1; next}
+    f && /^[a-z]/ {f=0}
+    f && /^  [a-z-]+: *[a-z]+/ { line=$0; sub(/^ +/,"",line); gsub(/ /,"",line); print line }
+  ' "$1" | sort -u
+}
+
+# Each declared input's `type`, as `name:type` lines.
+input_types() {
+  awk '
+    /^    inputs:/ {f=1; next}
+    /^    secrets:/ {f=0}
+    f && /^      [a-z_]+:/ { name=$0; sub(/:.*/,"",name); gsub(/ /,"",name) }
+    f && /^        type: */ { t=$0; sub(/.*type: */,"",t); gsub(/ /,"",t); if (name != "") print name ":" t }
+  ' "$1"
+}
+
+# The literal a caller passes for one input, or nothing when it is absent or block-scalar.
+with_value() { # $1=caller  $2=input
+  awk -v k="$2" '
+    /^    with:/ {f=1; next}
+    f && /^    [a-z]/ {f=0}
+    f && index($0, "      " k ":") == 1 { v=$0; sub("^      " k ": *", "", v); print v; exit }
+  ' "$1"
+}
+
 fail=0
+callers=(callers/*/*.yml .github/workflows/self-*.yml)
+if [ ${#callers[@]} -eq 0 ]; then
+  echo "FAIL no callers found under callers/*/ - nothing was checked."
+  exit 1
+fi
+
 pinned=$(mktemp)
 trap 'rm -f "$pinned"' EXIT
-for caller in callers/*/*.yml .github/workflows/self-*.yml; do
+for caller in "${callers[@]}"; do
   # The target comes from the `uses:` line, not the caller's filename: a self caller is
   # named for its role here (self-review.yml), not for the workflow it calls.
   uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml@[^[:space:]]+' "$caller" | head -1)
@@ -93,22 +133,45 @@ for caller in callers/*/*.yml .github/workflows/self-*.yml; do
   else
     passed=$(keys "$caller" '^    secrets:' '^[a-z]' '      ' '[A-Z_]')
   fi
-  # Permissions the called workflow declares, against what the caller grants itself.
-  needs_perms=$(awk '/^permissions:/{f=1;next} f && /^[a-z]/{f=0} f && /^  [a-z-]+:/{sub(/:.*/,"");gsub(/ /,"");print}' "$reusable" | sort -u)
-  has_perms=$(awk '/^permissions:/{f=1;next} f && /^[a-z]/{f=0} f && /^  [a-z-]+:/{sub(/:.*/,"");gsub(/ /,"");print}' "$caller" | sort -u)
-  # `contents` is in every repository default, so a caller need not restate it. Anything else must
-  # be declared, because the default grants none of it.
-  missing_perms=$(comm -23 <(printf '%s\n' "$needs_perms") <(printf '%s\n' "$has_perms") | grep -v '^$' | grep -v '^contents$')
+
+  # Permissions the called workflow declares, against what the caller grants itself. A
+  # caller with no block holds the repository default, which is `contents: read` and nothing
+  # else, so that is the one pair a caller need not restate.
+  needs_perms=$(perm_pairs "$reusable")
+  has_perms=$(perm_pairs "$caller")
+  missing_perms=""
+  while IFS=: read -r name level; do
+    [ -n "$name" ] || continue
+    got=$(printf '%s\n' "$has_perms" | awk -F: -v n="$name" '$1 == n { print $2 }')
+    [ -z "$got" ] && [ "$name" = contents ] && got="read"
+    case "$got" in
+      "$level"|write) ;;
+      *) missing_perms+="$name: $level " ;;
+    esac
+  done <<<"$needs_perms"
+
+  # A quoted scalar reaching a `number` or `boolean` input is a string to GitHub, and it
+  # refuses the call at startup with no log. `${{ }}` and bare literals pass.
+  bad_types=""
+  while IFS=: read -r name type; do
+    [ -n "$name" ] || continue
+    case "$type" in number|boolean) ;; *) continue ;; esac
+    value=$(with_value "$caller" "$name")
+    case "$value" in
+      \'*|\"*) bad_types+="$name ($type, passed quoted) " ;;
+    esac
+  done <<<"$(input_types "$reusable")"
 
   bad=$(comm -23 <(printf '%s\n' "$used")     <(printf '%s\n' "$inputs")   | grep -v '^$')
   unset_req=$(comm -23 <(printf '%s\n' "$required") <(printf '%s\n' "$used")     | grep -v '^$')
   missing=$(comm -23 <(printf '%s\n' "$secrets")  <(printf '%s\n' "$passed")   | grep -v '^$')
-  if [ -n "$bad" ] || [ -n "$missing" ] || [ -n "$unset_req" ] || [ -n "$missing_perms" ]; then
+  if [ -n "$bad" ] || [ -n "$missing" ] || [ -n "$unset_req" ] || [ -n "$missing_perms" ] || [ -n "$bad_types" ]; then
     fail=1; echo "FAIL $caller"
     [ -n "$bad" ]           && echo "     undeclared inputs:   $(echo "$bad")"
     [ -n "$unset_req" ]     && echo "     required not passed: $(echo "$unset_req")"
     [ -n "$missing" ]       && echo "     secrets not passed:  $(echo "$missing")"
-    [ -n "$missing_perms" ] && echo "     permissions the caller must declare: $(echo "$missing_perms")"
+    [ -n "$missing_perms" ] && echo "     permissions the caller must declare: ${missing_perms% }"
+    [ -n "$bad_types" ]     && echo "     inputs of the wrong type: ${bad_types% }"
   else
     echo "ok   $caller  ($(printf '%s\n' "$used" | grep -c .) inputs, $(printf '%s\n' "$passed" | grep -c .) secrets, against $against)"
   fi

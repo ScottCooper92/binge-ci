@@ -150,7 +150,10 @@ these directories do not exist. The tag is immutable rather than `v1`, so a call
 This repo ships no product code, so CI checks the two things that can be wrong with it:
 the workflows (actionlint + shellcheck) and whether the callers still fit them
 (`tools/check-callers.sh` — actionlint cannot see across a remote workflow reference, so
-a misspelled input would otherwise fail at run time in the consuming repo).
+a misspelled input, a permission level the caller does not hold, or a quoted scalar passed
+to a `number` or `boolean` input would otherwise fail at run time in the consuming repo).
+The tools are shellchecked too, and each fails on finding nothing to check rather than
+passing on an empty glob.
 
 The five bots run on this repository's own PRs too, through the `self-*.yml` callers in
 `.github/workflows/`. They pin the same release tag as the actions rather than `./`, so a PR
@@ -194,6 +197,12 @@ and its `labeled` door dies as `startup_failure` until the tag exists. The `work
 door still reviews it, from `main`'s copy at the previous tag. The other four self callers
 take the default-branch or base copy and are unaffected.
 
-`tag-check.yml` enforces the part a PR cannot: on any `v*` tag push it requires the
-self-referenced tag to exist. Moving `v1` is itself a tag push, so cutting the release
-without the patch tag fails there rather than in a consumer's next agent run.
+`tag-check.yml` enforces the part a PR cannot. On a `vX.Y.Z` push it requires that tag to
+be the one the workflows pin, so a release cannot ship the previous release's actions; on a
+`v1` move it requires the alias to land on the commit the pinned tag names; and on every
+push to `main` it requires the pinned tag to exist, because the slip that has actually
+happened is merging the bump and never tagging at all. `main` is therefore red between the
+bump merging and the tag being cut. That red is the report, not a fault, and it clears the
+moment the tag is pushed. It detects rather than prevents: by the time a tag push fails
+there, `v1` has moved and consumers are already broken, so it turns a silent breakage into a
+loud one rather than stopping it.

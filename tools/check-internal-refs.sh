@@ -17,7 +17,11 @@
 # that does not exist yet.
 #
 # `--resolve` additionally requires the pinned tag to EXIST. It cannot run on a PR - the tag
-# is created after the merge that names it - so tag-check.yml runs it on a tag push instead.
+# is created after the merge that names it - so tag-check.yml runs it on a tag push and on
+# every push to main instead. With PUSHED_REF and PUSHED_SHA set (the ref and commit of that
+# push) it also requires the tag to name THIS release: a vX.Y.Z push must be the tag the
+# workflows pin, and a move of `v1` must land on the commit that tag names. Existence alone
+# let a commit that edits an action without bumping its references ship the old action.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -53,13 +57,38 @@ else
   echo "ok    $n self-reference(s), all at $refs"
 
   if [ "$resolve" = true ]; then
-    if git ls-remote --exit-code --tags origin "refs/tags/$refs" >/dev/null 2>&1; then
-      echo "ok    $refs exists"
-    else
+    # Both the tag and its peeled form: an annotated tag lists twice, and the commit is the
+    # second line; a lightweight one lists once, already a commit.
+    remote=$(git ls-remote --tags origin "refs/tags/$refs" "refs/tags/$refs^{}" 2>/dev/null || true)
+    if [ -z "$remote" ]; then
       echo "FAIL  the workflows reference $refs, which does not exist."
       echo "      Every consumer's next agent run dies on 'unable to resolve action'."
       echo "      Tag $refs at the commit these workflows are on, THEN move v1."
       fail=1
+    else
+      echo "ok    $refs exists"
+      pinned_commit=$(printf '%s\n' "$remote" | awk '/\^\{\}$/ {p=$1} !/\^\{\}$/ {c=$1} END {print (p != "" ? p : c)}')
+      pushed_ref="${PUSHED_REF:-}"
+      pushed_commit=$(git rev-parse -q --verify "${PUSHED_SHA:-}^{commit}" 2>/dev/null || true)
+      if printf '%s' "$pushed_ref" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+        if [ "$pushed_ref" = "$refs" ]; then
+          echo "ok    $pushed_ref is the tag the workflows pin"
+        else
+          echo "FAIL  $pushed_ref was pushed, but the workflows still pin $refs."
+          echo "      Bump the self-references to $pushed_ref before tagging, or the actions at"
+          echo "      $pushed_ref are not the ones that shipped with it."
+          fail=1
+        fi
+      elif printf '%s' "$pushed_ref" | grep -qE '^v[0-9]+$'; then
+        if [ -n "$pushed_commit" ] && [ "$pushed_commit" = "$pinned_commit" ]; then
+          echo "ok    $pushed_ref now points at the commit $refs names"
+        else
+          echo "FAIL  $pushed_ref moved to ${pushed_commit:-an unknown commit}, but $refs names ${pinned_commit}."
+          echo "      Every @$pushed_ref consumer now runs these workflows with the actions from $refs,"
+          echo "      which is a different commit. Tag the release first, then move $pushed_ref to it."
+          fail=1
+        fi
+      fi
     fi
   fi
 fi
