@@ -102,6 +102,10 @@ on:
         type: number
         default: 45
       agent_timeout_minutes:
+        description: >
+          A bound on the agent step alone, BELOW the job's. A step that hits it fails, and the
+          push-and-reply step is skipped with it: nothing half-done is pushed, no reply claims
+          it was, and the reporter says the run failed.
         type: number
         default: 35
       show_full_output:
@@ -357,8 +361,10 @@ jobs:
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
         # cancellation skips every ordinary step after it - so nothing is pushed and nothing is
-        # said. A step timeout FAILS the step and leaves the job alive, so the push, the reply,
-        # the reporter and the upload all get their ordinary budget.
+        # said. A step timeout FAILS the step and leaves the job alive: the reporter and the
+        # upload, which carry always(), still run. The push and the reply do NOT - their `if`
+        # names no status function, so success() is implied and a failed agent step skips them.
+        # Nothing half-done is pushed and no reply claims it was; the reporter says the run failed.
         #
         # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
         # composite action silently drops what it does not declare.
@@ -420,11 +426,12 @@ jobs:
             work outstanding - finish it yourself, in this turn.
 
             Stopping mid-turn is worse here than it is for the reviewer, which at
-            least fails clean. This job pushes whatever is in
-            the working tree, so a turn that ends early pushes a HALF-APPLIED change
-            and reply.md then tells the reviewer their feedback was addressed.
-            Answering a review with a partial change described as a whole one is the
-            one outcome this job must never produce.
+            least fails clean. This job pushes whatever is in the working tree when
+            your turn ENDS - a timeout fails the step and nothing is pushed, but a
+            turn you end early is a success as far as the workflow can see, so it
+            pushes a HALF-APPLIED change and reply.md then tells the reviewer their
+            feedback was addressed. Answering a review with a partial change
+            described as a whole one is the one outcome this job must never produce.
 
       - name: Push and reply
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'

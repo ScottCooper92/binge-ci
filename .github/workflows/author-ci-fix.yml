@@ -138,7 +138,9 @@ on:
         description: >
           A bound on the agent step alone, BELOW the job's. Keep the arithmetic ~5 minutes of
           setup (a fetch-depth: 0 checkout alone can take over three minutes) + this + ~4 for
-          the push, the reporter and the upload, inside timeout_minutes.
+          the push, the reporter and the upload, inside timeout_minutes. A step that hits this
+          bound fails, and the push step is skipped with it: nothing half-done is pushed, and the
+          reporter says nothing was.
         type: number
         default: 35
       show_full_output:
@@ -556,7 +558,10 @@ jobs:
           steps.log.outputs.skip != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
         # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
-        # the job alive, so the reporter, the diagnostics upload and the push all still run.
+        # the job alive: the reporter and the diagnostics upload, which carry always(), still run.
+        # The push does NOT - its `if` names no status function, so success() is implied and a
+        # failed agent step skips it. Nothing half-done is pushed; whatever the agent wrote stays
+        # in the runner workspace, and the reporter says so.
         #
         # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
         # composite action silently drops what it does not declare.
@@ -638,10 +643,11 @@ jobs:
 
             Stopping mid-turn is worse here than it is for the reviewer, which at
             least fails clean: no verdict file, a hard failure, and a comment saying
-            nothing was reviewed. This job pushes whatever is in
-            the working tree, so a turn that ends early pushes a HALF-APPLIED fix
-            and note.md then reports it as the fix. A red PR told it is green is
-            worse than a red PR told nobody looked.
+            nothing was reviewed. This job pushes whatever is in the working tree
+            when your turn ENDS - a timeout fails the step and nothing is pushed,
+            but a turn you end early is a success as far as the workflow can see,
+            so it pushes a HALF-APPLIED fix and note.md then reports it as the fix.
+            A red PR told it is green is worse than a red PR told nobody looked.
 
       - name: Commit and push
         if: >

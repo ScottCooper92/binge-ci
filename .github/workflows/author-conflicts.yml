@@ -96,6 +96,10 @@ on:
         type: number
         default: 25
       agent_timeout_minutes:
+        description: >
+          A bound on the agent step alone, BELOW the job's. A step that hits it fails, and
+          "Commit or bail out" is skipped with it: a half-resolved merge is never committed or
+          pushed, and the reporter says the resolution did not complete.
         type: number
         default: 15
       max_turns:
@@ -431,7 +435,10 @@ jobs:
           steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
         # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
-        # the job alive, so the reporter, the diagnostics upload and the push all still run.
+        # the job alive: the reporter and the diagnostics upload, which carry always(), still run.
+        # "Commit or bail out" does NOT - its `if` names no status function, so success() is
+        # implied and a failed agent step skips it. A half-resolved merge stays in the runner
+        # workspace, nothing is pushed, and the reporter says the resolution did not complete.
         #
         # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
         # composite action silently drops what it does not declare.
@@ -484,9 +491,11 @@ jobs:
             work outstanding - finish it yourself, in this turn.
 
             Stopping mid-turn is worse here than it is for the reviewer, which at
-            least fails clean. This job commits the merge in
-            the working tree, so a turn that ends early lands a HALF-RESOLVED merge
-            on the author's branch and note.md then reports the conflicts resolved.
+            least fails clean. This job commits the merge in the working tree when
+            your turn ENDS - a timeout fails the step and nothing is pushed, but a
+            turn you end early is a success as far as the workflow can see, so it
+            lands a HALF-RESOLVED merge on the author's branch and note.md then
+            reports the conflicts resolved.
             Leaving a conflict explicitly unresolved, as the rules above require, is
             a stated outcome; a merge abandoned halfway is not.
 
