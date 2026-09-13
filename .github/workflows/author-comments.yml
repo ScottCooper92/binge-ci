@@ -446,6 +446,7 @@ jobs:
           set -euo pipefail
           push_note=""
           commit_stat=""
+          pushed=false
           # origin/$BRANCH is not refetched during the job, so it still points at what was
           # checked out - exactly the question being asked.
           checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
@@ -461,10 +462,18 @@ jobs:
           # the PR head must not be supplied BY the PR head.
           governed_note=$(bash "$GOVERNED_SCRIPT" "${checked_out:-HEAD}")
 
-          # Posted on its own, ahead of the commit and push, rather than folded into the reply at
-          # the end: everything between here and the reply is fatal under `set -e`, and a governed
-          # path never changes without a note - a commit that fails after the restore must not take
-          # the note down with it.
+          # The note and the marker inside it have opposite timing requirements, so they are
+          # split. The NOTE goes out now, on its own rather than folded into the reply: everything
+          # between here and that reply is fatal under `set -e`, a governed path never changes
+          # without a note, and a commit that fails after the restore must not take the note down
+          # with it. The MARKER holds the PR for a human, permanently and with no way to lift it,
+          # so it must not reach the PR until the commit carrying the change has actually landed.
+          governed_marker=$(bash "$GOVERNED_SCRIPT" --merged-marker)
+          governed_merged=false
+          if [ -n "$governed_note" ] && grep -qF -- "$governed_marker" <<<"$governed_note"; then
+            governed_merged=true
+            governed_note=$(grep -vF -- "$governed_marker" <<<"$governed_note" || true)
+          fi
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
@@ -491,12 +500,14 @@ jobs:
             fi
             # The branch can have moved under us. Letting set -e kill the step here would strand the
             # work AND skip the reply, so the round cap would never advance.
+            pushed=true
             if ! git push; then
               git fetch origin "$BRANCH"
               if git rebase "origin/$BRANCH" && git push; then
                 echo "Pushed after rebasing onto a branch that had moved."
               else
                 git rebase --abort || true
+                pushed=false
                 push_note="_The branch moved while I was working and I could not push these changes, so they are gone. Comment again if you still want them._"
                 commit_stat=""
               fi
@@ -510,6 +521,12 @@ jobs:
             # not make the account true - it makes it falsifiable without re-diffing the branch.
             if [ -n "$commit_stat" ]; then
               printf '\n<details><summary>Files this push changed</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"
+            fi
+            # Only now, and only on this path: the marker holds the PR for a human permanently,
+            # so it must describe a change that is actually on the branch.
+            if [ "$governed_merged" = "true" ] && [ "$pushed" = "true" ]; then
+              printf '\n%s\n_The governed-path change above is in `%s`, now on this branch._\n' \
+                "$governed_marker" "$(git rev-parse --short HEAD)"
             fi
           } | gh pr comment "$PR" --body-file -
 
