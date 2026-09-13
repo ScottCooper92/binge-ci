@@ -20,7 +20,17 @@
 #   reasoning about the same paths reads them from here rather than keeping a copy that can
 #   narrow silently.
 #
-# $GOVERNED_BASE_REF (default origin/main) is the ref the action rewrote from.
+# Usage: restore-agent-governed-paths.sh --rewrite
+#   Performs the rewrite itself: every governed path in the WORKING TREE becomes the base's
+#   copy, and the index is left alone - the same state claude-code-action leaves behind. The
+#   action only does this on an entity event (a comment, a review); on a workflow_run it does
+#   nothing, so author-ci-fix and author-conflicts call this before their agent step. Without
+#   it those two agents read the PR head's own copies live, and the undo above has nothing to
+#   undo - the guard the README describes is not in force.
+#
+# $GOVERNED_BASE_REF (default origin/main) is the ref the rewrite is taken from, and for the
+# undo the ref it was taken from: on an entity event the action restores from the PR's BASE
+# branch, so a caller on a stacked PR passes that, not the default branch.
 set -euo pipefail
 
 # Fixed by the pinned claude-code-action SHA in the author workflows, so it cannot drift
@@ -40,7 +50,26 @@ if [ "${1:-}" = "--list" ]; then
   exit 0
 fi
 
-ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list}"
+if [ "${1:-}" = "--rewrite" ]; then
+  base=$(git rev-parse -q --verify "${GOVERNED_BASE_REF:-origin/main}") \
+    || { echo "Cannot rewrite the governed paths: ${GOVERNED_BASE_REF:-origin/main} does not resolve." >&2; exit 1; }
+  rewritten=()
+  for path in "${governed[@]}"; do
+    # Through the working tree only. `git checkout <base> -- <path>` would also stage the base's
+    # copy, and a merge in progress refuses a partial `git reset` to unstage it again; an archive
+    # extracted over the tree touches no index entry, so it works mid-merge and leaves the
+    # discriminator below ("tracked and byte-identical to the base") exactly as the action does.
+    rm -rf -- "${path:?}"
+    if git cat-file -e "$base:$path" 2>/dev/null; then
+      git archive "$base" -- "$path" | tar -x
+      rewritten+=("$path")
+    fi
+  done
+  echo "Rewrote governed paths to ${GOVERNED_BASE_REF:-origin/main}'s copy in the working tree: ${rewritten[*]:-none present there}" >&2
+  exit 0
+fi
+
+ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite}"
 
 # Telling the action's rewrite apart from an edit the agent made needs the base branch's copy:
 # "the worktree is byte-identical to the base" is the whole discriminator. Without the ref,
@@ -96,12 +125,20 @@ merged=()
 discarded=()
 added=()
 
+# Whether the working tree's copy of an UNTRACKED file is byte-for-byte the base's.
+same_as_base() {
+  git show "$base:$1" 2>/dev/null | cmp -s - "$1"
+}
+
 for path in "${governed[@]}"; do
   # Per-file, not per-path, because `git checkout "$ref" -- "$path"` cannot express a
   # deletion: it only restores paths $ref HAS. A file the PR deleted and the rewrite
   # recreated survives it silently, or aborts the script on the pathspec if $path is that
   # file itself.
-  while IFS= read -r file; do
+  #
+  # -z, with quotePath off: a non-ASCII name is otherwise emitted C-quoted, matches nothing
+  # in `git cat-file -e`, and the checkout that follows dies on the pathspec under `set -e`.
+  while IFS= read -r -d '' file; do
     [ -n "$file" ] || continue
 
     # Byte-identical to the base means the action's rewrite and nothing else; anything
@@ -118,18 +155,31 @@ for path in "${governed[@]}"; do
       discarded+=("$file")
       restore_from_ref "$file"
     fi
-  done < <(git diff --name-only "$ref" -- "$path")
+  done < <(git -c core.quotePath=false diff --name-only -z "$ref" -- "$path")
 
-  # Something the agent added fresh. Left in place - deleting it would be a fresh silent
-  # loss, which is the fault being fixed. A file the rewrite recreated is staged rather than
-  # untracked, so it never reaches here.
-  extra=$(git ls-files --others --exclude-standard -- "$path")
-
-  if [ -n "$extra" ]; then
-    while IFS= read -r file; do
-      [ -n "$file" ] && added+=("$file")
-    done <<<"$extra"
-  fi
+  # Untracked files under the path. The rewrite leaves its copies UNSTAGED (it checks the
+  # base's files out and then resets the index), so a file the PR deleted and the rewrite
+  # recreated arrives here untracked rather than as a diff against $ref - and `git rm`
+  # cannot remove it, because the index never had it. Told apart from something the agent
+  # added by whether the base has it and the PR does not: that is the rewrite's doing, and
+  # the PR's deletion is put back by deleting it again. An edit the agent made to such a
+  # file was made to a file the PR deleted, so it goes the way of any other collision.
+  while IFS= read -r -d '' file; do
+    [ -n "$file" ] || continue
+    if [ -n "$base" ] && git cat-file -e "$base:$file" 2>/dev/null \
+       && ! git cat-file -e "$ref:$file" 2>/dev/null; then
+      if same_as_base "$file"; then
+        restored+=("$file")
+      else
+        discarded+=("$file")
+      fi
+      rm -f -- "$file"
+      continue
+    fi
+    # Something the agent added fresh. Left in place - deleting it would be a fresh silent
+    # loss, which is the fault being fixed.
+    added+=("$file")
+  done < <(git -c core.quotePath=false ls-files --others --exclude-standard -z -- "$path")
 done
 
 if [ ${#restored[@]} -gt 0 ]; then

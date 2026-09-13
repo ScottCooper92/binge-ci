@@ -18,7 +18,10 @@ description: >
 inputs:
   base-ref:
     description: >
-      The ref claude-code-action rewrote FROM, e.g. origin/main. It only discriminates the
+      The ref the governed paths are rewritten FROM, e.g. origin/main. On an entity event
+      claude-code-action restores from the PR's BASE branch, so a caller on that path passes
+      the PR's base rather than the default branch; on a workflow_run the caller performs the
+      rewrite itself (`--rewrite`) from this ref. For the undo it only discriminates the
       rewrite from an agent's own edit, so a wrong value over-reports rather than corrupts.
     required: false
     default: origin/main
@@ -64,4 +67,6 @@ runs:
         } >> "$GITHUB_ENV"
 
         echo "script=$script" >> "$GITHUB_OUTPUT"
-        echo "Governed paths: $(bash "$script" --list | tr '\n' ' ')"
+        # GITHUB_ENV takes effect in the NEXT step, so this call gets the extra paths by hand;
+        # without that the log names the script's own list and never the caller's additions.
+        echo "Governed paths: $(GOVERNED_EXTRA_PATHS="$EXTRA_PATHS" bash "$script" --list | tr '\n' ' ')"
