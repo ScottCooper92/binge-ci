@@ -21,7 +21,7 @@ they are worth keeping in one place.
 | Workflow | What it does |
 | --- | --- |
 | `bot-review.yml` | Reviews a PR once CI goes green, and optionally squash-merges it. |
-| `author-ci-fix.yml` | Makes one repair attempt when CI goes red, then stops rather than churning. |
+| `author-ci-fix.yml` | Makes one repair attempt per commit when CI goes red, at most two per human push, then stops rather than churning. |
 | `author-comments.yml` | Answers review feedback — top-level comments, inline notes and reviews. |
 | `author-conflicts.yml` | Finds PRs that conflict when the base moves, and resolves them. |
 | `author-retarget.yml` | Catches a stacked PR up to its base so it starts moving again. |

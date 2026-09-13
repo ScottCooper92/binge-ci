@@ -238,6 +238,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
         run: |
           set -euo pipefail
           # See author-ci-fix.yml: an empty value is malformed in two different
@@ -247,15 +248,43 @@ jobs:
           [ -n "${AUTHOR_BOT_ID:-}" ] \
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
+          skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # Re-read, not carried over from the scan: the scan can run for most of twenty minutes and
+          # the resolves before this one for twenty-five each, and a PR merged, closed, drafted,
+          # unlabelled or restacked in between would otherwise get a merge commit pushed to a closed
+          # PR's branch, or a failure comment on a merged one.
+          #
           # An empty name would send the checkout to the default branch, and every step after it
           # would merge the base onto the base and report success.
-          IFS=$'\037' read -r name sha < <(gh pr view ${{ matrix.pr }} \
-            --json headRefName,headRefOid --jq '[.headRefName, .headRefOid] | join("\u001f")')
+          IFS=$'\037' read -r name sha state isdraft cross base labels < <(gh pr view ${{ matrix.pr }} \
+            --json headRefName,headRefOid,state,isDraft,isCrossRepository,baseRefName,labels \
+            --jq '[.headRefName, .headRefOid, .state, .isDraft, .isCrossRepository, .baseRefName,
+                   ([.labels[].name] | join(","))] | join("\u001f")')
           [ -n "$name" ] || { echo "::error::No head branch for #${{ matrix.pr }}."; exit 1; }
+          [ "$state" = "OPEN" ] || skip "PR #${{ matrix.pr }} is $state since the scan - leaving it alone."
+          [ "$isdraft" != "true" ] || skip "PR #${{ matrix.pr }} was marked draft since the scan - leaving it alone."
+          [ "$cross" != "true" ] || skip "PR #${{ matrix.pr }} comes from a fork - out of scope."
+          [ "$base" = "$DEFAULT_BRANCH" ] || skip "PR #${{ matrix.pr }} was restacked onto '$base' since the scan - leaving it alone."
+          echo ",$labels," | grep -q ",$AGENT_LABEL," \
+            || skip "PR #${{ matrix.pr }} lost its '$AGENT_LABEL' label since the scan - leaving it alone."
+          # Still conflicted? A push in the meantime may have resolved it, and merging the base into a
+          # clean branch spends a CI run to say nothing. The state is null while GitHub recomputes it.
+          mergeable_state=""
+          for _ in 1 2 3 4 5 6; do
+            info=$(gh api "repos/${GH_REPO}/pulls/${{ matrix.pr }}" --jq '"\(.mergeable)|\(.mergeable_state)"')
+            mergeable_state=${info##*|}
+            [ "${info%%|*}" != "null" ] && break
+            sleep 3
+          done
+          [ "$mergeable_state" = "dirty" ] \
+            || skip "PR #${{ matrix.pr }} is no longer conflicted (mergeable_state=$mergeable_state) - nothing to resolve."
+
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.branch.outputs.skip != 'true'
         with:
           ref: ${{ steps.branch.outputs.name }}
           fetch-depth: 0
@@ -269,6 +298,7 @@ jobs:
       # GOVERNED_EXTRA_PATHS for the steps below and hands back the script's path.
       - name: Provide the governed-paths script
         id: governed
+        if: steps.branch.outputs.skip != 'true'
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.6
         with:
           base-ref: origin/${{ inputs.default_branch }}
@@ -276,6 +306,7 @@ jobs:
 
       - name: Start the merge
         id: merge
+        if: steps.branch.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -358,6 +389,11 @@ jobs:
               exit 0
             fi
 
+            # What the agent is asked to resolve, recorded now because the resolution erases it: the
+            # marker scan in "Commit or bail out" reads only these paths, so a `<<<<<<<` that is
+            # ordinary content on the base's side of an untouched file cannot trip it.
+            git diff --name-only -z --diff-filter=U > "${{ runner.temp }}/unmerged-paths"
+
             # Past the refusal, every governed path merged CLEANLY, so the working tree holds the
             # merge's own result for it - the thing that should be committed. The agent never sees it:
             # claude-code-action overwrites and stages those paths before it starts.
@@ -382,13 +418,17 @@ jobs:
       # every governed path merged cleanly, and the snapshot holds that result; the base's copy
       # goes in over it here, exactly as the action would put it, and the snapshot goes back after.
       - name: Rewrite the governed paths to the base's copy
-        if: steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        if: >
+          steps.branch.outputs.skip != 'true' &&
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
         env:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: bash "$GOVERNED_SCRIPT" --rewrite
 
       - name: Resolve with Claude
-        if: steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        if: >
+          steps.branch.outputs.skip != 'true' &&
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
         # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
         # the job alive, so the reporter, the diagnostics upload and the push all still run.
@@ -452,7 +492,7 @@ jobs:
 
       - name: Commit or bail out
         id: commit
-        if: steps.merge.outputs.clean != 'true'
+        if: steps.branch.outputs.skip != 'true' && steps.merge.outputs.clean != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -462,8 +502,28 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
         run: |
           set -uo pipefail
-          if [ -n "$(git ls-files -u)" ]; then
-            git merge --abort || true
+          # Every comment this step posts is deduped on the PR head: a conflict persists across pushes
+          # to the base, and one note per attempt would be one per merge. Not a pipeline into grep -q
+          # (see "Report a failed resolution").
+          comment_once() {
+            local marker="$1" body="$2" existing
+            existing=$(gh api "repos/${GH_REPO}/issues/${{ matrix.pr }}/comments?per_page=100" \
+              --paginate --jq '.[].body')
+            grep -qF "$marker" <<<"$existing" && return 0
+            printf '%s\n%s\n' "$marker" "$body" | gh pr comment ${{ matrix.pr }} --body-file -
+          }
+
+          # "Stop and leave it unresolved" is what the prompt asks for, and `git merge --abort` is how
+          # an agent naturally does it: no unmerged paths, no MERGE_HEAD, and HEAD back at the PR's
+          # own tip. Read as a decline, exactly like unmerged paths left behind - NOT as a merge the
+          # agent committed, which is what the amend below would otherwise take it for, amending the
+          # governed-path restore into a human's commit.
+          aborted=false
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null && [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
+            aborted=true
+          fi
+          if [ -n "$(git ls-files -u)" ] || [ "$aborted" = true ]; then
+            git merge --abort 2>/dev/null || true
             note=$(cat "${{ runner.temp }}/note.md" 2>/dev/null || echo "Conflicts were too ambiguous to resolve safely.")
 
             # Declining is a correct outcome, so the job stays green - but then a run that left the PR
@@ -474,17 +534,20 @@ jobs:
 
             # Deduped on the PR head, not the note: the note varies with the conflict, so hashing it
             # would mint a fresh marker for the same refusal on every push to the base.
-            marker="<!-- conflict-bailed:${SHA} -->"
-            comments=$(gh api "repos/${GH_REPO}/issues/${{ matrix.pr }}/comments?per_page=100" \
-              --paginate --jq '.[].body')
-            if ! grep -qF "$marker" <<<"$comments"; then
-              printf '%s\n' \
-                "$marker" \
-                "This PR conflicts with \`$DEFAULT_BRANCH\` and I've left it alone." \
-                "" \
-                "$note" | gh pr comment ${{ matrix.pr }} --body-file -
-            fi
+            comment_once "<!-- conflict-bailed:${SHA} -->" \
+              "This PR conflicts with \`$DEFAULT_BRANCH\` and I've left it alone."$'\n\n'"$note"
             exit 0
+          fi
+
+          # Past the decline, a HEAD that moved is the agent's own merge commit - and only a merge
+          # commit whose first parent is the tip this run started from is one this job may amend or
+          # push. Anything else (a second commit on top, a rewritten tip) is not the one merge commit
+          # this job's contract promises, and amending it would rewrite what a human pushed.
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            if [ "$(git rev-parse -q --verify HEAD^1)" != "$BEFORE" ] || ! git rev-parse -q --verify HEAD^2 >/dev/null; then
+              echo "::error::HEAD ($(git rev-parse --short HEAD)) is not a merge commit on top of the tip this run started from (${BEFORE:0:7}); refusing to amend or push it."
+              exit 1
+            fi
           fi
 
           # Undo claude-code-action's rewrite of the governed paths, back to what the merge itself
@@ -543,14 +606,25 @@ jobs:
           # with the markers still in the body reads as perfectly resolved, and for the .md, .xml and
           # allowlist files these conflicts most often touch, nothing downstream would catch it.
           # Diffed from the pre-merge tip rather than --cached, so it covers the agent-committed path
-          # too. Not a pipeline into grep -q: that would SIGPIPE git diff, and pipefail would read the
-          # 141 as "no markers found". ======= is deliberately out of the pattern - it is ordinary
-          # markdown, and no real conflict lacks the other two.
-          merged=$(git diff -U0 "$BEFORE" HEAD)
+          # too, and over the paths the merge left unmerged only: the rest of that diff is the base's
+          # side, where a fixture or a doc about merges is ordinary content. Not a pipeline into grep
+          # -q: that would SIGPIPE git diff, and pipefail would read the 141 as "no markers found".
+          # ======= is deliberately out of the pattern - it is ordinary markdown, and no real
+          # conflict lacks the other two.
+          resolved=()
+          if [ -s "${{ runner.temp }}/unmerged-paths" ]; then
+            mapfile -d '' resolved < "${{ runner.temp }}/unmerged-paths"
+          fi
+          if [ ${#resolved[@]} -gt 0 ]; then
+            merged=$(git diff -U0 "$BEFORE" HEAD -- "${resolved[@]}")
+          else
+            merged=$(git diff -U0 "$BEFORE" HEAD)
+          fi
           if grep -qE '^\+(<{7}|>{7}|\|{7})' <<<"$merged"; then
             echo "::error::Conflict markers left in the resolution."
             git reset --hard "$BEFORE"
-            gh pr comment ${{ matrix.pr }} --body "Tried to merge \`$DEFAULT_BRANCH\` into this PR but the resolution still had conflict markers in it, so I've left the branch alone. Over to you."
+            comment_once "<!-- conflict-markers:${SHA} -->" \
+              "Tried to merge \`$DEFAULT_BRANCH\` into this PR but the resolution still had conflict markers in it, so I've left the branch alone. Over to you."
             exit 0
           fi
 
@@ -558,7 +632,8 @@ jobs:
           # a stale FETCH_HEAD.
           git fetch origin "$BRANCH" || { echo "::error::Could not fetch origin/$BRANCH."; exit 1; }
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ]; then
-            gh pr comment ${{ matrix.pr }} --body "Tried to merge \`$DEFAULT_BRANCH\` into this PR but came away with nothing to push, so it is still conflicted. Over to you."
+            comment_once "<!-- conflict-nothing:${SHA} -->" \
+              "Tried to merge \`$DEFAULT_BRANCH\` into this PR but came away with nothing to push, so it is still conflicted. Over to you."
             exit 0
           fi
 

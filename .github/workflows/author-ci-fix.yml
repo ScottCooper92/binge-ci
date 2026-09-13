@@ -88,6 +88,14 @@ on:
       log_tail_bytes:
         type: number
         default: 200000
+      max_attempts_per_push:
+        description: >
+          How many repairs this bot may push on top of one human push before it stops. The
+          per-commit marker only stops a retry of the SAME head; a fix that trades one failure
+          for another is a new head with a fresh marker, and without this cap the chain only
+          ends when the agent chooses to decline.
+        type: number
+        default: 2
       max_turns:
         description: >
           Headroom, not a budget — the reasoning bot-review.yml records for its own 100, and
@@ -214,7 +222,7 @@ jobs:
       # Recording on the outcome does not reopen the loop this guards. That loop needs a fix to be
       # PUSHED, and a push is a new SHA with its own marker and its own attempt. A run that dies
       # before pushing leaves no commit, so no CI run, so nothing to loop on.
-      - name: One attempt per commit
+      - name: One attempt per commit, and a cap per push
         id: guard
         if: steps.pr.outputs.skip != 'true'
         env:
@@ -222,6 +230,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.number }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
+          MAX_ATTEMPTS: ${{ inputs.max_attempts_per_push }}
         run: |
           set -euo pipefail
           marker="<!-- ci-fix-attempted:${SHA} -->"
@@ -230,14 +240,38 @@ jobs:
           # when the comment list is long.
           comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
             --paginate --jq '.[].body')
+          exhausted=""
           if grep -qF "$marker" <<<"$comments"; then
             echo "Already attempted a fix for $SHA. Stopping."
+            exhausted="CI is still failing on \`${SHA:0:7}\` after an automatic fix attempt. Stopping here - this one needs a human."
+          else
+            # The marker is per commit, and this bot's own push is a new commit: a fix that trades one
+            # failure for another would get a fresh attempt with no memory of the last, until the agent
+            # itself declined. So the head's trailing run of commits authored by this bot - everything
+            # since the last push that was not its own - is what one human push has already been
+            # charged, and the attempts recorded against those commits are counted against the cap.
+            bot_email="${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
+            commits=$(gh api "repos/${GH_REPO}/pulls/${PR}/commits?per_page=100" --paginate \
+              --jq '.[] | "\(.sha)|\(.author.login // "")|\(.commit.author.email // "")"')
+            spent=0
+            while IFS='|' read -r sha login email; do
+              [ -n "$sha" ] || continue
+              [ "$login" = "$AUTHOR_BOT" ] || [ "$email" = "$bot_email" ] || break
+              if grep -qF "<!-- ci-fix-attempted:${sha} -->" <<<"$comments"; then
+                spent=$((spent + 1))
+              fi
+            done < <(tac <<<"$commits")
+            if [ "$spent" -ge "$MAX_ATTEMPTS" ]; then
+              echo "Already made $spent fix attempt(s) since the last push that was not this bot's. Stopping."
+              exhausted="CI is still failing on \`${SHA:0:7}\` after $spent automatic fix attempts on my own pushes. Stopping here rather than churning - this one needs a human."
+            fi
+          fi
+          if [ -n "$exhausted" ]; then
             # Re-running the same red CI re-enters this job on the same SHA, and an unmarked note would
             # repeat on every one.
             done_marker="<!-- ci-fix-exhausted:${SHA} -->"
             if ! grep -qF "$done_marker" <<<"$comments"; then
-              printf '%s\nCI is still failing on `%s` after an automatic fix attempt. Stopping here - this one needs a human.\n' \
-                "$done_marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file -
+              printf '%s\n%s\n' "$done_marker" "$exhausted" | gh pr comment "$PR" --body-file -
             fi
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
