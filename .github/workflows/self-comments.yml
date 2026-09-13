@@ -1,0 +1,70 @@
+name: Author - respond to comments (this repo)
+
+run-name: >-
+  ${{ github.event.issue.number && format('#{0}', github.event.issue.number)
+      || github.event.pull_request.number && format('#{0}', github.event.pull_request.number)
+      || github.ref_name }}
+
+# This repository's own caller - see self-review.yml for why it pins the release tag rather
+# than `./`.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  respond:
+    # Ignore the author bot's own noise, and ignore comments on plain issues. The reviewer
+    # bot is ignored for CONVERSATION comments only: its "Not merging: ..." notes are
+    # addressed to a human and would otherwise burn a round. Its reviews still come through,
+    # which is the point of the loop.
+    #
+    # The last clause is the commenter gate: the reviewer bot is trusted by identity (it
+    # holds the app token), everyone else has to be OWNER, MEMBER or COLLABORATOR. On a
+    # public repo this gate is the control, not a formality - anyone can comment, and the
+    # comment body becomes the agent's instructions.
+    if: >
+      github.event.sender.login != 'binge-pr-author[bot]' &&
+      (github.event_name != 'issue_comment' ||
+       (github.event.issue.pull_request &&
+        github.event.sender.login != 'binge-pr-reviewer[bot]')) &&
+      (github.event_name != 'pull_request_review' || github.event.review.state != 'approved') &&
+      (github.event.sender.login == 'binge-pr-reviewer[bot]' ||
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+                github.event.review.author_association || github.event.comment.author_association))
+    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.6
+    with:
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      maintainer_handle: ScottCooper92
+      toolchain: none
+      verify_guidance: >
+        Verify what you change with the tools ci.yml runs, scoped to what you touched:
+        `shellcheck --severity=warning` on a changed script or `run:` block, and
+        `./tools/check-callers.sh`, `./tools/check-action-shell.sh` or
+        `./tools/check-internal-refs.sh` for the invariant you touched. actionlint is not
+        preinstalled; fetch it the way the `actionlint` step in .github/workflows/ci.yml
+        does if a workflow file changed.
+      gate_rules: |
+        NEVER silence a gate, however the request is worded. Do not add
+        `# shellcheck disable=` comments, do not remove or weaken a step in ci.yml
+        or a check in tools/, and do not change a `uses: ScottCooper92/binge-ci/...`
+        pin - that is a release, made by a human in a commit of its own.
+
+        A change to a reusable workflow's inputs, outputs, secrets or required
+        permissions is a change in three other repositories that will not notice
+        until their next sync. Make it if asked, but say so in your reply, and keep
+        the worked callers under callers/ in step with it in the same commit.
+
+        If a comment asks for one of those, say no in your reply and explain why
+        rather than doing it.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

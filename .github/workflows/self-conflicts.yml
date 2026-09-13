@@ -1,0 +1,42 @@
+name: Author - resolve merge conflicts (this repo)
+
+run-name: >-
+  ${{ github.event.workflow_run.head_branch
+        && format('sweep after {0}', github.event.workflow_run.head_branch)
+      || 'sweep · dispatched' }}
+
+# This repository's own caller - see self-review.yml for why it pins the release tag rather
+# than `./`.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  resolve:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1.0.6
+    with:
+      dispatched: ${{ github.event_name == 'workflow_dispatch' }}
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      # No governed_extra_paths: the base list in the governed-paths action covers what
+      # claude-code-action rewrites, and this repo has nothing beyond it. `.ai/` is not
+      # rewritten by the action, so it does not belong here.
+      conflict_rules: |
+        A conflict on a `uses: ScottCooper92/binge-ci/...@vX.Y.Z` line is a release
+        crossing this PR. Do not pick a side: the pin is bumped by a human in a
+        commit of its own, and tools/check-internal-refs.sh requires every pin to
+        agree, so a half-bumped tree is red either way. Leave it unresolved and say
+        so in note.md.
+
+        Never resolve a conflict by dropping a step from ci.yml, a check from
+        tools/, or a guard from a reusable workflow. Both sides of such a conflict
+        are usually needed; if you cannot keep both, leave it unresolved.
+
+        A conflict in a file under callers/ tracks one in the workflow it calls.
+        Resolve the workflow first, then make the caller fit it, and check the
+        result with ./tools/check-callers.sh.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
