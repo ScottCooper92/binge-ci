@@ -1,0 +1,55 @@
+name: Author - fix failing CI (this repo)
+
+run-name: >-
+  ${{ github.event.workflow_run.pull_requests[0].number
+        && format('#{0} · {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_branch)
+      || github.event.workflow_run.head_branch
+      || github.ref_name }}
+
+# This repository's own caller - see self-review.yml for why it pins the release tag rather
+# than `./`. `CI` is matched by NAME: renaming ci.yml's `name:` silently unhooks this,
+# self-review and self-conflicts all at once.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fix:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1.0.6
+    with:
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      # Shell and YAML only: nothing here builds.
+      toolchain: none
+      verify_guidance: >
+        Verify with the same tools ci.yml runs, scoped to what failed: `shellcheck
+        --severity=warning` on the file you changed, `./tools/check-callers.sh`,
+        `./tools/check-action-shell.sh` or `./tools/check-internal-refs.sh` for the check
+        that reported. actionlint is not preinstalled; fetch it the way the `actionlint`
+        step in .github/workflows/ci.yml does (same version, same checksum) rather than
+        reasoning about its message. Do not run the whole gate; CI will when you push.
+      gate_rules: |
+        NEVER silence a gate instead of fixing it. In this repository that means,
+        specifically:
+
+          - Do not add `# shellcheck disable=` comments, and do not lower the
+            severity actionlint or shellcheck run at.
+          - Do not remove, weaken or skip a step in ci.yml or a check in tools/.
+            Those checks are the gate the three consuming repos rely on.
+          - Do not change a `uses: ScottCooper92/binge-ci/...@vX.Y.Z` pin to make
+            tools/check-internal-refs.sh pass. The pin is bumped at release, by a
+            human, in a commit that does nothing else.
+          - Do not edit a file under callers/ to make check-callers.sh pass unless
+            the workflow it calls changed in this same PR; a caller that no longer
+            fits is a consumer PR as well, and the PR body has to say so.
+
+        If the only way to green is through one of those, that is a stop: make no
+        changes and say so.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
