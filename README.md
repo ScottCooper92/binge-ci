@@ -150,7 +150,17 @@ these directories do not exist. The tag is immutable rather than `v1`, so a call
 This repo ships no product code, so CI checks the two things that can be wrong with it:
 the workflows (actionlint + shellcheck) and whether the callers still fit them
 (`tools/check-callers.sh` — actionlint cannot see across a remote workflow reference, so
-a misspelled input would otherwise fail at run time in the consuming repo).
+a misspelled input, a permission level the caller does not hold, or a quoted scalar passed
+to a `number` or `boolean` input would otherwise fail at run time in the consuming repo).
+The tools are shellchecked too, and each fails on finding nothing to check rather than
+passing on an empty glob.
+
+The five bots run on this repository's own PRs too, through the `self-*.yml` callers in
+`.github/workflows/`. They pin the same release tag as the actions rather than `./`, so a PR
+here is reviewed by the reviewer the consumers run and never by the one it is changing, and
+a fix reaches this repo's own PRs the way it reaches everyone's — at the next release.
+`auto_merge` is off: everything here governs the agents, so merging stays a human's. The
+review reads `CLAUDE.md` and `.ai/agents/` from `main`, exactly as it does in a consumer.
 
 ## Writing a caller: the one thing that will bite you
 
@@ -174,11 +184,25 @@ remote reference, and the called workflow's own CI is not the caller.
 Callers reference `@v1`, a moving alias. `v1.0.0` and friends are immutable — pin to one
 if you want no surprises.
 
-Releasing is: bump the self-references in `.github/workflows/` to the new patch tag, merge,
-tag `vX.Y.Z` at that commit, **then** move `v1`. That order keeps the window safe —
-consumers resolve the workflow at `v1`, so until it moves they are still on the previous
-commit and never see a tag that does not exist yet.
+Releasing is four steps, in this order. Bump every self-reference in `.github/workflows/`
+to the new patch tag: the actions the reusable workflows use and the `self-*.yml` callers
+alike, which `tools/check-internal-refs.sh` requires to agree. Merge that. Tag `vX.Y.Z` at
+that commit. **Then** move `v1`. That order keeps the window safe — consumers resolve the
+workflow at `v1`, so until it moves they are still on the previous commit and never see a
+tag that does not exist yet.
 
-`tag-check.yml` enforces the part a PR cannot: on any `v*` tag push it requires the
-self-referenced tag to exist. Moving `v1` is itself a tag push, so cutting the release
-without the patch tag fails there rather than in a consumer's next agent run.
+One door closes on the release PR itself. A `pull_request` event runs the workflow file
+from the merge ref, so `self-review.yml` on that PR pins the tag the PR is about to create,
+and its `labeled` door dies as `startup_failure` until the tag exists. The `workflow_run`
+door still reviews it, from `main`'s copy at the previous tag. The other four self callers
+take the default-branch or base copy and are unaffected.
+
+`tag-check.yml` enforces the part a PR cannot. On a `vX.Y.Z` push it requires that tag to
+be the one the workflows pin, so a release cannot ship the previous release's actions; on a
+`v1` move it requires the alias to land on the commit the pinned tag names; and on every
+push to `main` it requires the pinned tag to exist, because the slip that has actually
+happened is merging the bump and never tagging at all. `main` is therefore red between the
+bump merging and the tag being cut. That red is the report, not a fault, and it clears the
+moment the tag is pushed. It detects rather than prevents: by the time a tag push fails
+there, `v1` has moved and consumers are already broken, so it turns a silent breakage into a
+loud one rather than stopping it.
