@@ -802,10 +802,22 @@ jobs:
           #
           # Checked here rather than by having the author jobs add `hold`: a label has to exist in
           # the repository to be applied, and one that silently fails to apply restores nothing.
-          governed=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
-            --paginate --jq '.[].body' | grep -c -- '<!-- governed-merged -->' || true)
-          [ "${governed:-0}" = "0" ] \
-            || hold "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
+          # The call is separate from the reading of it. `grep -c … || true` folded a failing
+          # gh api into the same `0` a clean "no marker" gives, so a 502 or a rate limit read as
+          # "no bot touched a governed path" and merged - on the one guard added to stop that.
+          # Every other guard in this step fails closed; so does this one now.
+          #
+          # Bot-authored comments only: the marker is a literal string, so a review quoting it or
+          # a maintainer asking what it does would otherwise park the PR for good.
+          #
+          # There is deliberately no way to lift it. The `hold` label can be taken off because a
+          # human decides it no longer applies; this says a bot put a change into the rules file,
+          # which stays true. It stops the BOT merging, and a human merging by hand is the point.
+          bot_comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
+            --paginate --jq '.[] | select(.user.type == "Bot") | .body')
+          if grep -q -- '<!-- governed-merged -->' <<<"$bot_comments"; then
+            hold "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
+          fi
 
           # Stacks merge bottom-up: only a PR based on the default branch is mergeable.
           base=$(gh pr view "$PR" --json baseRefName --jq .baseRefName)
