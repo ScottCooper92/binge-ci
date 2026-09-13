@@ -1,18 +1,25 @@
 name: Tag check
 
-# Catches the one release mistake nothing else can: bumping the self-referenced tag, moving
-# `v1`, and never cutting the tag. The workflows then name a ref that does not exist, and
-# every consumer's next agent run dies on "unable to resolve action".
+# Catches the release mistakes nothing else can: bumping the self-referenced tag and never
+# cutting it, tagging a commit whose references still name the previous release, or moving
+# `v1` to a commit other than the one the pinned tag names. In each case the workflows name a
+# ref that does not exist, or resolve their actions from a different commit than the one
+# they shipped with, and every consumer's next agent run dies on "unable to resolve action".
 #
 # It cannot be a PR check - the tag is created after the merge that names it - so it runs on
-# a tag push, which is when the mistake is made: moving `v1` is itself a tag push.
+# a tag push, which is when the mistake is made: moving `v1` is itself a tag push. It ALSO
+# runs on every push to main, because the mistake that has actually happened, twice, is
+# merging the bump and never tagging at all, and no tag push follows that to fire on. Between
+# the bump merging and the tag being cut, main genuinely names a tag that does not exist, so
+# this is red for that window; that red is the report, and it clears when the tag is pushed.
 #
-# It DETECTS rather than prevents. By the time this fails, `v1` has already moved and
-# consumers are already broken; it turns a silent breakage into a loud one and shortens the
-# window. A green run here is not evidence the window never opened.
+# It DETECTS rather than prevents. By the time a tag push fails here, `v1` has already moved
+# and consumers are already broken; it turns a silent breakage into a loud one and shortens
+# the window. A green run here is not evidence the window never opened.
 on:
   push:
     tags: ['v*']
+    branches: [main]
 
 permissions:
   contents: read
@@ -23,5 +30,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Every self-referenced tag must exist
+      - name: Every self-referenced tag must exist, and name this release
+        env:
+          # The ref and commit of this push. On main only existence is checked; on a
+          # vX.Y.Z push the tag must be the one pinned; on a `v1` move the commit must be
+          # the one the pinned tag names.
+          PUSHED_REF: ${{ github.ref_name }}
+          PUSHED_SHA: ${{ github.sha }}
         run: ./tools/check-internal-refs.sh --resolve

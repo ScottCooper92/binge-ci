@@ -56,6 +56,21 @@ jobs:
       - name: Check this repo's references to its own actions
         run: ./tools/check-internal-refs.sh
 
-      # A plain file, so no `run:` block carries it into the checks above.
-      - name: shellcheck the governed-paths script
-        run: shellcheck --severity=warning .github/actions/governed-paths/restore-agent-governed-paths.sh
+      # Plain files, so no `run:` block carries them into the checks above. The tools are
+      # the checks themselves: one of them passing silently is a gate that is not there.
+      - name: shellcheck the governed-paths script and the tools
+        run: shellcheck --severity=warning .github/actions/governed-paths/restore-agent-governed-paths.sh tools/*.sh
+
+      # GitHub loads `.yaml` as readily as `.yml`, but every glob in this repo - actionlint's
+      # above and the three tools' - reads `.yml` only, so a workflow or caller added as
+      # `.yaml` would run in production having been seen by no check. Rather than widen four
+      # globs and keep them in step, the convention is enforced.
+      - name: Workflows and callers are .yml
+        run: |
+          set -euo pipefail
+          found=$(find .github callers -type f -name '*.yaml')
+          if [ -n "$found" ]; then
+            echo "::error::These are invisible to every check here; rename them to .yml:"
+            printf '%s\n' "$found"
+            exit 1
+          fi
