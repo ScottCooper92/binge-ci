@@ -9,7 +9,7 @@ CI is one job, `lint`, with these steps in order:
 | Step | Runs |
 | --- | --- |
 | `actionlint` | actionlint, with shellcheck at `--severity=warning`, over `.github/workflows/*.yml` and `callers/*/*.yml` |
-| Check the draft callers | `tools/check-callers.sh` - each caller's inputs, secrets and permissions against the workflow it calls |
+| Check the draft callers | `tools/check-callers.sh` - each caller's inputs, secrets and permissions against the workflow it calls, the worked ones under `callers/` and this repository's own `self-*.yml` alike |
 | shellcheck the composite actions | `tools/check-action-shell.sh` - every `run:` block in `.github/actions/*/action.yml` |
 | Check this repo's references | `tools/check-internal-refs.sh` - no `uses: ./`, one immutable tag on every self-reference |
 | shellcheck the governed-paths script | shellcheck on `restore-agent-governed-paths.sh` |
@@ -45,7 +45,8 @@ shellcheck --severity=warning <the file you changed>
 ./tools/check-callers.sh
 ./tools/check-action-shell.sh
 ./tools/check-internal-refs.sh
-./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml callers/*/*.yml
+./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
+./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
 ```
 
 Do not run the full gate. CI does that on push.
