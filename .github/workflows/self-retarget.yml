@@ -1,0 +1,28 @@
+name: Author - catch up a retargeted PR (this repo)
+
+run-name: >-
+  ${{ github.event.pull_request.number
+        && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
+      || github.ref_name }}
+
+# This repository's own caller - see self-review.yml for why it pins the release tag rather
+# than `./`. pull_request_target is load-bearing here, and the called workflow runs `git
+# merge` and `git push` and nothing else - see its header before adding anything.
+on:
+  pull_request_target:
+    # `edited` covers a base change. `ready_for_review` covers a stack opened as
+    # drafts and promoted one at a time - a draft retargeted while staged has no other
+    # moment to be caught up. `opened` and `labeled` cover a PR opened onto a base
+    # that had already merged, where there is no base change for `edited` to carry;
+    # both, because `gh pr create` then `gh pr edit --add-label` is two calls and
+    # `opened` fires before the label lands.
+    types: [opened, labeled, edited, ready_for_review]
+
+jobs:
+  catch-up:
+    uses: ScottCooper92/binge-ci/.github/workflows/author-retarget.yml@v1.0.6
+    with:
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
