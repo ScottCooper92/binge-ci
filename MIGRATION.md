@@ -18,7 +18,8 @@ Three decisions were settled on 2026-09-09 and the steps below assume them:
 Done, 2026-09-09. All five are current as of Binge `30e2c6c66`; see the status table in
 [README.md](README.md). Two things were settled while doing it, rather than inherited:
 
-- **`secrets: inherit` is gone.** Every caller names the three secrets it passes. `inherit`
+- **`secrets: inherit` is gone.** Every caller names the secrets it passes — three, or the two
+  `author-retarget` declares. `inherit`
   hands the called workflow every secret the caller holds, which on a public repo calling a
   public reusable workflow is a wider grant than the job needs.
 - **`bufbuild/buf-action` is pinned** to `8c6a16e1` (v1.5.0). It was the one action left on

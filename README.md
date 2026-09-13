@@ -20,7 +20,7 @@ they are worth keeping in one place.
 
 | Workflow | What it does |
 | --- | --- |
-| `bot-review.yml` | Reviews a PR once CI goes green, and optionally squash-merges it. |
+| `bot-review.yml` | Reviews a PR once CI goes green, and optionally merges it by the caller's `merge_method`. |
 | `author-ci-fix.yml` | Makes one repair attempt per commit when CI goes red, at most two per human push, then stops rather than churning. |
 | `author-comments.yml` | Answers review feedback — top-level comments, inline notes and reviews. |
 | `author-conflicts.yml` | Finds PRs that conflict when the base moves, and resolves them. |
@@ -41,16 +41,34 @@ name: Bot review
 run-name: >-
   ${{ github.event.workflow_run.pull_requests[0].number
         && format('#{0} · {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_branch)
-      || github.event.workflow_run.head_branch }}
+      || github.event.pull_request.number
+        && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
+      || inputs.pr && format('#{0} · dispatched', inputs.pr)
+      || github.event.workflow_run.head_branch
+      || github.ref_name }}
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  pull_request:
+    types: [labeled]      # a PR labelled after its CI already reported
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+# The called workflow cannot hold more than the caller does - see "Writing a caller".
+permissions:
+  contents: read
+  actions: read
+  checks: write
 
 jobs:
   review:
     uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
     with:
+      dispatch_pr: ${{ inputs.pr }}
       auto_merge: false
       gated_checks: ktlint or Android lint
     secrets:
@@ -58,6 +76,8 @@ jobs:
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
+
+The worked callers under `callers/` are the complete versions, one per workflow.
 
 Worked examples for two repos are in `callers/`. Every input is documented on the workflow
 it belongs to.
@@ -143,8 +163,8 @@ perform the rewrite themselves with the script's `--rewrite` mode before their a
 and every bot undoes it against the PR's base. Without that, an agent run on those triggers
 reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
 
-Both actions live here rather than in the consuming repos so a PR cannot edit the guard
-that is about to refuse it, and so the two public repos get one they never had.
+All three actions live here rather than in the consuming repos so a PR cannot edit the
+guard that is about to refuse it, and so the two public repos get one they never had.
 
 They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`. Inside a
 reusable workflow a local action path resolves against the **caller's** workspace, where
