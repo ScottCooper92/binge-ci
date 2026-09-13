@@ -303,7 +303,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.6
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.7
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
