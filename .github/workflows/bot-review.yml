@@ -190,6 +190,10 @@ permissions:
   # For the CI-run lookup in "Resolve the PR". The reviewer app's grant covers pull requests,
   # contents and issues but NOT Actions, so that call uses the workflow's own GITHUB_TOKEN.
   actions: read
+  # For "Record that the run failed before the review", which posts with the workflow's own
+  # GITHUB_TOKEN because the reviewer app's token is the thing most likely to have failed.
+  # Every caller has to hold this too - see README.md, "Writing a caller".
+  checks: write
 
 env:
   AGENT_LABEL: ${{ inputs.agent_label }}
@@ -219,6 +223,9 @@ jobs:
       pushed_at: ${{ steps.pr.outputs.pushed_at }}
       base: ${{ steps.pr.outputs.base }}
       vouched: ${{ steps.pr.outputs.vouched }}
+      # For the failed-before-review reporter below, which names the step that broke.
+      token: ${{ steps.token.outcome }}
+      resolved: ${{ steps.pr.outcome }}
     steps:
       - name: Mint reviewer app token
         id: token
@@ -419,6 +426,61 @@ jobs:
               "$marker" "$RUN_URL" | gh pr comment "$PR" --body-file -
           fi
 
+  # When resolve fails, the review job is skipped, and an always() step inside a skipped job
+  # does not run - so every check run this workflow posts, the "run failed" finaliser
+  # included, is unreachable, and the PR reads exactly like one no run has reported for yet.
+  # A twelve-minute API outage (binge-seerr #147, runs #239-#241) left three PRs that way.
+  #
+  # Two things follow. It posts with the workflow's own GITHUB_TOKEN, because the reviewer
+  # app's token is what failed on the observed run, so a fallback that minted it again would
+  # fail the same way. And it takes the head sha from the EVENT, since resolve never got as far
+  # as outputting one; the dispatch door carries no sha and is a human watching a run, so it
+  # gets nothing here.
+  #
+  # Under a name of its OWN, and neutral, not red. A check run can only be updated by the app
+  # that created it, so a `Bot review` posted by github-actions could never be replaced by the
+  # reviewer app's next run: the lookup by name would find it, the update would be refused, and
+  # that SHA would carry the stale note for good with no live one beside it. And a red check
+  # from any app holds mergeStateStatus at UNSTABLE, which is the merge gate's own hold - a
+  # re-run on the same commit after the outage, the ordinary remedy, would then be held by the
+  # note about the outage. The review job supersedes this check when it does get through.
+  report-resolve-failure:
+    needs: resolve
+    if: >
+      always() &&
+      (needs.resolve.result == 'failure' || needs.resolve.result == 'cancelled') &&
+      (github.event.workflow_run.head_sha || github.event.pull_request.head.sha) != ''
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 5
+    steps:
+      - name: Name the step that failed
+        id: why
+        env:
+          TOKEN_OUTCOME: ${{ needs.resolve.outputs.token }}
+          RESOLVE_OUTCOME: ${{ needs.resolve.outputs.resolved }}
+        run: |
+          set -euo pipefail
+          if [ "$TOKEN_OUTCOME" != "success" ]; then
+            summary="Minting the reviewer app's token failed before anything was looked up - GitHub's API returned an error, which is transient. Nothing has judged this commit. Re-run the workflow, or re-run CI on this commit, and it tries again."
+          elif [ "$RESOLVE_OUTCOME" != "success" ]; then
+            summary="Working out what to review failed before the review started; the log says where. Nothing has judged this commit. Re-running CI on this commit tries again."
+          else
+            summary="The run failed before the review job started; the log says where. Nothing has judged this commit."
+          fi
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+      - name: Record that the run failed before the review
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+          name: Bot review (run failed)
+          conclusion: neutral
+          title: The review run failed before it started
+          summary: ${{ steps.why.outputs.summary }}
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
   review:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
@@ -467,6 +529,23 @@ jobs:
             echo "PR #$PR was already reviewed at $SHA - not reviewing it again."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # The note report-resolve-failure leaves is posted by github-actions, so only github-actions
+      # can update it - which is why this is a separate step with the workflow's own token, and
+      # why it updates only: on a commit that never had the note there is nothing to say.
+      - name: Supersede a note about a run that failed before the review
+        if: needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review (run failed)
+          conclusion: neutral
+          title: Superseded by a later run
+          summary: An earlier run failed before it reached the review; a later one got through. The Bot review check carries the outcome.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          only-update: 'true'
 
       # Says on the PR that a review is running, and - the half that is not cosmetic - CLEARS
       # whatever this run's predecessor left on this SHA. A crashed review leaves a `failure`
