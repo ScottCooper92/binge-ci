@@ -2,18 +2,19 @@
 
 Shared CI and agent workflows for the Binge repositories.
 
-Five GitHub Actions workflows run a review bot and three author bots across
-[Binge](https://github.com/ScottCooper92), [binge-integrations](https://github.com/ScottCooper92/binge-integrations)
-and [binge-seerr](https://github.com/ScottCooper92/binge-seerr). They live here once, and
-each repo calls them with a ~30-line caller.
+Five GitHub Actions workflows run a review bot and four author bots across
+[Binge](https://github.com/ScottCooper92), [binge-integrations](https://github.com/ScottCooper92/binge-integrations),
+[binge-seerr](https://github.com/ScottCooper92/binge-seerr) and
+[binge-design-system](https://github.com/ScottCooper92/binge-design-system). They live here
+once, and each repo calls them with a ~30-line caller.
 
 They used to be copied. That went the way copies go: by the time there were three, all
 three were missing the same 23 fixes, and the original had grown 43% past the version they
 shared. The comments in these files record what each fix was for, which is most of why
 they are worth keeping in one place.
 
-> **Status: Binge, binge-seerr, binge-integrations and binge-design-system call these.** What is not yet proven is every bot —
-> see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
+> **Status: Binge, binge-seerr, binge-integrations and binge-design-system call these.**
+> What is not yet proven is every bot — see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
 > ever been skipped by a guard.
 
 ## The five workflows
