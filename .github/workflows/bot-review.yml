@@ -752,6 +752,7 @@ jobs:
           attempt=0
           status=""
           posted=false
+          landed=false
           while :; do
             attempt=$((attempt + 1))
             if gh api -i --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input "$PAYLOAD" \
@@ -762,14 +763,28 @@ jobs:
             # `|| true`: no status line is a real case (the connection died), and under pipefail the
             # grep's 1 would otherwise end the step here with nothing recorded.
             status=$(grep -m1 -oE '^HTTP/[0-9.]+ [0-9]{3}' "$POST_LOG" | awk '{ print $2 }' || true)
+            # A 403 is retried only when it is secondary rate limiting, which names itself; a
+            # permission error is permanent and thirty seconds of retrying it changes nothing.
             case "${status:-}" in
-              5??|403|'')
-                [ "$attempt" -lt 3 ] || break
-                echo "Review POST attempt $attempt failed (HTTP ${status:-none}); retrying." >&2
-                sleep $((attempt * 10))
-                ;;
+              5??|'') ;;
+              403) grep -qi 'rate limit' "$POST_LOG" || break ;;
               *) break ;;
             esac
+            [ "$attempt" -lt 3 ] || break
+            # A failure after GitHub had already created the review (a connection cut mid-response)
+            # must not post it twice: the pin is what the reviewed-already check reads, so it is what
+            # is looked for here before trying again.
+            if gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' 2>/dev/null \
+                 | jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" \
+                     '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length' \
+                 | grep -qvx 0; then
+              echo "Review POST attempt $attempt failed (HTTP ${status:-none}) but the review is on the PR; not posting it again." >&2
+              posted=true
+              landed=true
+              break
+            fi
+            echo "Review POST attempt $attempt failed (HTTP ${status:-none}); retrying." >&2
+            sleep $((attempt * 10))
           done
           if [ "$posted" != "true" ]; then
             cat "$POST_LOG" >&2
@@ -783,8 +798,10 @@ jobs:
           # created review's full JSON, which repeats the body verbatim; `cat` is the fallback
           # if the response is not the shape expected. The body follows the blank line that ends
           # the headers -i put ahead of it.
-          awk 'body { print } /^\r?$/ { body = 1 }' "$POST_LOG" \
-            | jq -r '"Posted review \(.id), pinned to \(.commit_id)."' || cat "$POST_LOG"
+          if [ "$landed" != "true" ]; then
+            awk 'body { print } /^\r?$/ { body = 1 }' "$POST_LOG" \
+              | jq -r '"Posted review \(.id), pinned to \(.commit_id)."' || cat "$POST_LOG"
+          fi
           : > "$POST_LOG"
 
           # AFTER the post, never before it. The check run keys off this, and a verdict that was
