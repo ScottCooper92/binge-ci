@@ -39,7 +39,7 @@ jobs:
       (github.event.sender.login == 'binge-pr-reviewer[bot]' ||
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
                 github.event.review.author_association || github.event.comment.author_association))
-    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.6
+    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.7
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
