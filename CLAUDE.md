@@ -22,7 +22,9 @@ signature. A caller that no longer fits dies as `startup_failure` before a singl
 with nothing on the PR. So a PR that changes one says so in its body, keeps the worked
 callers under `callers/` in step in the same commit, and names the consumer PRs that have to
 follow. `tools/check-callers.sh` catches the mechanical part for the two public consumers;
-Binge's callers live on its own `ci/binge-ci-callers` branch and it cannot see them.
+Binge's callers live on its own `ci/binge-ci-callers` branch and it cannot see them. The
+`self-*.yml` callers are the exception: they pin a release tag and are checked against the
+workflow at that tag, so they change in the release bump and never with the workflow.
 
 The consumers pin `@v1`, a moving alias, and this repository's own actions and callers pin
 the immutable `vX.Y.Z` the release was cut at. Releasing is bumping those pins, merging,

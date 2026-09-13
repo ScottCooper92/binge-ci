@@ -8,11 +8,11 @@ press.
 ## 1. What CI has already decided
 
 CI is green on the head under review before a review starts. That means actionlint and
-shellcheck passed over every workflow, caller and script, the two public callers and this
-repository's own `self-*.yml` callers fit the workflows they call (`tools/check-callers.sh`),
-every composite action's `run:` blocks are
-shellcheck-clean (`tools/check-action-shell.sh`), and every self-reference pins one
-immutable tag with no `uses: ./` (`tools/check-internal-refs.sh`).
+shellcheck passed over every workflow, caller and script; the two public callers fit the
+workflows in the tree and the `self-*.yml` callers fit the workflows at the tag they pin
+(`tools/check-callers.sh`); every composite action's `run:` blocks are shellcheck-clean
+(`tools/check-action-shell.sh`); and every self-reference pins one immutable tag with no
+`uses: ./` (`tools/check-internal-refs.sh`).
 
 Do not re-report anything in that set. Green is necessary and not sufficient: everything
 below is ungated, and most of it only fails at run time in a consuming repository.

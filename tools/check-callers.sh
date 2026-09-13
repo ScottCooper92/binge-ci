@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 #
 # Every `with:` key in a caller must be a declared input of the reusable workflow it
-# calls, and every required secret must reach it. Two trees of callers: the worked ones
-# under callers/, and this repository's own self-*.yml, which call the same workflows at the
-# release tag and are live rather than drafts.
+# calls, and every required secret must reach it. Two trees of callers, checked against two
+# different things. The worked ones under callers/ are checked against the WORKING TREE:
+# consumers pin `v1`, which moves to this commit at release, so a caller that no longer fits
+# is fixed in the same PR. This repository's own self-*.yml pin an immutable vX.Y.Z and run
+# against THAT, so each is checked against the workflow at the tag it pins, read with
+# `git show`. Checking a self caller against the tree would fail it for a signature it never
+# calls, and "fixing" it to match would be the startup_failure below at run time. ci.yml
+# fetches the tags for this.
 #
 # This exists because actionlint cannot see across a REMOTE reusable-workflow
 # reference. For a local `./.github/workflows/x.yml` call it validates the inputs;
@@ -34,14 +39,33 @@ keys() { # $1=file  $2=start regex  $3=stop regex  $4=key indent  $5=key charcla
 }
 
 fail=0
+pinned=$(mktemp)
+trap 'rm -f "$pinned"' EXIT
 for caller in callers/*/*.yml .github/workflows/self-*.yml; do
   # The target comes from the `uses:` line, not the caller's filename: a self caller is
   # named for its role here (self-review.yml), not for the workflow it calls.
-  uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml' "$caller" | head -1)
-  reusable=".github/workflows/${uses##*/}"
-  if [ -z "$uses" ] || [ ! -f "$reusable" ]; then
-    echo "FAIL $caller"; echo "     no reusable workflow found for its uses: line (${uses:-none})"; fail=1; continue
+  uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml@[^[:space:]]+' "$caller" | head -1)
+  target=".github/workflows/$(basename "${uses%@*}")"
+  ref="${uses##*@}"
+  if [ -z "$uses" ]; then
+    echo "FAIL $caller"; echo "     no ScottCooper92/binge-ci/.github/workflows/<x>.yml@<ref> uses: line"; fail=1; continue
   fi
+  case "$caller" in
+    callers/*)
+      reusable="$target"
+      against="the working tree"
+      if [ ! -f "$reusable" ]; then
+        echo "FAIL $caller"; echo "     no reusable workflow at $reusable"; fail=1; continue
+      fi
+      ;;
+    *)
+      if ! git show "${ref}:${target}" > "$pinned" 2>/dev/null; then
+        echo "FAIL $caller"; echo "     cannot read $target at $ref - tag not fetched, or the tag lacks it"; fail=1; continue
+      fi
+      reusable="$pinned"
+      against="$ref"
+      ;;
+  esac
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
   secrets=$(keys "$reusable" '^    secrets:' '^permissions:' '      ' '[A-Z_]')
   used=$(keys    "$caller"   '^    with:'    '^    secrets:' '      ' '[a-z_]')
@@ -76,7 +100,7 @@ for caller in callers/*/*.yml .github/workflows/self-*.yml; do
     [ -n "$missing" ]       && echo "     secrets not passed:  $(echo "$missing")"
     [ -n "$missing_perms" ] && echo "     permissions the caller must declare: $(echo "$missing_perms")"
   else
-    echo "ok   $caller  ($(printf '%s\n' "$used" | grep -c .) inputs, $(printf '%s\n' "$passed" | grep -c .) secrets)"
+    echo "ok   $caller  ($(printf '%s\n' "$used" | grep -c .) inputs, $(printf '%s\n' "$passed" | grep -c .) secrets, against $against)"
   fi
 done
 exit $fail

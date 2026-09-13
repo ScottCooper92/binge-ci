@@ -46,6 +46,10 @@ jobs:
           - Do not edit a file under callers/ to make check-callers.sh pass unless
             the workflow it calls changed in this same PR; a caller that no longer
             fits is a consumer PR as well, and the PR body has to say so.
+          - Do not edit a self-*.yml caller to match a workflow on main. It is
+            checked against the tag it pins and runs against that tag; an input
+            or permission main declares and the tag does not is a startup_failure
+            at run time. A self caller changes in the release bump, never before.
 
         If the only way to green is through one of those, that is a stop: make no
         changes and say so.
