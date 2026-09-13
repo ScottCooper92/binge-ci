@@ -65,6 +65,12 @@ inputs:
     description: Where the check's "Details" link goes. The workflow run, normally.
     required: false
     default: ''
+  only-update:
+    description: >
+      When true, post nothing unless a check run of this name already exists on the sha.
+      For superseding a note an earlier run left, without minting one on every commit.
+    required: false
+    default: 'false'
 
 outputs:
   id:
@@ -86,6 +92,7 @@ runs:
         TITLE: ${{ inputs.title }}
         SUMMARY: ${{ inputs.summary }}
         DETAILS_URL: ${{ inputs.details-url }}
+        ONLY_UPDATE: ${{ inputs.only-update }}
       run: |
         # Deliberately not `set -e`: see the header. Every exit below is 0.
         set -uo pipefail
@@ -109,6 +116,12 @@ runs:
           :
         else
           skip "could not read the existing check runs for ${SHA}; creating one blind would leave a second '${NAME}' on this commit."
+        fi
+
+        if [ -z "$existing" ] && [ "$ONLY_UPDATE" = "true" ]; then
+          echo "No '${NAME}' on ${SHA} to update - nothing to post."
+          echo "id=" >> "$GITHUB_OUTPUT"
+          exit 0
         fi
 
         payload=$(jq -n \
