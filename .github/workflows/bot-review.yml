@@ -849,10 +849,10 @@ jobs:
               403) grep -qi 'rate limit' "$POST_LOG" || break ;;
               *) break ;;
             esac
-            [ "$attempt" -lt 3 ] || break
             # A failure after GitHub had already created the review (a connection cut mid-response)
-            # must not post it twice: the pin is what the reviewed-already check reads, so it is what
-            # is looked for here before trying again.
+            # must not post it twice, and must not be reported as a refusal either: the pin is what
+            # the reviewed-already check reads, so it is what is looked for here - on every failed
+            # attempt, the last one included, before deciding whether there is anything to retry.
             if gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' 2>/dev/null \
                  | jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" \
                      '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length' \
@@ -862,6 +862,7 @@ jobs:
               landed=true
               break
             fi
+            [ "$attempt" -lt 3 ] || break
             echo "Review POST attempt $attempt failed (HTTP ${status:-none}); retrying." >&2
             sleep $((attempt * 10))
           done
