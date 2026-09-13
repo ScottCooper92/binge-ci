@@ -10,7 +10,9 @@
 # calls, and "fixing" it to match would be the startup_failure below at run time. ci.yml
 # fetches the tags for this. The one PR on which the tag cannot resolve is the release bump,
 # which pins the tag it is about to create; there the tree stands in, since the tag is cut
-# at that very commit.
+# at that very commit. A checkout with NO tags is the other way for the same `git show` to
+# fail, and it is not the same answer: it fails loudly rather than standing the tree in,
+# because silently doing so is the skew this whole branch exists to catch.
 #
 # This exists because actionlint cannot see across a REMOTE reusable-workflow
 # reference. For a local `./.github/workflows/x.yml` call it validates the inputs;
@@ -83,6 +85,9 @@ fi
 
 pinned=$(mktemp)
 trap 'rm -f "$pinned"' EXIT
+# Read once for the self-caller branch below, which has to tell an uncut tag from a tagless
+# checkout and has only a failed `git show` to go on.
+have_tags=$(git tag -l | head -1)
 for caller in "${callers[@]}"; do
   # The target comes from the `uses:` line, not the caller's filename: a self caller is
   # named for its role here (self-review.yml), not for the workflow it calls.
@@ -104,6 +109,12 @@ for caller in "${callers[@]}"; do
       if git show "${ref}:${target}" > "$pinned" 2>/dev/null; then
         reusable="$pinned"
         against="$ref"
+      elif [ -z "$have_tags" ]; then
+        echo "FAIL $caller"
+        echo "     no tags in this checkout, so $ref cannot be resolved and this caller cannot"
+        echo "     be checked against the workflow it pins. ci.yml uses fetch-tags: true;"
+        echo "     locally, git fetch --tags."
+        fail=1; continue
       elif [ -f "$target" ]; then
         # The release PR pins the tag it is about to create, and the tag is cut AFTER the
         # merge - so on that PR the ref cannot resolve, and the tree is what the tag will
