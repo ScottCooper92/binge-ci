@@ -542,6 +542,13 @@ jobs:
       # The note report-resolve-failure leaves is posted by github-actions, so only github-actions
       # can update it - which is why this is a separate step with the workflow's own token, and
       # why it updates only: on a commit that never had the note there is nothing to say.
+      #
+      # Done here for promptness and AGAIN after the verdict for correctness. The two writers of
+      # this check name sit in different jobs under different concurrency keys - failed-run on the
+      # head sha, review on the PR number - and neither key can adopt the other's: resolve never
+      # produced a number on the path that writes the note, and the review job's key is what stops
+      # a duplicate review and a second merge attempt. So nothing serialises them, and an earlier
+      # run's note can land after this step has already looked and found none.
       - name: Supersede a note about a run that failed before the review
         if: needs.resolve.outputs.sha != ''
         uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
@@ -933,6 +940,24 @@ jobs:
           title: ${{ steps.submit.outputs.verdict == 'approve' && 'Approved' || 'Changes requested' }}
           summary: The verdict above was posted as a review on this PR.
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # The second half of the pair above, and the half that is load-bearing: a note that landed
+      # while this review was running is caught here instead of outliving the verdict beside it.
+      # Gated on the same verdict as the check above, because "a later one got through" is only
+      # true of a run that reached one - a review that itself died must leave the note standing.
+      - name: Supersede a late note about a run that failed before the review
+        if: always() && steps.submit.outputs.verdict != '' && needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.6
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review (run failed)
+          conclusion: neutral
+          title: Superseded by a later run
+          summary: An earlier run failed before it reached the review; a later one got through. The Bot review check carries the outcome.
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          only-update: 'true'
 
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
