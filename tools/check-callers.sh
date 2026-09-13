@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
-# Every `with:` key in a draft caller must be a declared input of the reusable
-# workflow it calls, and every required secret must reach it.
+# Every `with:` key in a caller must be a declared input of the reusable workflow it
+# calls, and every required secret must reach it. Two trees of callers: the worked ones
+# under callers/, and this repository's own self-*.yml, which call the same workflows at the
+# release tag and are live rather than drafts.
 #
 # This exists because actionlint cannot see across a REMOTE reusable-workflow
 # reference. For a local `./.github/workflows/x.yml` call it validates the inputs;
@@ -66,16 +68,19 @@ with_value() { # $1=caller  $2=input
 }
 
 fail=0
-callers=(callers/*/*.yml)
+callers=(callers/*/*.yml .github/workflows/self-*.yml)
 if [ ${#callers[@]} -eq 0 ]; then
   echo "FAIL no callers found under callers/*/ - nothing was checked."
   exit 1
 fi
 
 for caller in "${callers[@]}"; do
-  wf=$(basename "$caller"); reusable=".github/workflows/$wf"
-  if [ ! -f "$reusable" ]; then
-    echo "FAIL $caller"; echo "     no reusable workflow at $reusable"; fail=1; continue
+  # The target comes from the `uses:` line, not the caller's filename: a self caller is
+  # named for its role here (self-review.yml), not for the workflow it calls.
+  uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml' "$caller" | head -1)
+  reusable=".github/workflows/${uses##*/}"
+  if [ -z "$uses" ] || [ ! -f "$reusable" ]; then
+    echo "FAIL $caller"; echo "     no reusable workflow found for its uses: line (${uses:-none})"; fail=1; continue
   fi
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
   secrets=$(keys "$reusable" '^    secrets:' '^permissions:' '      ' '[A-Z_]')
