@@ -154,10 +154,10 @@ jobs:
 
           # Unit separator (0x1f), not tab: an unlabelled PR leaves an empty field, and tab is an
           # IFS *whitespace* character, so IFS=$'\t' would collapse it and shift branch off the end.
-          IFS=$'\037' read -r cross state isdraft labels branch < <(gh pr view "$PR" \
-            --json isCrossRepository,state,isDraft,labels,headRefName \
+          IFS=$'\037' read -r cross state isdraft labels branch base < <(gh pr view "$PR" \
+            --json isCrossRepository,state,isDraft,labels,headRefName,baseRefName \
             --jq '[.isCrossRepository, .state, .isDraft,
-                   ([.labels[].name] | join(",")), .headRefName]
+                   ([.labels[].name] | join(",")), .headRefName, .baseRefName]
                   | join("\u001f")')
 
           [ "$cross" = "true" ] && skip "PR #$PR comes from a fork - out of scope."
@@ -177,6 +177,10 @@ jobs:
 
           echo "number=$PR" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          # claude-code-action rewrites the governed paths from the PR's BASE, not the default
+          # branch, so the undo has to discriminate against the same ref - on a stacked PR the two
+          # differ, and diffing against the wrong one reports the lower PR's changes as the rewrite.
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
       # Circuit breaker on bot-to-bot volleys. The count restarts from the newest HUMAN
       # comment, review or inline note: counting every response ever posted would leave the
@@ -306,7 +310,7 @@ jobs:
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.6
         with:
-          base-ref: origin/${{ inputs.default_branch }}
+          base-ref: origin/${{ steps.ctx.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
       # An agent runner ships no toolchain, so every Gradle task an agent was asked to run
@@ -450,6 +454,14 @@ jobs:
           # the PR head must not be supplied BY the PR head.
           governed_note=$(bash "$GOVERNED_SCRIPT" "${checked_out:-HEAD}")
 
+          # Posted on its own, ahead of the commit and push, rather than folded into the reply at
+          # the end: everything between here and the reply is fatal under `set -e`, and a governed
+          # path never changes without a note - a commit that fails after the restore must not take
+          # the note down with it.
+          if [ -n "$governed_note" ]; then
+            printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
+          fi
+
           dirty=$(git status --porcelain)
           # Agents commit anyway often enough that trusting the porcelain alone would strand the
           # work in the runner workspace and reply as though nothing had changed.
@@ -486,7 +498,6 @@ jobs:
           {
             echo "<!-- author-response -->"
             cat "${{ runner.temp }}/reply.md" 2>/dev/null || echo "_No reply written._"
-            if [ -n "$governed_note" ]; then printf '%s\n' "$governed_note"; fi
             if [ -n "$push_note" ]; then printf '\n\n%s\n' "$push_note"; fi
             # The reply above is the agent's account; this is the commit's. Listing the files does
             # not make the account true - it makes it falsifiable without re-diffing the branch.

@@ -134,7 +134,12 @@ tools/                The checks actionlint cannot do
 that govern an agent — `CLAUDE.md`, `.claude` and friends. The action overwrites them with
 the base branch's copy before it starts, because a PR head is untrusted; without the undo,
 the author bots commit that rewrite as their own work and silently revert the PR. It lives
-here so a PR cannot reach the guard that is about to refuse it.
+here so a PR cannot reach the guard that is about to refuse it. The action only rewrites on
+an entity event (a comment, a review), and from the PR's base branch rather than the default
+one; so the two `workflow_run`-and-schedule bots, `author-ci-fix` and `author-conflicts`,
+perform the rewrite themselves with the script's `--rewrite` mode before their agent starts,
+and every bot undoes it against the PR's base. Without that, an agent run on those triggers
+reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
 
 Both actions live here rather than in the consuming repos so a PR cannot edit the guard
 that is about to refuse it, and so the two public repos get one they never had.

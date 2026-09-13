@@ -376,6 +376,17 @@ jobs:
             done
           fi
 
+      # claude-code-action rewrites the governed paths only on an entity event, and this job runs
+      # on a schedule or by hand - so without this the agent sees the PR head's copy live, and
+      # "Commit or bail out" restores a snapshot that already matched it. Past the refusal above
+      # every governed path merged cleanly, and the snapshot holds that result; the base's copy
+      # goes in over it here, exactly as the action would put it, and the snapshot goes back after.
+      - name: Rewrite the governed paths to the base's copy
+        if: steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: bash "$GOVERNED_SCRIPT" --rewrite
+
       - name: Resolve with Claude
         if: steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and

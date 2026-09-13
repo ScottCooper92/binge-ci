@@ -200,6 +200,9 @@ jobs:
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
           echo "number=$num" >> "$GITHUB_OUTPUT"
+          # The governed paths are rewritten from the PR's BASE, not the default branch: on a
+          # stacked PR the two differ, and a rewrite from the wrong one reverts the lower PR too.
+          echo "base=$(gh pr view "$num" --json baseRefName --jq .baseRefName)" >> "$GITHUB_OUTPUT"
 
       # The loop cap: a marker comment keyed to the failing commit SHA.
       #
@@ -348,8 +351,20 @@ jobs:
           steps.log.outputs.skip != 'true'
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.6
         with:
-          base-ref: origin/${{ inputs.default_branch }}
+          base-ref: origin/${{ steps.pr.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
+
+      # claude-code-action rewrites the governed paths to the base's copy only on an ENTITY event
+      # (a comment, a review). This job runs on workflow_run, where it does nothing - so without
+      # this step the agent reads the PR head's own CLAUDE.md live, and the undo in "Commit and
+      # push" finds nothing to undo. The guard is only in force if the rewrite happens.
+      - name: Rewrite the governed paths to the base's copy
+        if: >
+          steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
+          steps.log.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: bash "$GOVERNED_SCRIPT" --rewrite
 
       # An agent runner ships no toolchain, so every Gradle task an agent was asked to run failed
       # before it started - leaving this job unable to run the build it was repairing. ci-setup is
@@ -506,10 +521,11 @@ jobs:
           # out - exactly the question being asked.
           checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
 
-          # Ahead of the porcelain read, not after it. claude-code-action rewrites the paths that
-          # govern an agent to the base's copy in the WORKING TREE before it starts, so `git add -A`
-          # would commit that rewrite as the agent's own repair and revert the PR. A run that found no
-          # fix must read CLEAN here and take the "couldn't identify a fix" path.
+          # Ahead of the porcelain read, not after it. The governed paths were rewritten to the
+          # base's copy in the WORKING TREE before the agent started (by the step above, since
+          # claude-code-action does not do it on workflow_run), so `git add -A` would commit that
+          # rewrite as the agent's own repair and revert the PR. A run that found no fix must read
+          # CLEAN here and take the "couldn't identify a fix" path.
           #
           # The script comes from binge-ci, not the PR's checkout, for two independent reasons: a
           # branch cut before an in-repo script landed would not have it, and under `set -e` that
