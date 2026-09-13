@@ -93,11 +93,14 @@ on:
           The CI run's report artifact, read alongside the log. Gradle's console renderer
           names a failed test's exception class and line and NOT its message, so the log
           carries `java.lang.AssertionError at Foo.kt:229` where the useful half was
-          `expected:<Sending> but was:<Idle>`. The reports carry it and ci.yml already
-          uploads them. Empty to skip, for a caller whose CI uploads nothing.
+          `expected:<Sending> but was:<Idle>`. The reports carry it. CHECK THE NAME your
+          ci.yml uploads under rather than assuming this default: a name that does not
+          exist is not an error, so a mismatch silently reads nothing. binge-seerr uses
+          `build-reports`, binge-integrations `test-reports`. Empty to skip, for a
+          caller whose CI uploads nothing.
         type: string
         default: build-reports
-      reports_tail_bytes:
+      reports_cap_bytes:
         description: >
           Cap on the extracted text, not on the artifact. The artifact itself can be tens of
           megabytes — kover and detekt HTML ride along with it — so what the agent reads is
@@ -150,8 +153,9 @@ concurrency:
 
 permissions:
   contents: read
-  # For reading the failing job's log. The author app's grant covers contents and pull
-  # requests but NOT Actions, so that call uses the workflow's own GITHUB_TOKEN.
+  # For reading the failing job's log and downloading its report artifact. The author
+  # app's grant covers contents and pull requests but NOT Actions, so both calls use
+  # the workflow's own GITHUB_TOKEN.
   actions: read
 
 env:
@@ -336,7 +340,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           ARTIFACT: ${{ inputs.reports_artifact }}
-          CAP_BYTES: ${{ inputs.reports_tail_bytes }}
+          CAP_BYTES: ${{ inputs.reports_cap_bytes }}
         run: |
           set -uo pipefail
           DIR="${{ runner.temp }}/ci-reports"
