@@ -109,9 +109,9 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # A base that is not the default branch is usually a LIVE stack. Its own PR is the
-      # discriminator: no open PR means nothing will ever land it, and requiring a MERGED
-      # one keeps this off branches that were never a stack.
+      # A base that is not the default branch is usually a LIVE stack. Its own PR and its
+      # existence are the discriminators: no open PR and no branch means nothing will ever
+      # land it, and requiring a MERGED one keeps this off branches that were never a stack.
       #
       # Carries on into the merge rather than relying on the resulting `edited` to
       # re-enter - it would, since an app token fires events, but a fix that depends on
@@ -149,6 +149,20 @@ jobs:
             echo "PR #$PR is stacked on '$BASE', which still has an open PR - the stack is live."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          # Whether the base still EXISTS is the discriminator; its PR history is only the explanation.
+          # A long-lived branch that once merged through a PR and is still there is a live base, and a
+          # PR opened onto it is not a stranded stack. Only a 404 reads as gone: any other failure is
+          # a dead token or an outage, and treating it as "deleted" would retarget a live PR.
+          err=$(mktemp)
+          if gh api "repos/${GH_REPO}/branches/${BASE}" --silent 2>"$err"; then
+            echo "PR #$PR is based on '$BASE', which still exists - not a stranded stack, leaving it alone."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif ! grep -q 'HTTP 404' "$err"; then
+            cat "$err"
+            echo "::error::Could not read whether branch '$BASE' still exists."
+            exit 1
           fi
           if [ -z "$merged_pr" ]; then
             echo "::warning::PR #$PR is based on '$BASE', which has no PR of its own, open or merged. Not a stack this workflow understands - leaving it alone."
