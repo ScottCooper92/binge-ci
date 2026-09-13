@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # check-callers.sh reads each self caller's workflow at the tag it pins.
+          fetch-tags: true
 
       # actionlint shellchecks every `run:` block, but only when shellcheck is on PATH.
       - name: Install shellcheck
