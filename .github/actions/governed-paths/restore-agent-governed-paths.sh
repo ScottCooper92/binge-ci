@@ -20,6 +20,13 @@
 #   reasoning about the same paths reads them from here rather than keeping a copy that can
 #   narrow silently.
 #
+# Usage: restore-agent-governed-paths.sh --merged-marker
+#   Prints the HTML-comment marker the merged-note carries, and exits. bot-review's merge gate
+#   holds on that marker, so it must not reach the PR until the commit carrying the change has
+#   actually been pushed - and the note itself must be posted BEFORE the push, or a failure in
+#   between takes the disclosure down with it. A caller splits the two apart, and reads the
+#   string from here rather than keeping its own copy.
+#
 # Usage: restore-agent-governed-paths.sh --rewrite
 #   Performs the rewrite itself: every governed path in the WORKING TREE becomes the base's
 #   copy, and the index is left alone - the same state claude-code-action leaves behind. The
@@ -43,6 +50,13 @@ if [ -n "${GOVERNED_EXTRA_PATHS:-}" ]; then
     extra_path="${extra_path%"${extra_path##*[![:space:]]}"}"
     [ -n "$extra_path" ] && governed+=("$extra_path")
   done <<<"$GOVERNED_EXTRA_PATHS"
+fi
+
+merged_marker="<!-- governed-merged -->"
+
+if [ "${1:-}" = "--merged-marker" ]; then
+  printf '%s\n' "$merged_marker"
+  exit 0
 fi
 
 if [ "${1:-}" = "--list" ]; then
@@ -69,7 +83,7 @@ if [ "${1:-}" = "--rewrite" ]; then
   exit 0
 fi
 
-ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite}"
+ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite|--merged-marker}"
 
 # Telling the action's rewrite apart from an edit the agent made needs the base branch's copy:
 # "the worktree is byte-identical to the base" is the whole discriminator. Without the ref,
@@ -197,7 +211,7 @@ if [ ${#merged[@]} -gt 0 ]; then
   # A marker, because this note is the only trace that a bot put a governed-path change into
   # this PR. bot-review's merge gate holds on it: `hold` is decided when a PR is opened, and
   # this is the one route that adds such a change AFTER that decision was taken.
-  note+=$'\n'"<!-- governed-merged -->"$'\n'
+  note+=$'\n'"$merged_marker"$'\n'
   note+="_Note: I changed ${list%, }. Those paths govern the agents and are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so I never saw your version. My edit applied cleanly on top of it and is in this commit; read that part of the diff, because I was not shown what I was editing around._"$'\n'
 fi
 

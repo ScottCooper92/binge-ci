@@ -690,9 +690,18 @@ jobs:
           # the PR head must not be supplied BY the PR head.
           governed_note=$(bash "$GOVERNED_SCRIPT" "${checked_out:-HEAD}")
 
-          # This job pushes without saying anything on the PR, so there is no reply for the note to
-          # ride on. Posted ahead of the "couldn't identify a fix" return: when the discard is the
-          # only change the agent made, the tree comes out clean and would hit that return first.
+          # The note and the marker inside it have opposite timing requirements, so they are
+          # split. The NOTE goes out now: this job has no reply for it to ride on, and a discard
+          # can be the agent's only change, leaving the tree clean and taking the "couldn't
+          # identify a fix" return below. The MARKER holds the PR for a human, permanently and
+          # with no way to lift it, so it must not reach the PR until the commit carrying the
+          # change has actually landed - the final comment, after the push.
+          governed_marker=$(bash "$GOVERNED_SCRIPT" --merged-marker)
+          governed_merged=false
+          if [ -n "$governed_note" ] && grep -qF -- "$governed_marker" <<<"$governed_note"; then
+            governed_merged=true
+            governed_note=$(grep -vF -- "$governed_marker" <<<"$governed_note" || true)
+          fi
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
@@ -794,6 +803,12 @@ jobs:
             if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
             if [ -n "$commit_stat" ]; then
               printf '\n<details><summary>Files this push changed</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"
+            fi
+            # Only now, and only on this path: the marker holds the PR for a human permanently,
+            # so it must describe a change that is actually on the branch.
+            if [ "$governed_merged" = "true" ]; then
+              printf '\n%s\n_The governed-path change above is in `%s`, now on this branch._\n' \
+                "$governed_marker" "$(git rev-parse --short HEAD)"
             fi
           } | gh pr comment "$PR" --body-file -
 
