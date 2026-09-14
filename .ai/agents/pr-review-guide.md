@@ -57,7 +57,7 @@ finalised after; `mergeable` is null while GitHub computes it; `opened` fires be
 lands; a queued run's payload is a snapshot from before an earlier run acted. A step that
 reads the payload where it should read the API is a bug waiting for the second event.
 
-**Public-safe defaults.** Two of the three consumers are public. A default that would print
+**Public-safe defaults.** Three of the four consumers are public. A default that would print
 what an agent read and ran into a world-readable log, admit a commenter by anything other
 than author association, or run on a fork PR is a finding whatever the input is called.
 

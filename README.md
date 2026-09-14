@@ -128,7 +128,7 @@ at the same commit. Posting a completed check at the start clears the predecesso
 
 ## Defaults are public-safe
 
-Two of the three consumers are public, so the defaults are the strict setting and a caller
+Three of the four consumers are public, so the defaults are the strict setting and a caller
 opts *out*. A repo that forgets to configure something gets the safe behaviour.
 
 | Input | Default | Why |
