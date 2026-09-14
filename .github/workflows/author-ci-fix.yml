@@ -430,7 +430,16 @@ jobs:
                     | sed -e 's/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g' \
                     | sed -e '/^[[:space:]]*$/d' \
                     | sed -n '/Failure details/,$p' \
-                    | head -n 40
+                    | awk '
+                        NR <= 40 { print; next }
+                        # Past the cap, keep only the lines that name a cause. A coroutine that threw
+                        # after its own test finished is reported against whichever test opens next,
+                        # and the exception that actually went is attached as a suppressed one - tens
+                        # of stack frames down, so a flat cap drops the only line worth reading.
+                        /^[[:space:]]*(Suppressed|Caused by):/ {
+                          if (!named++) print "\t... stack trimmed; the causes it named:"
+                          print
+                        }'
                   echo
                 done
           } > "$OUT" 2>/dev/null || true
