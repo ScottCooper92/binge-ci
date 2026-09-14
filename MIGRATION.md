@@ -1,6 +1,6 @@
 # Applying this
 
-**All three repositories call these workflows.** The steps below are kept as the record of
+**All four repositories call these workflows.** The steps below are kept as the record of
 how it landed and why each choice was made, rather than as a plan — what is still open is
 at the bottom, and it is which bots have actually been exercised rather than which are
 wired.
@@ -10,7 +10,7 @@ Three decisions were settled on 2026-09-09 and the steps below assume them:
 | Decision | Choice | Why |
 | --- | --- | --- |
 | How to catch up | **Re-derive from Binge HEAD**, not cherry-pick | 23 commits against a restructured file is 23 conflicts and no guarantee. The 09-02 draft is preserved in this repo's first commit so nothing editorial is lost silently. |
-| Default posture | **Public-safe** | Two of three consumers are public. A caller that forgets to configure something should get the strict setting, not Binge's. |
+| Default posture | **Public-safe** | Three of four consumers are public. A caller that forgets to configure something should get the strict setting, not Binge's. |
 | Prove it on | **binge-seerr first** | MIGRATION originally said Binge, but that was written before binge-seerr existed. It is now fully wired and is the lowest-stakes place a break costs nothing. |
 
 ## 1. Finish the re-derivation ✅
@@ -49,7 +49,7 @@ nothing to break. After that, treat it as published: land the fix, tag `v1.0.N`,
 
 binge-seerr is pre-alpha, has one open PR, no release train, and `auto_merge: false`, so
 a bad review cannot merge anything. A break there costs nothing. It also exercises the
-hosted-runner path that two of the three consumers use.
+hosted-runner path that three of the four consumers use.
 
 It is already wired: both apps installed, all five secrets, `AUTHOR_BOT_ID`, the `agent`
 label, and a `CLAUDE.md` plus `.ai/agents/` that are about *that* repo.
@@ -120,7 +120,8 @@ as *code*. What is unproven is two of them on the path the public repos take, wh
 different one: hosted runners and a JVM toolchain rather than self-hosted and Android,
 against a `ci.yml` that is one job rather than a matrix.
 
-Successful runs in the two public consumers, at the time of writing:
+Successful runs in the two public consumers that existed at the time of writing —
+binge-design-system became the fourth caller later and is not counted here:
 
 | Bot | binge-seerr | binge-integrations |
 | --- | --- | --- |

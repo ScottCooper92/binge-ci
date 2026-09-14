@@ -60,6 +60,6 @@ Do not run the full gate. CI does that on push.
 
 ## When in doubt
 
-A workflow's signature is an interface three repositories build against. A red gate is not
+A workflow's signature is an interface four repositories build against. A red gate is not
 permission to redesign it. Leaving the working tree clean and saying why is a valid and
 preferred outcome; a wrong guess costs more than stopping.
