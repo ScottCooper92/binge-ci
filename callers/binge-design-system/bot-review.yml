@@ -52,7 +52,10 @@ jobs:
     with:
       dispatch_pr: ${{ inputs.pr }}
       auto_merge: false
-      gated_checks: ktlint or Android lint
+      # The screenshot suite belongs in this list: ci.yml runs validateDebugScreenshotTest
+      # beside `build`, so a baseline mismatch is already reported and is not the
+      # reviewer's to raise.
+      gated_checks: ktlint, Android lint or the screenshot baselines
       # ci.yml here declares no paths-ignore - deliberately, since bot-review needs a
       # successful run against the head and a skipped run is a PR that is never
       # reviewed. So there are no CI-less PRs and the `labeled` door stays shut.
