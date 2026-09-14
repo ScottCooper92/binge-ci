@@ -72,10 +72,17 @@ runs:
         cache-disabled: ${{ steps.runner.outputs.hosted == 'false' && inputs.persistent-gradle-home == 'true' }}
 
     # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
+    #
+    # packages is set only to drop the action's default `tools` from it. That package is the
+    # obsolete SDK Tools, superseded by cmdline-tools (which this action installs separately), and
+    # Google has stopped serving it: sdkmanager answers `Warning: Failed to find package 'tools'`
+    # and exits 1, which fails this step before Gradle runs at all. Leave platform-tools, which is
+    # where adb comes from.
     - name: Set up Android SDK
       uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
       with:
         log-accepted-android-sdk-licenses: false
+        packages: platform-tools
 
     # MUST be written to $GRADLE_USER_HOME, not ~/.gradle. A container that runs the job as
     # root while pinning GRADLE_USER_HOME elsewhere makes ~/.gradle a directory Gradle never
