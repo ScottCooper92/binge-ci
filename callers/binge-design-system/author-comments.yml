@@ -64,14 +64,17 @@ jobs:
       # else. ci-setup is Binge's bootstrap - it writes a local.properties carrying a
       # TMDB key this app has no use for, and tunes Gradle for a container this job does
       # not run in. The Android SDK is preinstalled on the hosted runner image, which is
-      # why ci.yml installs one too.
+      # why ci.yml installs none either.
       toolchain: jvm
       java_version: '17'
       verify_guidance: >
         You have a JDK, an Android SDK and Gradle, so verify what you change
-        rather than reasoning about it. Scope Gradle to the module - `:app:test`,
-        `:app:ktlintCheck` - rather than running `./gradlew build`; CI will do
-        that when you push.
+        rather than reasoning about it. Scope Gradle to the module -
+        `:designsystem:test`, or `:designsystem:ktlintCheck` - rather than
+        running `./gradlew build`; CI will do that when you push.
+
+        There is no `:app` module here: `settings.gradle.kts` includes
+        `:designsystem` and `:designsystem-tv` and nothing else.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add a
         ktlint baseline, do not add `ktlint-disable` comments to make a file
