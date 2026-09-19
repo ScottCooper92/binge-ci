@@ -271,12 +271,84 @@ jobs:
       token: ${{ steps.token.outcome }}
       resolved: ${{ steps.pr.outcome }}
     steps:
-      - name: Mint reviewer app token
-        id: token
+      # Retried up to 3 times (#64). This call is GitHub's own API, ahead of anything else this
+      # job does, so a failure here is ordinarily the same transient 5xx the "Review POST
+      # attempt" loop below treats as retryable rather than a bad credential - and on the
+      # issue_comment/workflow_dispatch doors, a mint failure is the one resolve failure that
+      # nothing downstream can report: "Report a failed resolve" has no credential left to post
+      # with, and report-resolve-failure needs a head sha those doors never carry. This shrinks
+      # that window; it does not close it. Unlike the POST loop, there is no HTTP status to read
+      # - `create-github-app-token` is a JS action, not a `gh api` call this step controls - so
+      # every failure is retried alike rather than only the ones known to be transient. Bounded
+      # to 3 attempts so a genuinely bad credential still fails within a fixed, short window
+      # rather than never reporting at all.
+      - name: Mint reviewer app token (attempt 1)
+        id: token1
+        continue-on-error: true
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Wait before retrying the token mint (1)
+        if: steps.token1.outcome != 'success'
+        run: |
+          set -euo pipefail
+          sleep 10
+
+      - name: Mint reviewer app token (attempt 2)
+        id: token2
+        if: steps.token1.outcome != 'success'
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Wait before retrying the token mint (2)
+        if: steps.token1.outcome != 'success' && steps.token2.outcome != 'success'
+        run: |
+          set -euo pipefail
+          sleep 20
+
+      - name: Mint reviewer app token (attempt 3)
+        id: token3
+        if: steps.token1.outcome != 'success' && steps.token2.outcome != 'success'
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      # Collapses the three attempts back to the single `token` id everything else in this job
+      # already reads (`steps.token.outputs.token`, and the job's own `token` output above,
+      # `steps.token.outcome`) - so nothing downstream of the mint needed to change for this fix.
+      # continue-on-error above means none of the three attempts fails the JOB by itself; this
+      # step is what does, and only when every attempt did - so `steps.token.outcome` still
+      # reads `failure` exactly when an unretried mint always would have.
+      - name: Mint reviewer app token
+        id: token
+        env:
+          OUTCOME1: ${{ steps.token1.outcome }}
+          OUTCOME2: ${{ steps.token2.outcome }}
+          OUTCOME3: ${{ steps.token3.outcome }}
+          TOKEN1: ${{ steps.token1.outputs.token }}
+          TOKEN2: ${{ steps.token2.outputs.token }}
+          TOKEN3: ${{ steps.token3.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ "$OUTCOME1" = "success" ]; then
+            token="$TOKEN1"
+          elif [ "$OUTCOME2" = "success" ]; then
+            token="$TOKEN2"
+          elif [ "$OUTCOME3" = "success" ]; then
+            token="$TOKEN3"
+          else
+            echo "All 3 token mint attempts failed." >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       # workflow_run gives no PR context, so resolve by head branch.
       - name: Resolve the PR
