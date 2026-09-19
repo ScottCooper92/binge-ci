@@ -29,6 +29,11 @@ on:
     types: [completed]
   pull_request:
     types: [labeled]
+  # The fourth door (#2663): a rebuttal to a CHANGES_REQUESTED verdict, when the reply is a
+  # disagreement rather than a fix and so pushes no commit for workflow_run to pick up. Opens
+  # only for a `<!-- author-response -->` comment from the author bot - see bot-review.yml.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       pr:

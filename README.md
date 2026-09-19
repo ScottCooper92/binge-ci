@@ -53,6 +53,8 @@ on:
     types: [completed]
   pull_request:
     types: [labeled]      # a PR labelled after its CI already reported
+  issue_comment:
+    types: [created]      # a rebuttal comment from the author bot - see bot-review.yml
   workflow_dispatch:
     inputs:
       pr:
