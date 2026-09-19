@@ -46,7 +46,7 @@ permissions:
 
 jobs:
   review:
-    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.8
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.9
     with:
       dispatch_pr: ${{ inputs.pr }}
       # Everything in this repository governs the agents, so a merge here is a human's
