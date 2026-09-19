@@ -35,7 +35,18 @@ name: Bot review
 #    caller passes BOTH `unbuilt_paths` and `unbuilt_paths_regex`: a caller with no
 #    `paths-ignore` has no such PRs, and reviewing on it would be reviewing code mid-build.
 #
-# Every caller wires the `pull_request: [labeled]` trigger. A label on a head CI has not
+# `synchronize` is the SAME door, opened by a different event (#59). The `labeled` event
+# fires once, so a PR already labelled that stays entirely inside `paths-ignore` gets no
+# review on its second and later pushes - `workflow_run` never fires (nothing built it) and
+# `labeled` does not fire again (the label was already there). A caller that wants every
+# push on such a PR reviewed adds `synchronize` to its trigger too; one that does not is
+# unaffected; `synchronize` carries no `label` field, so this door re-reads the PR's current
+# labels and re-runs the unbuilt-paths check below on every push rather than trusting the
+# event payload. Same invariant either way: this half stays shut unless the caller passes
+# `unbuilt_paths`, and an ordinary buildable PR's pushes still wait for `workflow_run`.
+#
+# Every caller wires the `pull_request: [labeled]` trigger, and one that wants the repeat
+# trigger above adds `synchronize` to that same `types:` list. A label on a head CI has not
 # reported on yet is left to the run, which finds the label in place when it finishes.
 on:
   workflow_call:
@@ -120,11 +131,11 @@ on:
       unbuilt_paths:
         description: >
           Newline-separated mirror of the caller's ci.yml `paths-ignore`, enabling the
-          `labeled` door for PRs CI will never run on. Empty (the default) disables that
-          half of the door; the other half, a PR labelled after its CI already reported,
-          needs nothing but the trigger. CHECKED against the caller's ci.yml at run time
-          rather than trusted, so drift closes the door loudly instead of narrowing it in
-          silence.
+          `labeled`/`synchronize` door for PRs CI will never run on. Empty (the default)
+          disables that half of the door; the other half, a PR labelled (or, with
+          `synchronize` wired, pushed to) after its CI already reported, needs nothing but
+          the trigger. CHECKED against the caller's ci.yml at run time rather than trusted,
+          so drift closes the door loudly instead of narrowing it in silence.
         type: string
         default: ''
       unbuilt_paths_regex:
@@ -209,6 +220,9 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.label.name == inputs.agent_label &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'synchronize' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
@@ -246,7 +260,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           DISPATCH_PR: ${{ inputs.dispatch_pr }}
-          LABELED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
+          # Both halves of the third door - `labeled` and `synchronize` (#59) - are the SAME
+          # PR-scoped event as far as this script is concerned: neither carries a build to
+          # trust, both re-check the label and the unbuilt-paths condition below on their own
+          # terms. The job-level `if` above is what tells them apart from workflow_run/dispatch;
+          # nothing downstream needs to tell `labeled` from `synchronize` itself.
+          PR_EVENT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
           CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           UNBUILT_PATHS: ${{ inputs.unbuilt_paths }}
@@ -257,8 +276,8 @@ jobs:
 
           if [ -n "${DISPATCH_PR:-}" ]; then
             num="$DISPATCH_PR"
-          elif [ -n "${LABELED_PR:-}" ]; then
-            num="$LABELED_PR"
+          elif [ -n "${PR_EVENT_PR:-}" ]; then
+            num="$PR_EVENT_PR"
           else
             # Same-repo PRs only: `--head` matches a fork's PR with the same branch name too, and
             # `.[0]` among the matches is arbitrary, so a fork could stand in for the PR whose CI
@@ -279,8 +298,9 @@ jobs:
             --jq '[.isDraft, ([.labels[].name] | join(",")), .headRefOid, .isCrossRepository, .state]
                   | join("\u001f")')
 
-          # The workflow_run door listed open PRs only; the label and dispatch doors name a number,
-          # and a PR merged by hand or closed still takes a label and a dispatch.
+          # The workflow_run door listed open PRs only; the label, synchronize and dispatch doors
+          # name a number outright, and the PR they name may have merged or closed since - state
+          # is re-checked below regardless of which door named it.
           [ "$state" = "OPEN" ] || skip "PR #$num is $state - nothing to review."
           [ "$isdraft" = "true" ] && skip "PR #$num is a draft - skipping."
 
@@ -314,27 +334,31 @@ jobs:
           pushed_at=${run_info##*|}
 
           # Only a green build vouches for a review. The workflow_run door always has one; the
-          # dispatch door never does; the label door only when it finds the build already there.
-          # "Merge if the bar is met" holds on the rest rather than merging on nothing.
+          # dispatch door never does; the label/synchronize door only when it finds the build
+          # already there. "Merge if the bar is met" holds on the rest rather than merging on
+          # nothing.
           vouched=true
           if [ -n "${DISPATCH_PR:-}" ]; then
             vouched=false
             echo "Manual dispatch - not requiring a CI run (conclusion: '${ci:-none}')."
-          elif [ -n "${LABELED_PR:-}" ] && [ -n "$ci" ]; then
-            # CI reported on this head before the label landed, so the workflow_run door already
-            # opened for it and closed on "not opted in". That review is not coming. A green run
-            # still vouches for the head; a red one has nothing to review, and author-ci-fix has it.
+          elif [ -n "${PR_EVENT_PR:-}" ] && [ -n "$ci" ]; then
+            # CI reported on this head before this door opened (a label landing, or a push whose
+            # head this run already sees as built), so the workflow_run door already opened for it
+            # and closed on "not opted in". That review is not coming. A green run still vouches
+            # for the head; a red one has nothing to review, and author-ci-fix has it.
             [ "$ci" = "success" ] \
               || skip "PR #$num's CI run on $sha did not succeed (conclusion: '$ci') - nothing to review."
-            # A label removed and put back must not buy a second review of the same head; the
-            # review job checks that once it holds the concurrency slot, for every door.
-            echo "Labelled after CI reported on $sha - that run vouches for the head."
-          elif [ -n "${LABELED_PR:-}" ]; then
+            # A label removed and put back, or a second push, must not buy a second review of the
+            # same head; the review job checks that once it holds the concurrency slot, for every
+            # door.
+            echo "PR opted in and CI already reported on $sha - that run vouches for the head."
+          elif [ -n "${PR_EVENT_PR:-}" ]; then
             vouched=false
             # No completed run on this head. For a caller with no paths-ignore that is code
             # mid-build, which this workflow's trigger choice exists to avoid: the run's completion
-            # reopens the first door with the label now in place. For a caller with one, it may be
-            # a PR CI will never run on, which is what the rest of this door is for.
+            # reopens the first door (with the label now in place, or on the pushed head). For a
+            # caller with one, it may be a PR CI will never run on, which is what the rest of this
+            # door is for.
             [ -n "$UNBUILT_PATHS" ] \
               || skip "PR #$num has no completed CI run on $sha - its review comes with that run."
 
@@ -360,7 +384,7 @@ jobs:
             if [ "$mirrored" != "$declared" ]; then
               echo "${CI_WORKFLOW} paths-ignore: $(echo "$declared" | tr '\n' ' ')"
               echo "unbuilt_paths input:   $(echo "$mirrored" | tr '\n' ' ')"
-              skip "${CI_WORKFLOW}'s paths-ignore no longer matches the caller's unbuilt_paths (see above) - teach the caller the new entry before a docs-only PR can be labelled through."
+              skip "${CI_WORKFLOW}'s paths-ignore no longer matches the caller's unbuilt_paths (see above) - teach the caller the new entry before a docs-only PR can be reviewed through this door."
             fi
 
             # Two jq calls, because the regex must arrive as a VALUE and not as source text.
@@ -387,7 +411,7 @@ jobs:
               | jq --arg re "$UNBUILT_REGEX" '[.[] | select(test($re) | not)] | length')
             [ "$unbuilt" = "0" ] \
               || skip "PR #$num has $unbuilt file(s) CI will build - waiting for its run."
-            echo "Labelled, and CI will never run on this PR - reviewing without a build to vouch for it."
+            echo "PR opted in, and CI will never run on this PR - reviewing without a build to vouch for it."
           else
             [ "$ci" = "success" ] || skip "No successful CI run on $sha (conclusion: '${ci:-none}')."
           fi
