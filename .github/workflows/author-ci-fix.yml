@@ -149,6 +149,13 @@ on:
           world-readable and the stream carries what the agent read and ran.
         type: boolean
         default: false
+      model:
+        description: >
+          Passed to claude-code-action as `--model`. Empty (default) omits the flag entirely,
+          so an existing caller that never sets this keeps whatever the action's own default
+          resolves to — this input only pins a caller that wants one.
+        type: string
+        default: ''
     secrets:
       AUTHOR_APP_ID:
         required: true
@@ -617,6 +624,7 @@ jobs:
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
             --max-turns ${{ inputs.max_turns }}
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           prompt: |
             CI failed on this branch. The failing job output is at
             ${{ runner.temp }}/ci-failure.trimmed.log — read it first.
