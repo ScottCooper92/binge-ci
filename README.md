@@ -46,6 +46,7 @@ run-name: >-
         && format('#{0} · {1}', github.event.pull_request.number, github.event.pull_request.head.ref)
       || inputs.pr && format('#{0} · dispatched', inputs.pr)
       || github.event.workflow_run.head_branch
+      || github.event.issue.number && format('#{0} · rebuttal', github.event.issue.number)
       || github.ref_name }}
 on:
   workflow_run:
@@ -53,6 +54,8 @@ on:
     types: [completed]
   pull_request:
     types: [labeled]      # a PR labelled after its CI already reported
+  issue_comment:
+    types: [created]      # a rebuttal comment from the author bot - see bot-review.yml
   workflow_dispatch:
     inputs:
       pr:

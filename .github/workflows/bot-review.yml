@@ -45,9 +45,31 @@ name: Bot review
 # event payload. Same invariant either way: this half stays shut unless the caller passes
 # `unbuilt_paths`, and an ordinary buildable PR's pushes still wait for `workflow_run`.
 #
+# THE FOURTH DOOR (`issue_comment: [created]`) answers a different gap: an author's REPLY to a
+# CHANGES_REQUESTED verdict, when the reply is a rebuttal rather than a fix - no commit, so
+# neither `workflow_run` nor labeled/synchronize has anything to open on, and the PR is stuck on
+# a verdict the author disputes with no automated way back to APPROVED (#2663). Every response
+# author-comments.yml posts is marked `<!-- author-response -->` unconditionally, pushed or not
+# (that workflow's "Push and reply"), so this door opens on exactly that marker from exactly
+# `author_bot` and closes for everything else - a maintainer's comment, a human's reply, the
+# reviewer bot's own "Not merging" note.
+#
+# Same head as the verdict being disputed, which is the whole point, so "Skip a head already
+# reviewed" below is bypassed for this door alone (`resolve`'s `rebuttal` output): every other
+# door treats a SHA that already carries a review as nothing new to do, and this one exists
+# because that is exactly wrong for a rebuttal.
+#
+# Still demands a green CI run on the head, same as the other PR-scoped doors - a rebuttal does
+# not buy a review CI never vouched for, and one with no completed run on this sha (conclusion
+# empty) is skipped rather than reconsidered. Unlike labeled/synchronize this has no
+# unbuilt-paths half: a PR CI will never build has no CI run to demand success on, and
+# reconsidering one is a follow-up, not this fix's problem to solve.
+#
 # Every caller wires the `pull_request: [labeled]` trigger, and one that wants the repeat
 # trigger above adds `synchronize` to that same `types:` list. A label on a head CI has not
-# reported on yet is left to the run, which finds the label in place when it finishes.
+# reported on yet is left to the run, which finds the label in place when it finishes. The
+# fourth door is independent of both: a caller adds `issue_comment: [created]` to open it
+# regardless of whether it also wants `synchronize`.
 on:
   workflow_call:
     inputs:
@@ -223,6 +245,10 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.action == 'synchronize' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       github.event.comment.user.login == inputs.author_bot &&
+       contains(github.event.comment.body, '<!-- author-response -->')) ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
@@ -237,6 +263,10 @@ jobs:
       pushed_at: ${{ steps.pr.outputs.pushed_at }}
       base: ${{ steps.pr.outputs.base }}
       vouched: ${{ steps.pr.outputs.vouched }}
+      # Read by "Skip a head already reviewed" in the review job: a rebuttal is new
+      # information about a SHA that already has a verdict, not a new head, so that guard
+      # is bypassed for this door alone. See "THE FOURTH DOOR" above.
+      rebuttal: ${{ steps.pr.outputs.rebuttal }}
       # For the failed-before-review reporter below, which names the step that broke.
       token: ${{ steps.token.outcome }}
       resolved: ${{ steps.pr.outcome }}
@@ -266,6 +296,11 @@ jobs:
           # terms. The job-level `if` above is what tells them apart from workflow_run/dispatch;
           # nothing downstream needs to tell `labeled` from `synchronize` itself.
           PR_EVENT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
+          # The fourth door (#2663): a rebuttal comment names its PR by the issue number the
+          # comment landed on, same as labeled/synchronize do via github.event.pull_request -
+          # issue_comment carries no head sha and no repo full_name to check against a fork, so
+          # both are read from `gh pr view` below like every other field this script trusts.
+          COMMENT_PR: ${{ github.event_name == 'issue_comment' && github.event.issue.number || '' }}
           CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           UNBUILT_PATHS: ${{ inputs.unbuilt_paths }}
@@ -278,6 +313,8 @@ jobs:
             num="$DISPATCH_PR"
           elif [ -n "${PR_EVENT_PR:-}" ]; then
             num="$PR_EVENT_PR"
+          elif [ -n "${COMMENT_PR:-}" ]; then
+            num="$COMMENT_PR"
           else
             # Same-repo PRs only: `--head` matches a fork's PR with the same branch name too, and
             # `.[0]` among the matches is arbitrary, so a fork could stand in for the PR whose CI
@@ -412,10 +449,19 @@ jobs:
             [ "$unbuilt" = "0" ] \
               || skip "PR #$num has $unbuilt file(s) CI will build - waiting for its run."
             echo "PR opted in, and CI will never run on this PR - reviewing without a build to vouch for it."
+          elif [ -n "${COMMENT_PR:-}" ]; then
+            # No unbuilt-paths half here (see "THE FOURTH DOOR" above): a PR CI never builds has
+            # no run to demand success on, so an empty conclusion skips rather than reconsiders.
+            [ "$ci" = "success" ] \
+              || skip "PR #$num's CI run on $sha did not succeed (conclusion: '${ci:-none}') - nothing to reconsider."
+            echo "Rebuttal comment on PR #$num - re-reviewing $sha, which CI already vouches for."
           else
             [ "$ci" = "success" ] || skip "No successful CI run on $sha (conclusion: '${ci:-none}')."
           fi
           echo "vouched=$vouched" >> "$GITHUB_OUTPUT"
+          # Read by the review job's "Skip a head already reviewed" - this door's whole point is
+          # to look again at a SHA that already has a verdict, so that guard does not apply to it.
+          echo "rebuttal=$([ -n "${COMMENT_PR:-}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
           # `pushed_at` is left empty when there is no run to date the push by - reachable only on the
           # two unvouched doors, which the merge gate stops at first. There is no honest fallback: the
@@ -462,7 +508,9 @@ jobs:
   # app's token is what failed on the observed run, so a fallback that minted it again would
   # fail the same way. And it takes the head sha from the EVENT, since resolve never got as far
   # as outputting one; the dispatch door carries no sha and is a human watching a run, so it
-  # gets nothing here.
+  # gets nothing here - the fourth door (issue_comment) shares that blind spot for the same
+  # reason, an event with no sha of its own, but "Report a failed resolve" above still covers
+  # both once `steps.pr.outputs.number` is written, which is most of the way through resolving.
   #
   # Under a name of its OWN, and neutral, not red. A check run can only be updated by the app
   # that created it, so a `Bot review` posted by github-actions could never be replaced by the
@@ -546,8 +594,15 @@ jobs:
       #
       # Before "Show the review as running", which would otherwise overwrite the verdict check the
       # first review left with a neutral "Reviewing this commit".
+      #
+      # Bypassed on the fourth door's `rebuttal` output (#2663): a rebuttal comment is new
+      # information about a SHA that already carries a verdict, not a duplicate trigger on one
+      # that doesn't - so the one case every other door treats as "nothing to do" is the exact
+      # case this door exists for. The step itself is skipped rather than made to compute a
+      # `skip` it would ignore, since nothing downstream needs the lookup on this path either.
       - name: Skip a head already reviewed
         id: pin
+        if: needs.resolve.outputs.rebuttal != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
