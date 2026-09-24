@@ -15,7 +15,7 @@ on:
 
 jobs:
   resolve:
-    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1.0.9
+    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1.0.10
     with:
       dispatched: ${{ github.event_name == 'workflow_dispatch' }}
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
