@@ -20,7 +20,7 @@ on:
 
 jobs:
   catch-up:
-    uses: ScottCooper92/binge-ci/.github/workflows/author-retarget.yml@v1.0.9
+    uses: ScottCooper92/binge-ci/.github/workflows/author-retarget.yml@v1.0.10
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
     secrets:

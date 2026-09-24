@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   fix:
-    uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1.0.9
+    uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1.0.10
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       # Shell and YAML only: nothing here builds.
