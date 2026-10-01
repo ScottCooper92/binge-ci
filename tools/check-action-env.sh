@@ -9,8 +9,9 @@
 # actionlint cannot see it: it has no schema for an action.yml at all.
 #
 # A reference is accepted when an `env:` key of that name appears in the same action file, or a
-# `run:` block there that mentions `$GITHUB_ENV` echoes or printfs `NAME=` or `NAME<<` (the
-# heredoc form). That errs towards accepting: it does not check the write comes before the read.
+# `run:` there that mentions `$GITHUB_ENV` echoes or printfs `NAME=` or `NAME<<` (the heredoc
+# form), quoted or not. The `run:` may be one line or any block scalar (`|`, `|-`, `>`). That errs
+# towards accepting: it does not check the write comes before the read.
 # One that has to come from the caller is the exception: read it from a step's `env:` instead,
 # or take it as an input.
 set -uo pipefail
@@ -28,11 +29,22 @@ for path in actions:
     defined = set()
     for block in re.finditer(r'^(\s*)env:\s*\n((?:\1\s+.*\n|[ \t]*\n)+)', code + "\n", re.MULTILINE):
         defined.update(re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*):', block.group(2), re.MULTILINE))
-    for run in re.finditer(r'\n(\s+)run: \|\n((?:\1  .*\n|[ \t]*\n)+)', code + "\n"):
-        if 'GITHUB_ENV' in run.group(2):
+    lines = code.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r'^(\s*)(?:-\s+)?run:\s*(.*)$', line)
+        if not m:
+            continue
+        body = m.group(2)
+        if re.fullmatch(r'[|>][+-]?[0-9]*', body):
+            body = ""
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= len(m.group(1)):
+                    break
+                body += nxt + "\n"
+        if 'GITHUB_ENV' in body:
             defined.update(re.findall(
-                r'(?:echo|printf)\s+(?:-[A-Za-z]+\s+)?["\']([A-Za-z_][A-Za-z0-9_]*)(?:=|<<)',
-                run.group(2),
+                r'(?:echo|printf)\s+(?:-[A-Za-z]+\s+)?["\']?([A-Za-z_][A-Za-z0-9_]*)(?:=|<<)',
+                body,
             ))
     for name in sorted(set(re.findall(r'\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)', code))):
         refs += 1
