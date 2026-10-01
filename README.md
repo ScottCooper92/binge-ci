@@ -95,6 +95,14 @@ silent" step each one ends with.
 screenshot gate; binge-companions names buf and proto field numbers. A rule that fits
 both is usually too vague to bind either.
 
+The one exception is the list of suppression files. The three author workflows that take
+`gate_rules` or `conflict_rules` also take `suppression_files`: newline-separated globs, by
+default `*-allowlist.txt` and `detekt-baseline.xml`. A caller cannot compute an input, so the
+job expands the globs itself, against the PR's tree and the default branch's, and adds the files
+it finds to the agent's prompt as files it may not edit. Adding an allowlist that matches a glob
+needs no caller change. The rules inputs still apply alongside it. Pass an empty string to turn
+the derived list off.
+
 ## Seeing what the bots did
 
 A `workflow_run` run is not associated with the pull request that caused it. It is attributed
