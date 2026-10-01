@@ -215,7 +215,7 @@ on:
           Passed to claude-code-action as `--model`. The default is pinned here so every repo's reviewer runs one model. A caller overrides it by passing
           another value. An empty string omits the flag and uses the action's own default.
         type: string
-        default: claude-opus-5
+        default: claude-opus-5-5
     secrets:
       REVIEWER_APP_ID:
         required: true
