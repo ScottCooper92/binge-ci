@@ -57,6 +57,18 @@ on:
           rejects by default.
         type: string
         default: binge-pr-reviewer[bot]
+      suppression_files:
+        description: >
+          Newline-separated globs naming this repository's suppression lists: the baselines and
+          allowlists that record a known failure so a gate passes. The job expands them against
+          the checkout, on the PR and on the default branch, and adds the files it finds to the
+          agent's prompt as files it may not edit. A `*` matches across `/`. This is how the list
+          follows the repository: add an allowlist that matches a glob and no caller changes. It
+          is added to `conflict_rules`, never a replacement for it. Set it to an empty string to turn it off.
+        type: string
+        default: |
+          *-allowlist.txt
+          detekt-baseline.xml
       conflict_rules:
         description: >
           Which conflicts the agent may not arbitrate, in its own words. Repo-specific and
@@ -314,6 +326,42 @@ jobs:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
+      # Derived here because a caller cannot compute an input: it hands over globs and this
+      # lists what they match. Read from the default branch as well as the PR's tree, so a PR
+      # cannot hide a list from the agent by deleting it.
+      - name: List the suppression files
+        id: suppression
+        if: steps.branch.outputs.skip != 'true'
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          PATTERNS: ${{ inputs.suppression_files }}
+          LEAD: >-
+            These files record known failures so that a gate passes. Do not arbitrate a conflict in any of them. Leave it unresolved and say so:
+        run: |
+          set -euo pipefail
+          # Fetched again, not assumed: a shallow checkout has no default-branch tree to list.
+          git fetch --quiet origin "$DEFAULT_BRANCH"
+          found=$(mktemp)
+          # The default branch is read into a scratch index so its tree is matched the same way as
+          # the checkout's. A pathspec `*` crosses `/`, so `*-allowlist.txt` matches at any depth.
+          scratch=$(mktemp -u)
+          GIT_INDEX_FILE="$scratch" git read-tree "origin/${DEFAULT_BRANCH}"
+          while IFS= read -r pattern; do
+            [ -n "$pattern" ] || continue
+            git ls-files -- "$pattern" >> "$found"
+            GIT_INDEX_FILE="$scratch" git ls-files -- "$pattern" >> "$found"
+          done <<< "$PATTERNS"
+          rm -f "$scratch"
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            echo "block<<${delim}"
+            if [ -s "$found" ]; then
+              printf '%s\n\n' "$LEAD"
+              sort -u "$found" | sed 's/^/  - /'
+            fi
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Start the merge
         id: merge
         if: steps.branch.outputs.skip != 'true'
@@ -490,6 +538,8 @@ jobs:
             than picking one. Say so in ${{ runner.temp }}/note.md.
 
             ${{ inputs.conflict_rules }}
+
+            ${{ steps.suppression.outputs.block }}
 
             This run gets one turn and nothing will wake it. There is no next turn
             in which a delegated task reports back to you, and no scheduler behind
