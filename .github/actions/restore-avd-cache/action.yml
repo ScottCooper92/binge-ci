@@ -1,0 +1,85 @@
+name: Restore AVD cache
+description: >
+  Restores a Gradle Managed Device's created AVD (with its post-boot snapshot), its downloaded
+  system image package and the emulator package, so an emulator lane does not re-download and
+  re-boot from scratch on every run. Pair with save-avd-cache, which writes the entry this reads.
+
+inputs:
+  device:
+    description: The Gradle Managed Device name (e.g. smokeAtdApi34), as declared in the build.
+    required: true
+  api-level:
+    description: The device's apiLevel. Folded into the cache key so a config change can't restore a mismatched AVD under the same key.
+    required: true
+  system-image-source:
+    description: The device's systemImageSource (e.g. aosp-atd). Folded into the cache key for the same reason.
+    required: true
+  default-branch:
+    description: >
+      The caller's default branch (`master` or `main`), folded into the cache key. Required, with
+      no default, because neither name is right for every consumer.
+    required: true
+  android-sdk-root:
+    description: >
+      The Android SDK root whose system-images and emulator directories are cached. Empty resolves
+      it from $ANDROID_SDK_ROOT, then $ANDROID_HOME, on the runner. The step fails if neither is set.
+    required: false
+    default: ''
+
+outputs:
+  cache-hit:
+    description: "true on an exact key match; unset otherwise (a cache miss is not a failure - the build falls back to a full download+boot)."
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # The SDK root and the key come out of a run: step, not out of `${{ env.* }}`: the env
+    # context holds only what the workflow set, not the runner's own variables, so a caller
+    # without android-actions/setup-android would otherwise cache an empty path (#69).
+    - id: resolve
+      shell: bash
+      env:
+        SDK_ROOT_INPUT: ${{ inputs.android-sdk-root }}
+        DEVICE: ${{ inputs.device }}
+        API_LEVEL: ${{ inputs.api-level }}
+        IMAGE_SOURCE: ${{ inputs.system-image-source }}
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+      run: |
+        set -euo pipefail
+        root="${SDK_ROOT_INPUT:-${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}}"
+        if [ -z "$root" ]; then
+          echo "::error::No Android SDK root: pass android-sdk-root, or set ANDROID_SDK_ROOT or ANDROID_HOME."
+          exit 1
+        fi
+        {
+          echo "root=$root"
+          echo "key=gmd-avd-${GITHUB_REPOSITORY}-${RUNNER_OS}-${DEVICE}-${API_LEVEL}-${IMAGE_SOURCE}-${DEFAULT_BRANCH}-v1"
+        } >> "$GITHUB_OUTPUT"
+
+    # ~/.android/avd/gradle-managed is where GMD writes the AVD it creates plus the default_boot
+    # snapshot from Setup's boot-then-stop. system-images is the separately downloaded package the
+    # AVD is built from, and emulator is the emulator binary package itself - all three live under
+    # one key.
+    #
+    # emulator is load-bearing, not an optimisation (Binge#2753): Setup's own install branch only
+    # triggers on `!sdkImageDirectoryProvider(imageHash).isPresent()`, so a system-image cache hit
+    # skips it entirely - on a runner image that ships no `emulator` package, that left
+    # `VersionedSdkLoader.emulatorDirectoryProvider` with nothing to resolve and Setup failed with
+    # a bare `MissingValueException`. Restoring `emulator` alongside `system-images` keeps that
+    # isPresent() check honest: everything the skipped install branch would have installed is
+    # already there.
+    #
+    # *.lock and active_gradle_devices* are excluded, not merely left alone: a stale multi-process
+    # lock file restored as "in use" breaks the run that restores it, so save-avd-cache must not be
+    # able to write one back in even if it runs anyway.
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.android/avd/gradle-managed
+          !~/.android/avd/gradle-managed/**/*.lock
+          !~/.android/avd/gradle-managed/**/active_gradle_devices*
+          ${{ steps.resolve.outputs.root }}/system-images
+          ${{ steps.resolve.outputs.root }}/emulator
+        key: ${{ steps.resolve.outputs.key }}
