@@ -596,7 +596,7 @@ jobs:
         # A step key, NOT a `with:` input: claude-code-action declares no timeout input, and a
         # composite action silently drops what it does not declare.
         timeout-minutes: ${{ inputs.agent_timeout_minutes }}
-        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
+        uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1.0.238
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # See `show_full_output`. Without it the SDK stream is suppressed and a run that dies is
