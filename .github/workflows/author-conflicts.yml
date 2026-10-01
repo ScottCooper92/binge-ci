@@ -118,6 +118,12 @@ on:
           world-readable and the stream carries what the agent read and ran.
         type: boolean
         default: false
+      model:
+        description: >
+          Passed to claude-code-action as `--model`. The default is pinned here so every caller inherits one model for author work. A caller overrides it by passing
+          another value. An empty string omits the flag and uses the action's own default.
+        type: string
+        default: claude-sonnet-5-5
     secrets:
       AUTHOR_APP_ID:
         required: true
@@ -465,6 +471,7 @@ jobs:
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent"
             --max-turns ${{ inputs.max_turns }}
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           prompt: |
             A merge of origin/${{ inputs.default_branch }} into this PR branch has
             stopped with conflicts. Run `git status` and `git diff --diff-filter=U`
