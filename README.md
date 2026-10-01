@@ -150,8 +150,9 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 
 ```
 .github/workflows/    The five reusable workflows, and this repo's own CI
-.github/actions/      ci-setup (Android build bootstrap), governed-paths and
-                      pr-check-run (both below)
+.github/actions/      ci-setup (Android build bootstrap), governed-paths,
+                      pr-check-run and restore-avd-cache / save-avd-cache
+                      (all below)
 callers/              Worked callers for the public repos
 tools/                The checks actionlint cannot do
 ```
@@ -167,8 +168,16 @@ perform the rewrite themselves with the script's `--rewrite` mode before their a
 and every bot undoes it against the PR's base. Without that, an agent run on those triggers
 reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
 
-All three actions live here rather than in the consuming repos so a PR cannot edit the
+All the actions live here rather than in the consuming repos so a PR cannot edit the
 guard that is about to refuse it, and so the public repos get one they never had.
+
+**`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
+image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,
+`system-image-source` and its `default-branch`, and gates the save to a push to that branch with
+its own `if:`. The SDK root is an input, `android-sdk-root`; left empty it is resolved from
+`$ANDROID_SDK_ROOT`, then `$ANDROID_HOME`, so a caller without `android-actions/setup-android`
+works too. The save step deletes the old entry first, so it needs a token with `actions: write`
+(see "Writing a caller").
 
 They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`. Inside a
 reusable workflow a local action path resolves against the **caller's** workspace, where
@@ -203,6 +212,12 @@ A reusable workflow cannot be granted more than its caller holds, and a caller w
 `bot-review` needs `checks: write` for the check it posts when its first job fails, so a
 caller that omits either dies as `startup_failure`: no log, no annotation, no job, and
 nothing on the PR beyond a red tick.
+
+`save-avd-cache` needs `actions: write` too, for the `gh cache delete` it runs before it saves:
+`actions/cache/save` cannot overwrite an existing key. It takes the token as its `github-token`
+input, and the job that calls it must hold `actions: write` for that token to carry it. This one
+is not a `startup_failure`: the delete ends in `|| true`, so without the permission it fails
+quietly and the next save is refused for an existing key.
 
 This is the one way a caller differs from the copy it replaces. An ordinary workflow
 declaring `permissions: actions: read` simply gets it; a caller has to hold it first — which

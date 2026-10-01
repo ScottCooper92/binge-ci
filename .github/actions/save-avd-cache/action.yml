@@ -1,0 +1,87 @@
+name: Save AVD cache
+description: >
+  Saves the Gradle Managed Device state restore-avd-cache reads back: the created AVD (with its
+  post-boot snapshot), its downloaded system image package and the emulator package. Call only
+  after a run that actually populated all three, gated by the caller's `if:` to a push to its
+  default branch so PR and manual-dispatch runs don't thrash the canonical cache entry.
+
+inputs:
+  device:
+    description: The Gradle Managed Device name (e.g. smokeAtdApi34), as declared in the build.
+    required: true
+  api-level:
+    description: The device's apiLevel. Must match the value passed to restore-avd-cache for this device.
+    required: true
+  system-image-source:
+    description: The device's systemImageSource (e.g. aosp-atd). Must match the value passed to restore-avd-cache for this device.
+    required: true
+  default-branch:
+    description: The caller's default branch. Must match the value passed to restore-avd-cache.
+    required: true
+  android-sdk-root:
+    description: >
+      The Android SDK root whose system-images and emulator directories are cached. Must resolve to
+      the same path as restore-avd-cache. Empty resolves it from $ANDROID_SDK_ROOT, then
+      $ANDROID_HOME. The step fails if neither is set.
+    required: false
+    default: ''
+  github-token:
+    description: >
+      A token with `actions: write` on the caller's repository, for `gh cache delete`
+      (actions/cache/save alone cannot overwrite an existing key). The caller's job must hold
+      `actions: write` for the token to carry it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The key is fixed (not content-hashed against the AVD's own bytes), because there is nothing
+    # meaningful to hash - a snapshot's content changes on every boot regardless of whether anything
+    # about the device config did. actions/cache/save refuses to overwrite an existing key, so the
+    # previous entry is deleted first; a delete on a first-ever save (no entry yet) is expected to
+    # report not-found and is not a failure.
+    #
+    # The root and key are resolved in a run: step because the env expression context does not
+    # carry the runner's own variables (#69). Keep the key in step with restore-avd-cache.
+    - id: resolve
+      shell: bash
+      env:
+        SDK_ROOT_INPUT: ${{ inputs.android-sdk-root }}
+        DEVICE: ${{ inputs.device }}
+        API_LEVEL: ${{ inputs.api-level }}
+        IMAGE_SOURCE: ${{ inputs.system-image-source }}
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+      run: |
+        set -euo pipefail
+        root="${SDK_ROOT_INPUT:-${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}}"
+        if [ -z "$root" ]; then
+          echo "::error::No Android SDK root: pass android-sdk-root, or set ANDROID_SDK_ROOT or ANDROID_HOME."
+          exit 1
+        fi
+        {
+          echo "root=$root"
+          echo "key=gmd-avd-${GITHUB_REPOSITORY}-${RUNNER_OS}-${DEVICE}-${API_LEVEL}-${IMAGE_SOURCE}-${DEFAULT_BRANCH}-v1"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Delete the previous cache entry
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        CACHE_KEY: ${{ steps.resolve.outputs.key }}
+      run: |
+        set -euo pipefail
+        gh cache delete "$CACHE_KEY" || true
+
+    # emulator joins system-images here for the same reason it joins the restore side
+    # (Binge#2753) - see that action's comment. Both must move together or a save from before a
+    # change and a restore after it (or vice versa) recreates the gap.
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.android/avd/gradle-managed
+          !~/.android/avd/gradle-managed/**/*.lock
+          !~/.android/avd/gradle-managed/**/active_gradle_devices*
+          ${{ steps.resolve.outputs.root }}/system-images
+          ${{ steps.resolve.outputs.root }}/emulator
+        key: ${{ steps.resolve.outputs.key }}
