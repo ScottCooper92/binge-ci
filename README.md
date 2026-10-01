@@ -141,7 +141,7 @@ opts *out*. A repo that forgets to configure something gets the safe behaviour.
 | `merge_method` | `squash` | What this workflow has always done, and it keeps a linear history. A caller landing **stacked** PRs passes `merge`: squash and rebase rewrite the parent's commits, so every child is left holding commits absent from the base and needs a hand-resolved merge. The repository must allow the method too. |
 | `show_full_output` | `false` | The agent's log stream carries what it read and ran; public logs are world-readable. |
 | `default_branch` | `main` | Binge is the only `master`. |
-| `model` | `claude-opus-5-5` (`bot-review`), `claude-sonnet-5-5` (`author-ci-fix`, `author-comments`, `author-conflicts`) | The agent model is pinned once per role here, so a model change is one edit and one release. A caller can pass another value, and an empty string omits `--model` to use the action's own default. |
+| `model` | `claude-opus-5` (`bot-review`), `claude-sonnet-5` (`author-ci-fix`, `author-comments`, `author-conflicts`) | The agent model is pinned once per role here, so a model change is one edit and one release. A caller can pass another value, and an empty string omits `--model` to use the action's own default. |
 
 Binge's callers are not in `callers/`. They name that repo's self-hosted runner labels, and
 this repository is public — a public staging area has no reason to carry infrastructure
