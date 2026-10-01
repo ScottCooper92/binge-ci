@@ -336,7 +336,7 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           PATTERNS: ${{ inputs.suppression_files }}
           LEAD: >-
-            These files record known failures so that a gate passes. Do not arbitrate a conflict in any of them. Leave it unresolved and say so:
+            These files record known failures so that a gate passes. A conflict in any of them is a decision about a gate: resolve it only as the rules above direct, and never by taking either side wholesale. If those rules do not cover it, leave it unresolved and say so:
         run: |
           set -euo pipefail
           # Fetched again, not assumed: a shallow checkout has no default-branch tree to list.
