@@ -104,7 +104,7 @@ on:
           `expected:<Sending> but was:<Idle>`. The reports carry it. CHECK THE NAME your
           ci.yml uploads under rather than assuming this default: a name that does not
           exist is not an error, so a mismatch silently reads nothing. binge-seerr uses
-          `build-reports`, binge-integrations `test-reports`. Empty to skip, for a
+          `build-reports`, binge-companions `test-reports`. Empty to skip, for a
           caller whose CI uploads nothing.
         type: string
         default: build-reports

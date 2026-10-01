@@ -14,7 +14,7 @@ run-name: >-
       || github.event.workflow_run.head_branch
       || github.ref_name }}
 
-# This repository's own caller: the same shape as callers/binge-integrations, pointed at the
+# This repository's own caller: the same shape as callers/binge-companions, pointed at the
 # workflow this repository ships. Pinned to the release tag the actions pin, NOT `./`: a PR here
 # is reviewed by the reviewer that consumers run, never by the one it is changing, and a `./`
 # reference would fail tools/check-internal-refs.sh in any case. A fix to bot-review.yml

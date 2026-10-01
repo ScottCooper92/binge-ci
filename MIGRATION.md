@@ -28,7 +28,7 @@ Done, 2026-09-09. All five are current as of Binge `30e2c6c66`; see the status t
 
 ## 2. Create and tag `binge-ci` ✅
 
-Public, under `ScottCooper92`. Public matters: `binge-integrations` and `binge-seerr`
+Public, under `ScottCooper92`. Public matters: `binge-integrations` (now `binge-companions`) and `binge-seerr`
 are public, and a public repo calling a reusable workflow from a private one both needs
 the private repo's Actions access setting opened up *and* prints the called workflow's
 step bodies into the public caller's logs. A public `binge-ci` sidesteps both. Nothing
@@ -108,7 +108,7 @@ on `main`, none of them copies of Binge's:
 The bots are only as good as these. Porting the workflows without them produces an agent
 reviewing a proto repo against a screenshot gate that does not exist.
 
-Done, along with replacing its five copies with `callers/binge-integrations/*.yml`.
+Done, along with replacing its five copies with `callers/binge-companions/*.yml`.
 
 ## What is still open: exercising the bots
 
