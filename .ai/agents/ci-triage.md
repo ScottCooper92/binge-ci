@@ -11,7 +11,7 @@ CI is one job, `lint`, with these steps in order:
 | `actionlint` | actionlint, with shellcheck at `--severity=warning`, over `.github/workflows/*.yml` and `callers/*/*.yml` |
 | Check the draft callers | `tools/check-callers.sh` - each caller's inputs, secrets and permissions against the workflow it calls, the worked ones under `callers/` and this repository's own `self-*.yml` alike |
 | shellcheck the composite actions | `tools/check-action-shell.sh` - every `run:` block in `.github/actions/*/action.yml` |
-| Check composite-action env references | `tools/check-action-env.sh` - every `${{ env.X }}` in an `action.yml` is set by an `env:` key in that action |
+| Check composite-action env references | `tools/check-action-env.sh` - every `${{ env.X }}` in an `action.yml` is set by an `env:` key or a `$GITHUB_ENV` write in that action |
 | Check this repo's references | `tools/check-internal-refs.sh` - no `uses: ./`, one immutable tag on every self-reference |
 | shellcheck the governed-paths script | shellcheck on `restore-agent-governed-paths.sh` |
 
@@ -31,7 +31,7 @@ Nothing builds. If the log shows a failure that is not in the table below, that 
 | `check-callers.sh`: unknown input or secret | The caller names something the workflow does not declare | Fix the side this PR changed, as for the actionlint case above |
 | `check-callers.sh`: quoted scalar | `'true'` or `'10'` passed to a `boolean` or `number` input | Unquote it |
 | `check-action-shell.sh` failure | A composite action's `run:` block has a shellcheck warning | Fix the shell as above. The script extracts the blocks; edit `action.yml`, not the extract |
-| `check-action-env.sh` failure | A composite action reads `${{ env.X }}` that no `env:` key in it sets, so it expands to nothing on the runner | Set `X` in the step's `env:` or take it as an input; the runner's own environment is not in the `env` context |
+| `check-action-env.sh` failure | A composite action reads `${{ env.X }}` that no `env:` key or `$GITHUB_ENV` write in it sets, so it expands to nothing on the runner | Set `X` in the step's `env:`, write it to `$GITHUB_ENV` in an earlier step, or take it as an input; the runner's own environment is not in the `env` context |
 | `check-internal-refs.sh`: `cannot reference a local action` | A `uses: ./` inside a reusable workflow or action | Replace it with the full `ScottCooper92/binge-ci/...@vX.Y.Z` reference at the tag every other self-reference uses |
 | `check-internal-refs.sh`: `self-references disagree` or `moving alias` | One reference was bumped, or points at `v1` | **Stop** unless this PR is the release bump itself. A pin is bumped in a release commit that does nothing else; a repair must not do it |
 | `tag-check.yml` red on `main` | The pinned tag does not exist or does not name this release | **Stop.** This runs after a merge, not on a PR; cutting the tag is a human's step and no PR fixes it |
