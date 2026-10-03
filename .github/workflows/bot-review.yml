@@ -732,8 +732,9 @@ jobs:
       # A head whose latest pinned verdict is an APPROVAL is skipped for review but not for the
       # merge (#84). A merge held on a transient state would otherwise stay held for good: the pin
       # stops every later run on the head, so only a new push could reach the merge again. With
-      # `approved`, a CI re-run or a re-applied label retries the merge, under every guard it has,
-      # without paying for a second review.
+      # `approved`, a CI re-run retries the merge, under every guard it has, without paying for a
+      # second review. Re-applying the label does not: that run's own review job is an in-progress
+      # check on the head, which holds `mergeStateStatus` at UNSTABLE while the merge polls.
       - name: Skip a head already reviewed
         id: pin
         if: needs.resolve.outputs.rebuttal != 'true'
@@ -1412,7 +1413,7 @@ jobs:
             # head, so say how to reach the merge again. One marker per state, so a PR that goes
             # DIRTY and later UNSTABLE gets both notes.
             if [ "$state" = "UNSTABLE" ] || [ "$state" = "BLOCKED" ]; then
-              reason="$reason Once that clears, re-run CI on this commit or re-apply the \`$AGENT_LABEL\` label to retry the merge. The review stands and is not repeated."
+              reason="$reason Once that clears, re-run CI on this commit to retry the merge. The review stands and is not repeated."
             fi
             hold "$reason" "merge-state-$state"
           fi
