@@ -160,8 +160,8 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 ```
 .github/workflows/    The five reusable workflows, and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
-                      pr-check-run and restore-avd-cache / save-avd-cache
-                      (all below)
+                      suppression-files, pr-check-run and
+                      restore-avd-cache / save-avd-cache (all below)
 callers/              Worked callers for the public repos
 tools/                The checks actionlint cannot do
 ```
@@ -176,6 +176,11 @@ one; so the two `workflow_run`-and-schedule bots, `author-ci-fix` and `author-co
 perform the rewrite themselves with the script's `--rewrite` mode before their agent starts,
 and every bot undoes it against the PR's base. Without that, an agent run on those triggers
 reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
+
+**`suppression-files`** expands a caller's `suppression_files` globs against the checkout and
+the default branch, and outputs the prompt block that tells an agent not to edit what they
+match. The three author workflows that take `suppression_files` share it, each passing its own
+`lead` sentence.
 
 All the actions live here rather than in the consuming repos so a PR cannot edit the
 guard that is about to refuse it, and so the public repos get one they never had.
