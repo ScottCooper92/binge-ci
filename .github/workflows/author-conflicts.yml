@@ -332,35 +332,12 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.branch.outputs.skip != 'true'
-        env:
-          DEFAULT_BRANCH: ${{ inputs.default_branch }}
-          PATTERNS: ${{ inputs.suppression_files }}
-          LEAD: >-
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.15
+        with:
+          patterns: ${{ inputs.suppression_files }}
+          default-branch: ${{ inputs.default_branch }}
+          lead: >-
             These files record known failures so that a gate passes. A conflict in any of them is a decision about a gate: resolve it only as the rules above direct, and never by taking either side wholesale. If those rules do not cover it, leave it unresolved and say so:
-        run: |
-          set -euo pipefail
-          # Fetched again, not assumed: a shallow checkout has no default-branch tree to list.
-          git fetch --quiet origin "$DEFAULT_BRANCH"
-          found=$(mktemp)
-          # The default branch is read into a scratch index so its tree is matched the same way as
-          # the checkout's. A pathspec `*` crosses `/`, so `*-allowlist.txt` matches at any depth.
-          scratch=$(mktemp -u)
-          GIT_INDEX_FILE="$scratch" git read-tree "origin/${DEFAULT_BRANCH}"
-          while IFS= read -r pattern; do
-            [ -n "$pattern" ] || continue
-            git ls-files -- "$pattern" >> "$found"
-            GIT_INDEX_FILE="$scratch" git ls-files -- "$pattern" >> "$found"
-          done <<< "$PATTERNS"
-          rm -f "$scratch"
-          delim="EOF_$(openssl rand -hex 8)"
-          {
-            echo "block<<${delim}"
-            if [ -s "$found" ]; then
-              printf '%s\n\n' "$LEAD"
-              sort -u "$found" | sed 's/^/  - /'
-            fi
-            echo "${delim}"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Start the merge
         id: merge
