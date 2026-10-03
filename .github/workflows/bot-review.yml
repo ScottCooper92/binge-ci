@@ -728,6 +728,13 @@ jobs:
       # that doesn't - so the one case every other door treats as "nothing to do" is the exact
       # case this door exists for. The step itself is skipped rather than made to compute a
       # `skip` it would ignore, since nothing downstream needs the lookup on this path either.
+      #
+      # A head whose latest pinned verdict is an APPROVAL is skipped for review but not for the
+      # merge (#84). A merge held on a transient state would otherwise stay held for good: the pin
+      # stops every later run on the head, so only a new push could reach the merge again. With
+      # `approved`, a CI re-run retries the merge, under every guard it has, without paying for a
+      # second review. Re-applying the label does not: that run's own review job is an in-progress
+      # check on the head, which holds `mergeStateStatus` at UNSTABLE while the merge polls.
       - name: Skip a head already reviewed
         id: pin
         if: needs.resolve.outputs.rebuttal != 'true'
@@ -738,12 +745,18 @@ jobs:
           SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          reviewed=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' \
+          # Latest last, because a rebuttal can put a second verdict on the same head.
+          pinned=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' \
             | jq -s --arg pin "Reviewed \`${SHA:0:7}\`" \
-                '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length')
+                '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | sort_by(.submitted_at)')
+          reviewed=$(jq 'length' <<<"$pinned")
           if [ "${reviewed:-0}" != "0" ]; then
             echo "PR #$PR was already reviewed at $SHA - not reviewing it again."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            if [ "$(jq -r '.[-1].state' <<<"$pinned")" = "APPROVED" ]; then
+              echo "Its latest verdict approved it, so the merge is retried."
+              echo "approved=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       # The note report-resolve-failure leaves is posted by github-actions, so only github-actions
@@ -1172,12 +1185,13 @@ jobs:
       # than being deleted so that turning it on is one input and not a re-derivation.
       - name: Merge if the bar is met
         id: merge
-        if: inputs.auto_merge && steps.pin.outputs.skip != 'true'
+        if: inputs.auto_merge && (steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true')
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.number }}
           REVIEWED_SHA: ${{ needs.resolve.outputs.sha }}
+          RETRY: ${{ steps.pin.outputs.approved }}
           PUSHED_AT: ${{ needs.resolve.outputs.pushed_at }}
           VOUCHED: ${{ needs.resolve.outputs.vouched }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
@@ -1215,7 +1229,13 @@ jobs:
             exit 0
           }
 
-          [ "$(jq -r '.verdict' "$VERDICT_FILE")" = "approve" ] || hold "review requested changes."
+          # On the retry path no review ran, so there is no verdict file; the pin step read the
+          # verdict off the review already on the PR.
+          if [ "$RETRY" = "true" ]; then
+            echo "Retrying the merge of an approved head; the review is not repeated."
+          else
+            [ "$(jq -r '.verdict' "$VERDICT_FILE")" = "approve" ] || hold "review requested changes."
+          fi
 
           # A review no CI run vouched for has no green build behind it and no reliable way to date
           # the push, so the unaddressed-feedback guard has nothing trustworthy to compare against.
@@ -1364,14 +1384,39 @@ jobs:
 
           [ "$newer" = "0" ] || hold "there is human feedback newer than the head commit."
 
-          # mergeStateStatus reads UNKNOWN for a few seconds after any other merge.
+          # mergeStateStatus reads UNKNOWN for a few seconds after any other merge, and UNSTABLE for
+          # a few seconds after a check run changes - this run's own verdict check among them. Read
+          # once, an approved PR was held 6-10s after its review and never looked at again (#84).
+          # So both are polled, for about a minute. BLOCKED, DIRTY and BEHIND are not: nothing in a
+          # minute clears them.
           state=""
-          for _ in 1 2 3 4 5 6 7 8; do
+          for attempt in $(seq 1 15); do
             state=$(gh pr view "$PR" --json mergeStateStatus --jq .mergeStateStatus)
-            [ "$state" != "UNKNOWN" ] && break
-            sleep 4
+            case "$state" in UNKNOWN|UNSTABLE) ;; *) break ;; esac
+            if [ "$attempt" -lt 15 ]; then sleep 4; fi
           done
-          [ "$state" = "CLEAN" ] || hold "mergeStateStatus is $state, not CLEAN." merge-state
+          if [ "$state" != "CLEAN" ]; then
+            # Which check held it was unrecoverable after the fact on every occurrence in #84: by
+            # the time anyone looked, every check was green. So it is named at the moment of the hold.
+            # gh exits non-zero whenever a check is pending or failing, which is the case being
+            # described, so its status is ignored and only its output is read.
+            waiting=""
+            if [ "$state" = "UNSTABLE" ] || [ "$state" = "BLOCKED" ]; then
+              waiting=$(gh pr checks "$PR" --json name,bucket \
+                --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | "`\(.name)` (\(.bucket))"] | join(", ")' \
+                2>/dev/null || true)
+              echo "Not passing: ${waiting:-none listed}"
+            fi
+            reason="mergeStateStatus is $state, not CLEAN."
+            if [ -n "$waiting" ]; then reason="$reason Not passing: $waiting."; fi
+            # UNSTABLE and BLOCKED can clear without a push, and the pin keeps a new review off this
+            # head, so say how to reach the merge again. One marker per state, so a PR that goes
+            # DIRTY and later UNSTABLE gets both notes.
+            if [ "$state" = "UNSTABLE" ] || [ "$state" = "BLOCKED" ]; then
+              reason="$reason Once that clears, re-run CI on this commit to retry the merge. The review stands and is not repeated."
+            fi
+            hold "$reason" "merge-state-$state"
+          fi
 
           title=$(gh pr view "$PR" --json title --jq .title)
           # GitHub ignores a commit title and message on a REBASE merge, and gh sends them anyway -
@@ -1445,6 +1490,7 @@ jobs:
           REFUSED_STATUS: ${{ steps.submit.outputs.refused_status }}
           UNCONFIRMED: ${{ steps.submit.outputs.unconfirmed }}
           MERGED: ${{ steps.merge.outcome }}
+          RETRY: ${{ steps.pin.outputs.approved }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
         run: |
@@ -1468,7 +1514,9 @@ jobs:
           # The third branch tests MERGED = failure rather than != success: `skipped` is what the merge
           # step reports when a caller leaves auto_merge off, and calling that a failure would tell
           # every review-only caller its merge step broke.
-          if [ "$SUBMITTED" != "success" ]; then
+          # A merge retry (#84) skips "Submit the review" because the review is already on the PR,
+          # so for it the branches below that say what happened to the merge are the true ones.
+          if [ "$SUBMITTED" != "success" ] && [ "$RETRY" != "true" ]; then
             # "Re-running CI on this commit will try again" is wrong for one ordinary way this
             # branch is reached: a force-push between resolve and submit takes the reviewed
             # commit off the PR, and the pinned POST then 422s on a commit_id GitHub cannot
