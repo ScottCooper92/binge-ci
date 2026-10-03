@@ -1389,22 +1389,45 @@ jobs:
           # once, an approved PR was held 6-10s after its review and never looked at again (#84).
           # So both are polled, for about a minute. BLOCKED, DIRTY and BEHIND are not: nothing in a
           # minute clears them.
+          #
+          # On the `pull_request` door this run's own jobs are check runs on the PR head, so the
+          # review job is in_progress there while this step reads the state, and holds it at UNSTABLE
+          # by itself (#89). The other doors' runs attach to the default branch. So UNSTABLE with
+          # nothing failing or pending but this run's own jobs is not a reason to hold: only required
+          # checks block `gh pr merge`, and those read as BLOCKED, not UNSTABLE.
+          #
+          # gh exits non-zero whenever a check is pending or failing, which is the case being read,
+          # so its status is ignored and its output is checked instead. Output that is not a JSON
+          # array means the checks could not be read, and that is never taken as "only ours".
+          checks_json=""
+          others=""
+          read_others() {
+            checks_json=$(gh pr checks "$PR" --json name,bucket,link 2>/dev/null || true)
+            jq -e 'type == "array"' >/dev/null 2>&1 <<<"$checks_json" || return 1
+            others=$(jq -r --arg run "/actions/runs/${GITHUB_RUN_ID}/" \
+              '[.[] | select(.bucket != "pass" and .bucket != "skipping")
+                    | select((.link // "") | contains($run) | not)
+                    | "`\(.name)` (\(.bucket))"] | join(", ")' <<<"$checks_json")
+          }
           state=""
+          own_only=false
           for attempt in $(seq 1 15); do
             state=$(gh pr view "$PR" --json mergeStateStatus --jq .mergeStateStatus)
+            if [ "$state" = "UNSTABLE" ] && read_others && [ -z "$others" ]; then
+              echo "UNSTABLE only on this run's own jobs - merging."
+              own_only=true
+              break
+            fi
             case "$state" in UNKNOWN|UNSTABLE) ;; *) break ;; esac
             if [ "$attempt" -lt 15 ]; then sleep 4; fi
           done
-          if [ "$state" != "CLEAN" ]; then
+          if [ "$state" != "CLEAN" ] && [ "$own_only" != "true" ]; then
             # Which check held it was unrecoverable after the fact on every occurrence in #84: by
-            # the time anyone looked, every check was green. So it is named at the moment of the hold.
-            # gh exits non-zero whenever a check is pending or failing, which is the case being
-            # described, so its status is ignored and only its output is read.
+            # the time anyone looked, every check was green. So it is named at the moment of the hold,
+            # leaving out this run's own jobs, which clear when it ends.
             waiting=""
             if [ "$state" = "UNSTABLE" ] || [ "$state" = "BLOCKED" ]; then
-              waiting=$(gh pr checks "$PR" --json name,bucket \
-                --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | "`\(.name)` (\(.bucket))"] | join(", ")' \
-                2>/dev/null || true)
+              if read_others; then waiting="$others"; fi
               echo "Not passing: ${waiting:-none listed}"
             fi
             reason="mergeStateStatus is $state, not CLEAN."
