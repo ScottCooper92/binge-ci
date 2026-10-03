@@ -991,6 +991,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.number }}
           REVIEWED_SHA: ${{ needs.resolve.outputs.sha }}
+          # For the did-it-land lookup below: only this app's own review counts (#94), as in the pin step.
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
           BODY_FILE: ${{ runner.temp }}/review-body.md
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
@@ -1110,8 +1112,11 @@ jobs:
               echo "refused_status=${status:-none}" >> "$GITHUB_OUTPUT"
               exit 1
             fi
-            if jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" \
-                 '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | length' \
+            # Another bot's pin-shaped review is not this run's, and counting it would record a verdict
+            # whose review never landed. An empty slug matches nothing, so the run retries or reports
+            # the refusal rather than claiming a review it cannot see.
+            if jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" --arg login "${APP_SLUG}[bot]" \
+                 '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))] | length' \
                  <<<"$reviews" | grep -qvx 0; then
               echo "Review POST attempt $attempt failed (HTTP ${status:-none}) but the review is on the PR; not posting it again." >&2
               posted=true
