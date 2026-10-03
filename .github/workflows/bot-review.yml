@@ -743,12 +743,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.number }}
           SHA: ${{ needs.resolve.outputs.sha }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
         run: |
           set -euo pipefail
+          # This workflow's own reviews only (#90). Since #87 an approval found here also retries the
+          # merge, so a pinned-looking approval from any other app must not count. Without the slug the
+          # filter would match nothing and the head would be reviewed again, so it stops instead.
+          [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
           # Latest last, because a rebuttal can put a second verdict on the same head.
           pinned=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' \
-            | jq -s --arg pin "Reviewed \`${SHA:0:7}\`" \
-                '[.[] | select(.user.type == "Bot") | select(.body | startswith($pin))] | sort_by(.submitted_at)')
+            | jq -s --arg pin "Reviewed \`${SHA:0:7}\`" --arg login "${APP_SLUG}[bot]" \
+                '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))]
+                 | sort_by(.submitted_at)')
           reviewed=$(jq 'length' <<<"$pinned")
           if [ "${reviewed:-0}" != "0" ]; then
             echo "PR #$PR was already reviewed at $SHA - not reviewing it again."
