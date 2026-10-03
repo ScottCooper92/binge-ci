@@ -58,6 +58,17 @@ on:
           passed rather than guessed at.
         type: string
         default: ''
+      rerecord_screenshots:
+        description: >
+          Lets the agent re-record a screenshot baseline that the PR itself moved, under a narrow
+          gate: every failing frame renders a component this PR's diff (or a submodule bump in it)
+          changed, each frame is at most 1% off, there are at most 10 of them, and nothing else is
+          red. Anything outside that is a stop, as it is with this off. Turning it on is half the
+          change: the caller's `gate_rules` and triage doc must stop forbidding the re-record too,
+          and until they do they win and the agent stops. Off by default because a re-record turns
+          CI green on whatever rendered, and a regression inside a changed component rides along.
+        type: boolean
+        default: false
       verify_guidance:
         description: >
           How this repo expects a change to be verified before it is claimed verified -
@@ -560,6 +571,61 @@ jobs:
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
 
+      # Kept out of the prompt unless the caller opted in, so a caller that has not changes nothing:
+      # the agent never reads that a re-record was ever possible.
+      - name: Describe the screenshot re-record gate
+        id: rerecord
+        if: >
+          inputs.rerecord_screenshots &&
+          steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
+          steps.log.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            echo "block<<${delim}"
+            cat <<'GATE'
+          SCREENSHOT DIFFS. This repository lets you re-record a screenshot baseline in one
+          narrow case: the PR's own change moved the pixels and a frame was missed. A red build
+          the PR did not cause - a base-branch change, a font or runner change - is still a stop.
+          If the gate rules above or the triage table still say never to re-record, they win:
+          stop as they say, and name the frames in note.md.
+
+          Re-record only when ALL of these hold. If any one fails, change nothing and stop:
+
+            1. Nothing else is red. A screenshot diff next to a failing test, a lint or
+               format finding or a compile error is a stop.
+            2. There are at most 10 failing frames, and each differs by 1% of pixels or less,
+               as the log reports it.
+            3. Every failing frame renders a component whose source this PR changed. Check it
+               yourself: `git diff` against the merge base with the PR's base branch, and, when
+               the PR moves a submodule pin, `git log -p old..new` inside that submodule. The
+               PR body may name the cause, but that is a hint to check and not evidence.
+
+          Then:
+
+            - Re-record only the failing classes, never the whole suite: the update task for
+              the variant that failed, scoped with `--tests <fully.qualified.Class>` per class
+              (for example `./gradlew :app:updateDebugScreenshotTest --tests <Class>`).
+            - `git status` must show only the reference PNGs of the failing frames. Any other
+              changed file, or any other PNG, means revert everything and stop.
+            - Look before keeping. For each frame, write the old PNG out with
+              `git show HEAD:<path> > <tmp>.png` and Read both images. Keep the change only if
+              the difference is confined to the component the PR changed. If it is anywhere
+              else, revert everything and stop.
+            - Run the matching validate task, scoped the same way, and keep the change only if
+              it passes.
+
+          You may not edit a suppression file, an allowlist or a test to get there. The only
+          files this case lets you write are those reference PNGs.
+
+          In note.md, name each re-recorded frame, its diff percentage, and the change in this
+          PR (file, or submodule commit) it traces to, so a reviewer can check the frames
+          rather than re-derive the cause. If you stopped, say which condition failed.
+          GATE
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
       # Ships with this repo rather than the caller's, so a PR cannot touch the guard that is
       # about to discard its own changes - see the action's header. Placed before the toolchain
       # so a setup failure still leaves the environment it exports in place for "Commit and push".
@@ -696,6 +762,8 @@ jobs:
             ${{ inputs.gate_rules }}
 
             ${{ steps.suppression.outputs.block }}
+
+            ${{ steps.rerecord.outputs.block }}
 
             Do not commit and do not push; leave the working tree modified.
 
