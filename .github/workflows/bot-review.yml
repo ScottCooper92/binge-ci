@@ -868,7 +868,9 @@ jobs:
           # checkHumanActor throws for a non-User actor unless listed here. This is a workflow_run, so
           # the actor is whoever caused the CI run - the author bot whenever it pushed the fix.
           # Without this, precisely the commits this system exists to produce never get reviewed.
-          allowed_bots: ${{ inputs.author_bot }}
+          # Renovate is the other bot whose PRs need review: a dependency PR's CI run is Renovate's.
+          # Named, not '*', so no other app's run can start an agent with this job's secrets.
+          allowed_bots: ${{ inputs.author_bot }},renovate[bot]
           # Write is not optional: the prompt ends by asking for a JSON file, and "Submit the review"
           # hard-fails when it is missing.
           #
