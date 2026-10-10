@@ -1,0 +1,53 @@
+name: actionlint
+description: >
+  Lints the calling repository's workflows with a pinned, checksum-verified actionlint, and
+  shellchecks every `run:` block in them.
+
+# One version and one checksum, here, rather than one per repository drifting apart. The release
+# is downloaded and verified against its published SHA-256 before it runs.
+#
+# Run it after actions/checkout: it lints the workspace, which is the caller's. With no `args`
+# actionlint finds `.github/workflows/` itself.
+#
+# actionlint shellchecks a `run:` block only when shellcheck is on PATH, so this installs it.
+# --severity=warning, not the default, because info fires SC2016 on single-quoted scripts where the
+# quotes are correct, and disabling SC2016 outright would also drop the real case.
+#
+# actionlint cannot see across a remote `uses:` reference to a reusable workflow, so a caller's
+# inputs, secrets and permissions are not checked by this. They are proved by running the caller.
+
+inputs:
+  args:
+    description: >
+      Further arguments for actionlint, space-separated: the files to lint, say, when the
+      default directory is not the whole story.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install shellcheck
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v shellcheck >/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+        fi
+
+    - name: actionlint
+      shell: bash
+      env:
+        VERSION: 1.7.12
+        SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        dir=$(mktemp -d)
+        curl -sSLo "$dir/actionlint.tar.gz" \
+          "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+        echo "${SHA256}  $dir/actionlint.tar.gz" | sha256sum -c -
+        tar xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
+        read -ra extra <<<"$ARGS"
+        "$dir/actionlint" -shellcheck 'shellcheck --severity=warning' "${extra[@]}"

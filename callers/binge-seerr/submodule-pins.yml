@@ -1,0 +1,20 @@
+name: CI
+
+# The submodule-pin check as a job of this repository's gate. In the real file it is one job of
+# `.github/workflows/ci.yml`, beside the build jobs, and the job branch protection requires lists it
+# in `needs:` so an unmerged pin fails the gate rather than reporting beside it.
+#
+# The caller grants `pull-requests: read`: the check reads the PR's labels live, and a reusable
+# workflow cannot hold more than its caller.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  submodule-pins:
+    if: github.event.pull_request.draft == false
+    uses: ScottCooper92/binge-ci/.github/workflows/submodule-pins.yml@v1
