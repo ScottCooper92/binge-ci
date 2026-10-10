@@ -20,7 +20,9 @@ inputs:
   args:
     description: >
       Further arguments for actionlint, space-separated: the files to lint, say, when the
-      default directory is not the whole story.
+      default directory is not the whole story. Globs are expanded against the workspace, so
+      `callers/*/*.yml` names every caller; one matching nothing reaches actionlint as written
+      and fails loudly.
     required: false
     default: ''
 
@@ -49,5 +51,7 @@ runs:
           "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
         echo "${SHA256}  $dir/actionlint.tar.gz" | sha256sum -c -
         tar xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
-        read -ra extra <<<"$ARGS"
+        extra=()
+        # Word-splitting and pathname expansion are both wanted: the arguments are paths and globs.
+        for arg in $ARGS; do extra+=("$arg"); done
         "$dir/actionlint" -shellcheck 'shellcheck --severity=warning' "${extra[@]}"
