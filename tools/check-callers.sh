@@ -3,7 +3,7 @@
 # Every `with:` key in a caller must be a declared input of the reusable workflow it
 # calls, and every required secret must reach it. Two trees of callers, checked against two
 # different things. The worked ones under callers/ are checked against the WORKING TREE:
-# consumers pin `v1`, which moves to this commit at release, so a caller that no longer fits
+# consumers follow `v1`, which moves to this commit at release, so a caller that no longer fits
 # is fixed in the same PR. This repository's own self-*.yml pin an immutable vX.Y.Z and run
 # against THAT, so each is checked against the workflow at the tag it pins, read with
 # `git show`. Checking a self caller against the tree would fail it for a signature it never

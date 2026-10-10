@@ -26,9 +26,10 @@ Binge's callers live in its own `.github/workflows/` and it cannot see them. The
 `self-*.yml` callers are the exception: they pin a release tag and are checked against the
 workflow at that tag, so they change in the release bump and never with the workflow.
 
-The consumers pin `@v1`, a moving alias, and this repository's own actions and callers pin
-the immutable `vX.Y.Z` the release was cut at. Releasing is bumping those pins, merging,
-tagging `vX.Y.Z` at that commit, then moving `v1` - in that order, by a human.
+The consumers follow `v1`, a moving alias: each pins the commit it names, with a `# v1`
+comment, and moves when Renovate's digest update for it merges. This repository's own actions
+and callers pin the immutable `vX.Y.Z` the release was cut at. Releasing is bumping those
+pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order, by a human.
 `tools/check-internal-refs.sh` and `tag-check.yml` hold the order; nothing else does.
 
 ## Shell and YAML

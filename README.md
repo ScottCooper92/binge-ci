@@ -81,7 +81,11 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-The worked callers under `callers/` are the complete versions, one per workflow.
+The worked callers under `callers/` are the complete versions, one per workflow. Two things a
+consumer does that the sketch above leaves out: it pins the commit `v1` names rather than the
+alias (see Versioning), and each bot job carries a fork guard in its `if:`. On an event that
+names a head repository, that repository must be the caller's own. The workflows refuse fork PRs
+themselves; the caller's guard keeps the check visible in the repository that holds the secrets.
 
 Worked examples for the public repos are in `callers/`. Every input is documented on the workflow
 it belongs to.
@@ -242,14 +246,17 @@ remote reference, and the called workflow's own CI is not the caller.
 
 ## Versioning
 
-Callers reference `@v1`, a moving alias. `v1.0.0` and friends are immutable — pin to one
-if you want no surprises.
+`v1` is a moving alias, and the consumers follow it. Each pins the commit `v1` names, with a
+`# v1` comment, as it pins every other action. Renovate's digest pinning opens an update when
+`v1` moves, and a human merges it like any workflow change, so a release reaches a consumer
+when that update merges. The worked callers write `@v1`, the alias
+they track. `v1.0.0` and friends are immutable tags too.
 
 Releasing is four steps, in this order. Bump every self-reference in `.github/workflows/`
 to the new patch tag: the actions the reusable workflows use and the `self-*.yml` callers
 alike, which `tools/check-internal-refs.sh` requires to agree. Merge that. Tag `vX.Y.Z` at
-that commit. **Then** move `v1`. That order keeps the window safe — consumers resolve the
-workflow at `v1`, so until it moves they are still on the previous commit and never see a
+that commit. **Then** move `v1`. That order keeps the window safe: a consumer's Renovate
+resolves `v1`, so until it moves no consumer is offered the new commit, and none is offered a
 tag that does not exist yet.
 
 One door closes on the release PR itself. A `pull_request` event runs the workflow file
