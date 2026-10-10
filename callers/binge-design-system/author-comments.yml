@@ -47,6 +47,9 @@ jobs:
     # author_association travels on the comment and the review alike, so one clause covers
     # all three events. On a public repo this gate is the control, not a formality - anyone
     # can comment, and the comment body becomes the agent's instructions.
+    #
+    # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
+    # here (binge-design-system#407). It checks the events that name a head repository and lets the others through.
     if: >
       github.event.sender.login != 'binge-pr-author[bot]' &&
       (github.event_name != 'issue_comment' ||
@@ -55,7 +58,9 @@ jobs:
       (github.event_name != 'pull_request_review' || github.event.review.state != 'approved') &&
       (github.event.sender.login == 'binge-pr-reviewer[bot]' ||
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
-                github.event.review.author_association || github.event.comment.author_association))
+                github.event.review.author_association || github.event.comment.author_association)) &&
+      (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
     uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}

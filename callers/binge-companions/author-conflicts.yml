@@ -20,6 +20,11 @@ on:
 
 jobs:
   resolve:
+    # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
+    # here (binge-design-system#407). It checks the events that name a head repository and lets the others through.
+    if: >-
+      (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
     uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1
     with:
       dispatched: ${{ github.event_name == 'workflow_dispatch' }}
