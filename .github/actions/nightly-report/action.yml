@@ -1,0 +1,82 @@
+name: Nightly report
+description: >
+  Keeps one issue open while a scheduled run is red, comments on it each red run, and closes it
+  on the next green one.
+
+# A red scheduled run has no PR or push to carry it, so without this it is a red mark in the
+# Actions tab that nothing points at. One issue stays open while the run is red and closes itself
+# on the next green one, so an open issue means "still broken", not "old".
+#
+# The issue is found by its exact title, so each scheduled workflow passes a title of its own:
+# two sharing one would close each other's issue.
+#
+# Call it from a job that runs after the gate whatever happened (`if: always()` and the event is
+# `schedule`), passing that job's result. Anything but `success` reports: a job that hits its
+# timeout is `cancelled`, not `failure`. The job needs `issues: write`.
+
+inputs:
+  result:
+    description: The result of the job this reports on, as `needs.<job>.result` gives it.
+    required: true
+  title:
+    description: The issue's title, and the identity it is found by.
+    required: false
+    default: Nightly CI is failing on main
+  note:
+    description: >
+      Markdown for a new issue, after the line naming the failed run: what to suspect, and which
+      artifact holds the reports. Nothing was pushed to cause a scheduled failure, so this is
+      usually the environment.
+    required: false
+    default: Nothing was pushed to cause this, so suspect the environment first.
+  github-token:
+    description: A token with `issues: write`.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        RESULT: ${{ inputs.result }}
+        TITLE: ${{ inputs.title }}
+        NOTE: ${{ inputs.note }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { RESULT, TITLE, NOTE } = process.env;
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          const { owner, repo } = context.repo;
+          const open = (await github.paginate(github.rest.issues.listForRepo, {
+            owner, repo, state: 'open', per_page: 100,
+          })).find((i) => !i.pull_request && i.title === TITLE);
+
+          if (RESULT === 'success') {
+            if (!open) return;
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: open.number,
+              body: `The scheduled run is green again: ${runUrl}`,
+            });
+            await github.rest.issues.update({
+              owner, repo, issue_number: open.number, state: 'closed', state_reason: 'completed',
+            });
+            return;
+          }
+          if (open) {
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: open.number,
+              body: `Still failing (${RESULT}): ${runUrl}`,
+            });
+            return;
+          }
+          await github.rest.issues.create({
+            owner, repo, title: TITLE,
+            body: [
+              `The scheduled run failed (${RESULT}): ${runUrl}`,
+              '',
+              NOTE,
+              '',
+              'This issue closes itself on the next green scheduled run.',
+            ].join('\n'),
+          });

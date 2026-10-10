@@ -1,0 +1,82 @@
+name: Submodule pins
+
+# Fails a PR whose submodule pins a commit its own repository has not merged, unless the PR
+# carries the hold label.
+#
+# A pin can be a commit that only exists on an unmerged branch of its own repository. That is a
+# deliberate case while `hold` gates the merge on it, and one nobody remembers is unmerged once
+# `hold` comes off. Every pinned commit has to be an ancestor of its submodule's default branch,
+# or the PR still needs `hold`. Nothing here reads `.gitmodules` for which pins are "supposed" to
+# be held, only whether each one actually merged. Each submodule's own remote names its repository,
+# so the caller passes no list of paths and a submodule added later is checked with no edit.
+#
+# Call it as a job of the workflow branch protection requires, and make the required job need it.
+# A separate workflow would report beside the gate rather than in it. It does nothing outside a
+# `pull_request` run, so the caller's push and schedule triggers can call it unconditionally.
+#
+# The submodules are cloned with the workflow's own token, which reaches public repositories and
+# the caller's own. A submodule of another private repository needs a different checkout.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: runs-on, as a JSON array string.
+        type: string
+        default: '["ubuntu-latest"]'
+      hold_label:
+        description: The label that lets an unmerged pin through, with a warning.
+        type: string
+        default: hold
+      timeout_minutes:
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pins:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Check submodule pins are merged upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HOLD_LABEL: ${{ inputs.hold_label }}
+        run: |
+          set -euo pipefail
+          # Read live, not from the event payload: adding the label starts no run, and a re-run
+          # replays the original payload, so the payload still says the label is absent.
+          held=$(gh pr view "$PR_NUMBER" --json labels | jq --arg l "$HOLD_LABEL" 'any(.labels[]; .name == $l)')
+          unmerged_file=$(mktemp)
+          export unmerged_file
+          git submodule foreach --quiet '
+            url=$(git config --get remote.origin.url)
+            default_branch=$(git ls-remote --symref "$url" HEAD | awk "NR==1{print \$2}" | sed "s#^refs/heads/##")
+            # actions/checkout leaves each submodule shallow, and a plain fetch of the default
+            # branch brings only its tip, not the history between it and $sha1. An ancestry check
+            # against that truncated graph reports every pin "unmerged". The huge depth is the
+            # standard "just unshallow" idiom.
+            git fetch --quiet --depth=2147483647 origin "$default_branch"
+            if git merge-base --is-ancestor "$sha1" "origin/$default_branch"; then
+              echo "$name: $sha1 is merged into $default_branch"
+            else
+              echo "$name: $sha1 is NOT an ancestor of $default_branch" >&2
+              echo "$name" >> "$unmerged_file"
+            fi
+          '
+          if [ -s "$unmerged_file" ]; then
+            unmerged=$(paste -sd, "$unmerged_file")
+            echo "::warning::Submodule pin(s) not merged upstream: $unmerged"
+            if [ "$held" != "true" ]; then
+              echo "::error::Unmerged submodule pin(s) without the '$HOLD_LABEL' label: $unmerged"
+              exit 1
+            fi
+          fi

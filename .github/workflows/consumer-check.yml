@@ -1,0 +1,146 @@
+name: Consumer check
+
+# Compiles a public consumer against the calling PR's head, for a repository the consumer includes
+# as a submodule composite build. A green build in the included repository says nothing about the
+# build that includes it: a changed public signature is otherwise noticed only by the bump PR that
+# arrives after it merged.
+#
+# INFORMATIONAL. The caller gives it a workflow of its own, not named `CI`: bot-review, author-ci-fix
+# and author-conflicts match that name, and this check can go red for a reason that has nothing to do
+# with the diff, or for exactly the reason an intended signature change should. Keep it out of branch
+# protection too. Informational is not the same as no effect on merging, though: bot-review's
+# auto-merge reads the PR's merge state, and a failing or running check here holds it at UNSTABLE.
+#
+# The swap finds its target in the consumer's `.gitmodules`: the submodule whose URL is the calling
+# repository. Nothing here assumes what that directory is called, so a consumer that renames it needs
+# no change on either side. Every other submodule of the consumer is checked out at its own pin.
+#
+# It compiles what `tasks` names and nothing else. The consumer's lint, unit tests and screenshot
+# baselines say little about the change being checked, and made the job take over twenty minutes. The
+# caller should also run it on pushes to its default branch: setup-gradle saves its cache only there,
+# so a job that ran on pull requests alone would start cold every time.
+#
+# A private consumer needs a token this does not take; it is out of scope.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: runs-on, as a JSON array string.
+        type: string
+        default: '["ubuntu-latest"]'
+      consumer:
+        description: owner/name of the public consumer to compile.
+        type: string
+        required: true
+      consumer_ref:
+        description: The consumer's branch to compile.
+        type: string
+        default: main
+      tasks:
+        description: >
+          The Gradle tasks to run in the consumer, space-separated. Compile tasks, as a rule:
+          `:app:compileDebugKotlin :app:compileDebugUnitTestKotlin`.
+        type: string
+        required: true
+      java_version:
+        description: The JDK the consumer builds on, which need not be the caller's own.
+        type: string
+        default: '17'
+      timeout_minutes:
+        type: number
+        default: 45
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-check-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - name: Check out the change
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: candidate
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Submodules are fetched one by one below: the consumer's pin of the calling repository is
+      # exactly what this job replaces, so cloning it would be wasted work.
+      - name: Check out the consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.consumer }}
+          ref: ${{ inputs.consumer_ref }}
+          path: consumer
+
+      - name: Swap the change in for the consumer's pin
+        env:
+          CONSUMER: ${{ inputs.consumer }}
+          SELF: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          modules=consumer/.gitmodules
+          if [ ! -f "$modules" ]; then
+            echo "::error::$CONSUMER has no .gitmodules, so it does not include $SELF as a submodule."
+            exit 1
+          fi
+          # Fixed-string match on the URL's tail, with or without `.git`, over https or ssh.
+          key=$(git config -f "$modules" --get-regexp '^submodule\..*\.url$' \
+            | awk -v repo="$SELF" '{ u = $2; sub(/\.git$/, "", u); n = length(repo)
+                if (substr(u, length(u) - n + 1) == repo && substr(u, length(u) - n, 1) ~ /[\/:]/) print $1 }')
+          if [ "$(printf '%s\n' "$key" | grep -c .)" -ne 1 ]; then
+            echo "::error::Expected exactly one submodule of $SELF in $CONSUMER's .gitmodules, found: ${key:-none}"
+            exit 1
+          fi
+          path=$(git config -f "$modules" --get "${key%.url}.path")
+          echo "$SELF is $CONSUMER's submodule at ${path}/"
+          mapfile -t others < <(git config -f "$modules" --get-regexp '^submodule\..*\.path$' \
+            | awk -v p="$path" '$2 != p { print $2 }')
+          if [ "${#others[@]}" -gt 0 ]; then
+            git -C consumer submodule update --init --depth 1 -- "${others[@]}"
+          fi
+          rm -rf "consumer/${path}"
+          mv candidate "consumer/${path}"
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Compile the consumer against this change
+        working-directory: consumer
+        env:
+          TASKS: ${{ inputs.tasks }}
+        run: |
+          set -euo pipefail
+          read -ra tasks <<<"$TASKS"
+          ./gradlew "${tasks[@]}" --continue
+
+      - name: Report
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ job.status }}
+          CONSUMER: ${{ inputs.consumer }}
+          TASKS: ${{ inputs.tasks }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          {
+            echo "## ${CONSUMER} against this change (${SHA})"
+            echo
+            echo "Informational only. This is not a required check."
+            echo
+            echo "Ran \`${TASKS}\` in the consumer. Its lint, unit tests and screenshot baselines are not run here."
+            echo
+            if [ "${OUTCOME}" = "success" ]; then
+              echo "${CONSUMER} still compiles against this change."
+            else
+              echo "The consumer no longer compiles against this change. Its bump PR will need code changes. Expected for an intentional signature change; say so in the PR body."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

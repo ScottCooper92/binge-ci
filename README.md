@@ -158,10 +158,12 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 ## Layout
 
 ```
-.github/workflows/    The five reusable workflows, and this repo's own CI
+.github/workflows/    The five reusable workflows, the two shared CI ones
+                      (submodule-pins, consumer-check), and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
-                      suppression-files, pr-check-run and
-                      restore-avd-cache / save-avd-cache (all below)
+                      suppression-files, pr-check-run,
+                      restore-avd-cache / save-avd-cache, nightly-report
+                      and actionlint (all below)
 callers/              Worked callers for the public repos
 tools/                The checks actionlint cannot do
 ```
@@ -198,6 +200,21 @@ reusable workflow a local action path resolves against the **caller's** workspac
 these directories do not exist. The tag is immutable rather than `v1`, so a caller pinning
 `@v1.0.N` gets the actions that shipped with it; `uses:` takes no expression, so
 `tools/check-internal-refs.sh` is what keeps the five in step.
+
+## The shared CI steps
+
+Not every repeated step is a bot. Four ordinary CI pieces were pasted between the repositories and
+drifted a word at a time, so they live here too:
+
+| Piece | Kind | What it does |
+| --- | --- | --- |
+| `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
+| `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
+| `nightly-report` | composite action | Keeps one issue open while a scheduled run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. The job needs `issues: write`. |
+| `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
+
+The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks
+them like the bot callers.
 
 ## Its own gate
 

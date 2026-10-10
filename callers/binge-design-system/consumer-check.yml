@@ -1,0 +1,46 @@
+name: Consumer check (binge-seerr)
+
+# Compiles binge-seerr against this PR's head. Informational: a workflow of its own, deliberately
+# not named `CI`, and not a required check. See consumer-check.yml in binge-ci for why.
+#
+# The caller owns the triggers, so the paths are the ones that can change what the consumer
+# compiles. Push to main is there for the Gradle cache, which setup-gradle saves only there.
+#
+# Gradle configures every project of an included build, so `catalog-app` and `catalog-registry` can
+# break the consumer's configuration phase although it compiles neither.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'designsystem/**'
+      - 'designsystem-tv/**'
+      - 'catalog-app/**'
+      - 'catalog-registry/**'
+      - 'libs.versions.toml'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/consumer-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'designsystem/**'
+      - 'designsystem-tv/**'
+      - 'catalog-app/**'
+      - 'catalog-registry/**'
+      - 'libs.versions.toml'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/consumer-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  seerr:
+    uses: ScottCooper92/binge-ci/.github/workflows/consumer-check.yml@v1
+    with:
+      consumer: ScottCooper92/binge-seerr
+      tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
+      java_version: '17'
