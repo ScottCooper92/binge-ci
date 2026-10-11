@@ -66,6 +66,20 @@ class CheckTranslationStalenessTaskTest {
         assertEquals(setOf("app:greeting"), hashes.keys)
     }
 
+    @Test
+    fun `hashes strings in a project at the root directory itself`() {
+        File(root, "src/main/res/values").mkdirs()
+        File(root, "src/main/res/values-es").mkdirs()
+        File(root, "src/main/res/values/strings.xml")
+            .writeText("""<resources><string name="greeting">Hello</string></resources>""")
+        File(root, "src/main/res/values-es/strings.xml")
+            .writeText("""<resources><string name="greeting">Hola</string></resources>""")
+
+        val hashes = computeHashes(root, project.fileTree(root) { include("src/**/strings.xml") }.files)
+
+        assertEquals(setOf(".:greeting"), hashes.keys)
+    }
+
     private fun task(
         name: String,
         rewrite: Boolean,

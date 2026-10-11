@@ -84,7 +84,8 @@ jobs:
           fi
 
   # The shared Gradle gates are code every consumer's build runs, so they get a build of their own:
-  # compile, plugin validation and the tests, each gate against a case it must pass and one it must fail.
+  # compile, plugin validation and the tests: each gate against the cases it must pass and fail,
+  # except detekt, whose wiring is only checked structurally (#117).
   gradle-plugins:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -127,6 +127,7 @@ The Gradle wrapper matches the consumers' too.
 
 ## Its own gate
 
-`./gradlew build` in this directory compiles the plugins, validates them and runs the tests. Every
-gate is tested against a case it must pass and a case it must fail, because a gate that breaks
-usually breaks by passing everything. CI runs it as the `gradle-plugins` job.
+`./gradlew build` in this directory compiles the plugins, validates them and runs the tests. The
+other gates are tested against a case they must pass and a case they must fail, because a gate
+that breaks usually breaks by passing everything. `binge.gates.detekt` is only checked for wiring
+its custom rules into `detektPlugins`; nothing runs detekt yet (#117). CI runs it as the `gradle-plugins` job.

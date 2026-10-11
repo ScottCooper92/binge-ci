@@ -120,7 +120,9 @@ internal fun computeHashes(
 
     files.sortedBy { it.relativeTo(root).invariantSeparatorsPath }.forEach { file ->
         val relativePath = file.relativeTo(root).invariantSeparatorsPath
-        val module = relativePath.substringBefore("/src/")
+        // The leading slash gives a project at the root a delimiter to find; without it substringBefore
+        // returns the whole path, source and translation get different keys, and nothing is hashed.
+        val module = "/$relativePath".substringBefore("/src/").removePrefix("/").ifEmpty { "." }
         when (valuesDirectoryOf(relativePath)) {
             null -> Unit
             "values" -> sources.getOrPut(module) { linkedMapOf() }.putAll(readEntries(file))
