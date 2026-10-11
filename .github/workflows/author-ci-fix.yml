@@ -1423,36 +1423,34 @@ jobs:
 
           # A comment, not part of the body: bot-review's merge gate reads the governed-merged marker
           # from bot comments, and a repair that changed a rules file is a human's merge like any other.
-          # Retried, and fail-closed: when the note carries the governed marker, it is what stops
-          # bot-review merging this PR. A note that cannot be posted withholds the agent label below,
-          # so nothing reviews or merges the PR, and a human picks it up.
-          governed_posted=true
+          # It is posted before any label because that comment is the guard: a PR that carries the agent
+          # label without it could be merged by a bot, so when it cannot be posted the labels stay off.
           if [ -n "$governed_note" ]; then
-            printf '%s\n' "$governed_note" > "${{ runner.temp }}/governed-note.md"
-            governed_posted=false
+            posted=false
             for attempt in 1 2 3; do
-              if gh pr comment "$url" --body-file "${{ runner.temp }}/governed-note.md"; then governed_posted=true; break; fi
-              if [ "$attempt" -lt 3 ]; then sleep $((attempt * 10)); fi
+              if printf '%s\n' "$governed_note" | gh pr comment "$url" --body-file -; then
+                posted=true
+                break
+              fi
+              sleep $((attempt * 5))
             done
-            [ "$governed_posted" = "true" ] || echo "::warning::Could not post the governed-path note on ${url}; withholding the '$AGENT_LABEL' label."
+            if [ "$posted" = "false" ]; then
+              echo "governed_unposted=true" >> "$GITHUB_OUTPUT"
+              echo "::error::Could not post the governed-path note on ${url}; leaving the labels off."
+              exit 1
+            fi
           fi
 
           # One label at a time, after the PR exists: `gh pr create --label` refuses the whole PR when
           # a label is missing from the repository. A missing label is said on the PR, because without
           # the agent label nothing reviews it and without the fix label the merge gate holds it.
           missing=""
-          labels=("$FIX_LABEL")
-          [ "$governed_posted" = "true" ] && labels=("$AGENT_LABEL" "$FIX_LABEL")
-          for label in "${labels[@]}"; do
+          for label in "$AGENT_LABEL" "$FIX_LABEL"; do
             gh pr edit "$url" --add-label "$label" >/dev/null 2>&1 || missing="$missing \`$label\`"
           done
           if [ -n "$missing" ]; then
             printf 'Could not apply%s to this PR - the label does not exist in this repository. Create it and add it here.\n' \
-              "$missing" | gh pr comment "$url" --body-file - || true
-          fi
-          if [ "$governed_posted" != "true" ]; then
-            printf 'This repair merged a change into a path that governs the agents, and the note saying so could not be posted. The `%s` label is withheld, so no bot reviews or merges this PR: it is a human merge.\n' \
-              "$AGENT_LABEL" | gh pr comment "$url" --body-file - || true
+              "$missing" | gh pr comment "$url" --body-file -
           fi
 
       # A run that dies before the push leaves no branch and no marker, so re-running CI on the commit
@@ -1462,7 +1460,7 @@ jobs:
         if: >
           always() && job.status != 'success' &&
           steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true' &&
-          steps.open.outputs.url == ''
+          (steps.open.outputs.url == '' || steps.open.outputs.governed_unposted == 'true')
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -1470,6 +1468,8 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           BRANCH: ${{ steps.decide.outputs.branch }}
           PUSHED: ${{ steps.open.outputs.pushed }}
+          PR_URL: ${{ steps.open.outputs.url }}
+          GOVERNED_UNPOSTED: ${{ steps.open.outputs.governed_unposted }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1477,6 +1477,15 @@ jobs:
           comments=$(gh api "repos/${GH_REPO}/commits/${SHA}/comments?per_page=100" \
             --paginate --jq '.[].body')
           grep -qF "$marker" <<<"$comments" && exit 0
+          if [ "$GOVERNED_UNPOSTED" = "true" ]; then
+            # The PR carries no labels, so no bot reviews or merges it; a human has to take it from here.
+            text=$(printf 'CI on `%s` is red at `%s`. PR %s repairs it but changed a governed path, and the note saying so could not be posted, so the PR was left without its labels. It needs a human: read it, then add the labels yourself ([log](%s)).' \
+              "$DEFAULT_BRANCH" "${SHA:0:7}" "$PR_URL" "$RUN_URL")
+            printf '%s\n%s\n' "$marker" "$text" \
+              | gh api "repos/${GH_REPO}/commits/${SHA}/comments" -F body=@- --silent
+            printf '%s\n' "$text" | gh pr comment "$PR_URL" --body-file - || true
+            exit 0
+          fi
           if [ "$PUSHED" = "true" ]; then
             tail_text=$(printf 'The repair is pushed to `%s` but no PR was opened. Open the PR from that branch, or delete the branch so that re-running CI on this commit can try again.' "$BRANCH")
           else
