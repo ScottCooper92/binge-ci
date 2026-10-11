@@ -679,7 +679,7 @@ jobs:
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
 
       - name: Record that the run failed before the review
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -777,7 +777,7 @@ jobs:
       # run's note can land after this step has already looked and found none.
       - name: Supersede a note about a run that failed before the review
         if: needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -801,7 +801,7 @@ jobs:
       # It never meets the merge gate: the verdict below replaces it before that step runs.
       - name: Show the review as running
         if: steps.pin.outputs.skip != 'true' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
@@ -1162,7 +1162,7 @@ jobs:
       # check is named for the review, and the review is what it now answers for.
       - name: Record the verdict on the PR
         if: always() && steps.submit.outputs.verdict != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
@@ -1181,7 +1181,7 @@ jobs:
       # true of a run that reached one - a review that itself died must leave the note standing.
       - name: Supersede a late note about a run that failed before the review
         if: always() && steps.submit.outputs.verdict != '' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -1628,7 +1628,7 @@ jobs:
         if: >
           always() && steps.pin.outputs.skip != 'true' &&
           steps.submit.outputs.verdict == '' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.16
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.18
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
