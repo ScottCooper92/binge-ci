@@ -1,7 +1,7 @@
 name: CI setup
 description: >
-  Shared CI bootstrap — JDK 17, Gradle, the Android SDK, CI-only heap tuning, and the
-  TMDB credentials that core/network reads from local.properties. Keeps the build
+  Shared CI bootstrap — a JDK (21 unless the caller says otherwise), Gradle, the Android SDK,
+  CI-only heap tuning, and the TMDB credentials that core/network reads from local.properties. Keeps the build
   and screenshot jobs from duplicating the same five steps. Caching and heap tuning
   both adapt to the runner the job landed on, self-hosted or GitHub-hosted.
 
@@ -17,6 +17,12 @@ inputs:
       false for the agent runners (no mounts at all), so it cannot be inferred from "self-hosted".
     required: false
     default: 'true'
+  java-version:
+    description: >
+      The JDK the build runs on. 21 by default; the bytecode target is the consumer's own build
+      setting, so moving the JDK does not move what runs on a device.
+    required: false
+    default: '21'
 
 runs:
   using: composite
@@ -57,11 +63,11 @@ runs:
 
     # SHA-pinned like everything the author workflows run: they execute an agent with Bash,
     # Edit and Write plus a contents:write token, and this action runs inside that boundary.
-    - name: Set up JDK 17
+    - name: Set up the JDK
       uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
       with:
         distribution: temurin
-        java-version: '17'
+        java-version: ${{ inputs.java-version }}
 
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
