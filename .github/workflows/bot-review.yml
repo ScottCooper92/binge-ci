@@ -135,6 +135,13 @@ on:
           than one it inherited.
         type: boolean
         default: false
+      default_branch_fix_label:
+        description: >
+          The label that marks a PR repairing a red default branch. While CI on the default
+          branch is red, a clean review does not merge; a PR carrying this label is exempt, or the
+          repair could never land. The label must exist in the repository to be applied.
+        type: string
+        default: fix-default-branch
       merge_method:
         description: >
           How a clean review merges: squash, merge or rebase. Squash is the default because it
@@ -1210,6 +1217,11 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
+          # The default branch's CI is read with the workflow's own token: the reviewer app's grant
+          # does not cover Actions.
+          ACTIONS_TOKEN: ${{ github.token }}
+          CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
+          FIX_LABEL: ${{ inputs.default_branch_fix_label }}
         run: |
           set -euo pipefail
           # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
@@ -1396,6 +1408,31 @@ jobs:
           newer=$((newer + ${n:-0}))
 
           [ "$newer" = "0" ] || hold "there is human feedback newer than the head commit."
+
+          # Two PRs can each be green against the base they were tested on and still break the
+          # default branch together: one renames a parameter, the other adds a call that uses the old
+          # name. Merging more on top of a red default branch buries that failure under further
+          # changes, so a merge waits until it is green again. The PR that repairs it carries the
+          # fix label and is exempt, or the repair could never land.
+          #
+          # Push runs only: a scheduled run can go red for the environment, which says nothing about
+          # the code on the branch. A cancelled or skipped run says nothing either way, so the newest
+          # run that reached a verdict is the one read. No such run at all reads as green - a
+          # repository whose CI has never run on a push has nothing to protect yet.
+          #
+          # Unreadable holds, as every other guard here fails closed. The hold is keyed to the red
+          # commit, so a held PR gets one note per breakage rather than one per push.
+          if ! echo ",$labels," | grep -qF ",${FIX_LABEL},"; then
+            runs=$(GH_TOKEN="$ACTIONS_TOKEN" gh api \
+              "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20") \
+              || hold "CI on \`$DEFAULT_BRANCH\` could not be read, so I cannot tell whether it is green. Re-running CI here retries the merge." default-branch-unreadable
+            IFS='|' read -r red_conclusion red_sha red_url < <(jq -r '
+              [.workflow_runs[] | select(.conclusion | IN("cancelled", "skipped", "neutral") | not)]
+              | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs")
+            if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
+              hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again. Re-running CI here then retries the merge; a PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"
+            fi
+          fi
 
           # mergeStateStatus reads UNKNOWN for a few seconds after any other merge, and UNSTABLE for
           # a few seconds after a check run changes - this run's own verdict check among them. Read

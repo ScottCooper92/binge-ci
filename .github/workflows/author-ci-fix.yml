@@ -111,6 +111,19 @@ on:
       log_tail_bytes:
         type: number
         default: 200000
+      ci_workflow_file:
+        description: >
+          Filename of the CI workflow, for reading whether CI on the default branch is red.
+          The workflow_run trigger itself matches CI by NAME and lives in the caller.
+        type: string
+        default: ci.yml
+      default_branch_fix_label:
+        description: >
+          The label that marks a PR repairing a red default branch. While CI on the default
+          branch is red, every PR branch inherits the failure, so this job leaves PR branches alone;
+          a PR carrying this label is the exception.
+        type: string
+        default: fix-default-branch
       max_attempts_per_push:
         description: >
           How many repairs this bot may push on top of one human push before it stops. The
@@ -226,6 +239,12 @@ jobs:
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
+          # The default branch's CI is read with the workflow's own token: the author app's grant
+          # does not cover Actions.
+          ACTIONS_TOKEN: ${{ github.token }}
+          CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          FIX_LABEL: ${{ inputs.default_branch_fix_label }}
         run: |
           set -euo pipefail
           skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
@@ -245,6 +264,37 @@ jobs:
           labels=$(gh pr view "$num" --json labels --jq '[.labels[].name] | join(",")')
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$num has no '$AGENT_LABEL' label - leaving it alone."
+
+          # While CI on the default branch is red, every PR branch cut from it inherits the same
+          # failure. One repair belongs on the default branch; a bot on each PR attempting its own is
+          # N fixes to one bug, each spending that PR's attempt. So PR branches are left alone until
+          # the default branch is green, except the PR that repairs it.
+          #
+          # Push runs only, and the newest that reached a verdict, as bot-review's merge gate reads
+          # it. Unreadable falls through to the ordinary repair: this is a saving, not a safety guard.
+          # Before `number` is written, so a skip here spends no attempt and the reporters stay quiet.
+          if ! echo ",$labels," | grep -qF ",${FIX_LABEL},"; then
+            if runs=$(GH_TOKEN="$ACTIONS_TOKEN" gh api \
+                "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20"); then
+              IFS='|' read -r red_conclusion red_sha red_url < <(jq -r '
+                [.workflow_runs[] | select(.conclusion | IN("cancelled", "skipped", "neutral") | not)]
+                | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs")
+              if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
+                # One note per breakage, not one per CI run on the PR.
+                red_marker="<!-- ci-fix-default-red:${red_sha} -->"
+                comments=$(gh api "repos/${GH_REPO}/issues/${num}/comments?per_page=100" \
+                  --paginate --jq '.[].body')
+                if ! grep -qF "$red_marker" <<<"$comments"; then
+                  printf '%s\nCI failed on `%s`, but CI on `%s` is red too, at `%s` ([run](%s)), and every branch cut from it inherits that failure. The repair belongs on `%s`, so I am not attempting one here. Once `%s` is green, re-running CI on this PR gets the automatic fix back.\n' \
+                    "$red_marker" "${SHA:0:7}" "$DEFAULT_BRANCH" "${red_sha:0:7}" "$red_url" \
+                    "$DEFAULT_BRANCH" "$DEFAULT_BRANCH" | gh pr comment "$num" --body-file -
+                fi
+                skip "CI on $DEFAULT_BRANCH is red at ${red_sha:0:7} - leaving PR #$num alone."
+              fi
+            else
+              echo "::warning::Could not read CI on $DEFAULT_BRANCH; repairing as usual."
+            fi
+          fi
 
           # Written HERE, the moment opt-in is established, because that is what the failure
           # reporters below read it as. Written at the end of the step instead, it meant "this
