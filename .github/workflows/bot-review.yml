@@ -1444,10 +1444,14 @@ jobs:
               # The mark is what "Release merges held for a red default branch" sweeps when the
               # default branch goes green again. Best-effort: without the label in the repository
               # the PR still waits, and a CI re-run still retries it.
-              if ! gh pr edit "$PR" --add-label "$HELD_LABEL" >/dev/null 2>&1; then
+              # The note says what will actually happen, which turns on whether the mark landed.
+              if gh pr edit "$PR" --add-label "$HELD_LABEL" >/dev/null 2>&1; then
+                then_what="and merges then without re-running anything here"
+              else
                 echo "::warning::Could not add '$HELD_LABEL' to PR #$PR - it will wait for a CI re-run instead."
+                then_what="and once it is, re-running CI on this PR retries the merge"
               fi
-              hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again, and merges then without re-running anything here; a PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"
+              hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again, $then_what. A PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"
             fi
           fi
 
@@ -1745,6 +1749,7 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           HELD_LABEL: ${{ inputs.held_label }}
           MERGE_METHOD: ${{ inputs.merge_method }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           case "$MERGE_METHOD" in
@@ -1753,7 +1758,7 @@ jobs:
           esac
           [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
 
-          held=$(gh pr list --state open --label "$HELD_LABEL" --json number --jq '.[].number')
+          held=$(gh pr list --state open --label "$HELD_LABEL" --limit 1000 --json number --jq '.[].number')
           [ -n "$held" ] || { echo "No PR carries '$HELD_LABEL'."; exit 0; }
 
           # The run that woke this is green, but a later push may already have gone red. The newest
@@ -1765,7 +1770,8 @@ jobs:
           [ "$newest" = "success" ] || { echo "CI on $DEFAULT_BRANCH is $newest again - leaving the held PRs held."; exit 0; }
 
           unmark() { gh pr edit "$1" --remove-label "$HELD_LABEL" >/dev/null 2>&1 || true; }
-          # One note per reason, deduped on a marker, as the merge gate's `hold` does.
+          # One note per reason, deduped on a marker, as the merge gate's `hold` does. A reason that can
+          # recur on a later head carries the head in its key, so a second round is not swallowed.
           note() {
             marker="<!-- held-release:$(printf '%s' "$3" | sha1sum | cut -c1-12) -->"
             existing=$(gh api "repos/${GH_REPO}/issues/$1/comments?per_page=100" --paginate --jq '.[].body' || true)
@@ -1814,7 +1820,7 @@ jobs:
               | jq -s '[group_by(.login)[] | (sort_by(.at) | last)
                         | select(.state == "CHANGES_REQUESTED")] | length')
             if [ "$human_blocks" != "0" ]; then
-              unmark "$pr"; note "$pr" "a human review requests changes." changes-requested; return 0
+              unmark "$pr"; note "$pr" "a human review requests changes." "changes-requested-${head}"; return 0
             fi
 
             # Human feedback left since the approval, by the merge gate's own rules: reviews and
@@ -1862,7 +1868,7 @@ jobs:
               | awk '{ s += $1 } END { print s + 0 }')
             newer=$((newer + ${n:-0}))
             if [ "$newer" != "0" ]; then
-              unmark "$pr"; note "$pr" "there is human feedback newer than the approval." newer-feedback; return 0
+              unmark "$pr"; note "$pr" "there is human feedback newer than the approval." "newer-feedback-${head}"; return 0
             fi
 
             # CLEAN covers the PR's own checks still passing and no conflict. It reads UNKNOWN for a
@@ -1875,10 +1881,20 @@ jobs:
               sleep 10
             done
             if [ "$state" != "CLEAN" ]; then
-              # A conflict is resolved by a push, which brings a new head and a new review. Anything
-              # else may clear on its own, so the mark stays for the next green run.
-              if [ "$state" = "DIRTY" ]; then unmark "$pr"; fi
               echo "#$pr: merge state is $state - not merging now."
+              case "$state" in
+                # Both are cleared by a push, which brings a new head, a CI run and a review that
+                # decide the merge from scratch - so the mark has nothing left to do.
+                DIRTY)
+                  unmark "$pr"
+                  note "$pr" "it now conflicts with \`$DEFAULT_BRANCH\`. Resolving that brings a new head, and its own CI run and review decide the merge." "merge-state-DIRTY-${head}" ;;
+                BEHIND)
+                  unmark "$pr"
+                  note "$pr" "it is behind \`$DEFAULT_BRANCH\`, and this repository requires an up-to-date branch to merge. Updating the branch brings a new head, and its own CI run and review decide the merge." "merge-state-BEHIND-${head}" ;;
+                # Anything else may clear by itself, so the mark stays for the next green run.
+                *)
+                  note "$pr" "its merge state is \`$state\`. It stays marked and is tried again on the next green run of \`$DEFAULT_BRANCH\`; re-running CI on this PR also retries the merge." "merge-state-${state}-${head}" ;;
+              esac
               return 0
             fi
 
@@ -1901,5 +1917,7 @@ jobs:
             set -e
             if [ "$rc" != "0" ]; then
               echo "::warning::Could not release PR #$pr this time; it stays marked for the next green run."
+              head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || echo unknown)
+              note "$pr" "the merge after \`$DEFAULT_BRANCH\` went green failed ([log]($RUN_URL)). It stays marked and is tried again on the next green run of \`$DEFAULT_BRANCH\`; re-running CI on this PR also retries the merge." "release-failed-${head}"
             fi
           done
