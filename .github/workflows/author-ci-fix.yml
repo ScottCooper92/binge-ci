@@ -1184,9 +1184,14 @@ jobs:
           if [ ! -s "$TRIMMED" ]; then
             echo "::error::Could not read the failing job log for run ${RUN_ID} after 5 attempts."
             sed 's/^/gh: /' "${LOG}.err" || true
-            GH_TOKEN="$APP_TOKEN" gh api "repos/${GH_REPO}/commits/${SHA}/comments" \
-              -f body="CI failed on \`${SHA:0:7}\` but I couldn't read the job log, so there is nothing to repair from. No attempt was recorded - re-running CI on this commit will try again." \
-              --silent
+            nolog="<!-- ci-fix-default-nolog:${SHA} -->"
+            seen=$(GH_TOKEN="$APP_TOKEN" gh api "repos/${GH_REPO}/commits/${SHA}/comments?per_page=100" \
+              --paginate --jq '.[].body')
+            if ! grep -qF "$nolog" <<<"$seen"; then
+              GH_TOKEN="$APP_TOKEN" gh api "repos/${GH_REPO}/commits/${SHA}/comments" \
+                -f body="${nolog}"$'\n'"CI failed on \`${SHA:0:7}\` but I couldn't read the job log, so there is nothing to repair from. No attempt was recorded - re-running CI on this commit will try again." \
+                --silent
+            fi
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -1372,6 +1377,7 @@ jobs:
           fi
           commit_stat=$(git diff --stat "$SHA" HEAD | head -40)
           git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
           body=$(
             printf '%s\n' "$attempted"
@@ -1388,7 +1394,8 @@ jobs:
           # A comment, not part of the body: bot-review's merge gate reads the governed-merged marker
           # from bot comments, and a repair that changed a rules file is a human's merge like any other.
           if [ -n "$governed_note" ]; then
-            printf '%s\n' "$governed_note" | gh pr comment "$url" --body-file -
+            printf '%s\n' "$governed_note" | gh pr comment "$url" --body-file - \
+              || echo "::warning::Could not post the governed-path note on ${url}."
           fi
 
           # One label at a time, after the PR exists: `gh pr create --label` refuses the whole PR when
@@ -1403,8 +1410,9 @@ jobs:
               "$missing" | gh pr comment "$url" --body-file -
           fi
 
-      # A run that dies before "Open the repair PR" reports leaves no PR and no marker, so the commit's
-      # attempt is unspent and re-running CI on it tries again. This says which happened.
+      # A run that dies before the push leaves no branch and no marker, so re-running CI on the commit
+      # tries again. One that dies after the push leaves the branch, which the next run's guard counts
+      # as the attempt: a re-run would skip, so the human is told to open the PR or delete the branch.
       - name: Report a failed repair
         if: >
           always() && job.status != 'success' &&
@@ -1415,9 +1423,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          BRANCH: ${{ steps.decide.outputs.branch }}
+          PUSHED: ${{ steps.open.outputs.pushed }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          printf '%s\nCI on `%s` is red at `%s`, and the automatic repair did not complete - the workflow run itself failed ([log](%s)). No attempt was recorded, so re-running CI on this commit will try again.\n' \
-            "<!-- ci-fix-default-failed:${SHA} -->" "$DEFAULT_BRANCH" "${SHA:0:7}" "$RUN_URL" \
+          marker="<!-- ci-fix-default-failed:${SHA} -->"
+          comments=$(gh api "repos/${GH_REPO}/commits/${SHA}/comments?per_page=100" \
+            --paginate --jq '.[].body')
+          grep -qF "$marker" <<<"$comments" && exit 0
+          if [ "$PUSHED" = "true" ]; then
+            tail_text=$(printf 'The repair is pushed to `%s` but no PR was opened. Open the PR from that branch, or delete the branch so that re-running CI on this commit can try again.' "$BRANCH")
+          else
+            tail_text='No attempt was recorded, so re-running CI on this commit will try again.'
+          fi
+          printf '%s\nCI on `%s` is red at `%s`, and the automatic repair did not complete - the workflow run itself failed ([log](%s)). %s\n' \
+            "$marker" "$DEFAULT_BRANCH" "${SHA:0:7}" "$RUN_URL" "$tail_text" \
             | gh api "repos/${GH_REPO}/commits/${SHA}/comments" -F body=@- --silent
