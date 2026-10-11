@@ -1470,6 +1470,7 @@ jobs:
       # container, and it does not carry the files the run produced. This path runs only on a red
       # default branch and nothing in CI exercises it, so a failed run's log, note and working tree
       # are worth more here, not less. Only on a run that went wrong.
+      # Best-effort: -e is off so one missing file cannot lose the rest.
       - name: Collect diagnostics
         if: >
           always() && job.status != 'success' &&
