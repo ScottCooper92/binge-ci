@@ -129,7 +129,9 @@ for caller in "${callers[@]}"; do
   esac
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
   secrets=$(keys "$reusable" '^    secrets:' '^permissions:' '      ' '[A-Z_]')
-  used=$(keys    "$caller"   '^    with:'    '^    secrets:' '      ' '[a-z_]')
+  # The `with:` block ends at the next key at its own depth or shallower, not only at
+  # `secrets:`, so a second job in the caller (a scheduled report, say) is not read as inputs.
+  used=$(keys    "$caller"   '^    with:'    '^ ? ? ? ?[a-z]' '      ' '[a-z_]')
   # Inputs with `required: true` and no default. Omitting one is a run-time failure in
   # the consuming repo, which is the same class of silence the undeclared-input check
   # exists for, arrived at from the other side.
