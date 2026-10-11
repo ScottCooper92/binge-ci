@@ -169,6 +169,7 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
                       restore-avd-cache / save-avd-cache, nightly-report
                       and actionlint (all below)
 callers/              Worked callers for the public repos
+gradle-plugins/       The shared Gradle gates, as an included build (below)
 tools/                The checks actionlint cannot do
 ```
 
@@ -220,10 +221,22 @@ drifted a word at a time, so they live here too:
 The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks
 them like the bot callers.
 
+## The shared Gradle gates
+
+Some build checks were copied between the consumers too: translation staleness, the detekt wiring,
+detekt baseline staleness and the tv-material separation check. They live in `gradle-plugins/` as
+Gradle plugins, each wired into `check`.
+
+`gradle-plugins/` is a Gradle included build. A consumer already pins binge-ci by commit, so it
+includes the build from that checkout and applies the plugins by id. That adds no repository and no
+new pin. Each consumer adopts them in a PR of its own. [gradle-plugins/README.md](gradle-plugins/README.md)
+lists the plugins and how to configure them.
+
 ## Its own gate
 
-This repo ships no product code, so CI checks the two things that can be wrong with it:
-the workflows (actionlint + shellcheck) and whether the callers still fit them
+This repo ships no product code beyond the Gradle gates, so CI checks the things that can be
+wrong with it: the workflows (actionlint + shellcheck), the Gradle gates (their own `./gradlew build`)
+and whether the callers still fit them
 (`tools/check-callers.sh` — actionlint cannot see across a remote workflow reference, so
 a misspelled input, a permission level the caller does not hold, or a quoted scalar passed
 to a `number` or `boolean` input would otherwise fail at run time in the consuming repo).
