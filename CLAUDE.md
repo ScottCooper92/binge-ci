@@ -10,7 +10,8 @@ author bots), the composite actions they need, the checks actionlint cannot do, 
 callers for the public consumers. Read `README.md` for the shape of it and
 `MIGRATION.md` for how the consumers got here.
 
-Nothing here builds. It is shell and YAML, and it runs inside every repository that calls it.
+Most of it is shell and YAML, and it runs inside every repository that calls it. The one thing that builds is
+`gradle-plugins/`: the shared Gradle gates, an included build the consumers apply by path.
 
 ## The one rule everything else serves
 
@@ -56,9 +57,12 @@ pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order
 
 CI runs actionlint (with shellcheck) over the workflows and callers, shellcheck over the
 scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh` and
-`tools/check-internal-refs.sh`. There is no build, no test suite beyond those, and no
-coverage floor, so do not look for one and do not report a finding as though one had caught
-it. `tag-check.yml` runs on pushes to `main` and on tags, not on PRs.
+`tools/check-internal-refs.sh`. It also runs `./gradlew build` in `gradle-plugins/`, which
+compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
+not look for one and do not report a finding as though one had caught it.
+
+A change to a gate's plugin id, extension or task names is a change in every consumer that
+applies it, the same as a workflow's signature. `tag-check.yml` runs on pushes to `main` and on tags, not on PRs.
 
 **Never silence a gate instead of fixing it.** Do not weaken a step in `ci.yml` or a check
 in `tools/`, and do not touch a `uses:` pin to make `check-internal-refs.sh` pass - that is
