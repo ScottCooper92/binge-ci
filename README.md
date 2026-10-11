@@ -21,8 +21,8 @@ they are worth keeping in one place.
 
 | Workflow | What it does |
 | --- | --- |
-| `bot-review.yml` | Reviews a PR once CI goes green, and optionally merges it by the caller's `merge_method`. |
-| `author-ci-fix.yml` | Makes one repair attempt per commit when CI goes red, at most two per human push, then stops rather than churning. |
+| `bot-review.yml` | Reviews a PR once CI goes green, and optionally merges it by the caller's `merge_method`. While CI on the default branch is red it does not merge, except a PR carrying the `fix-default-branch` label; a held PR is marked `merge-held` and merged when the default branch goes green. |
+| `author-ci-fix.yml` | Makes one repair attempt per commit when CI goes red, at most two per human push, then stops rather than churning. While CI on the default branch is red it leaves PR branches alone, since they all inherit that failure. |
 | `author-comments.yml` | Answers review feedback — top-level comments, inline notes and reviews. |
 | `author-conflicts.yml` | Finds PRs that conflict when the base moves, and resolves them. |
 | `author-retarget.yml` | Catches a stacked PR up to its base so it starts moving again. |
@@ -31,6 +31,10 @@ All but the last run an agent. `author-retarget.yml` is plain git.
 
 A PR opts in with the **`agent` label**, which is maintainers-only in every repo: applying
 it grants code execution with that repository's secrets in scope.
+
+A PR that repairs a red default branch also carries **`fix-default-branch`**, and a merge held
+while it is red carries **`merge-held`**. Each caller's repository needs both labels to exist;
+their names are inputs.
 
 ## Using them
 
