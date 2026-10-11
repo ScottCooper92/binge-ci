@@ -1427,7 +1427,7 @@ jobs:
               "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20") \
               || hold "CI on \`$DEFAULT_BRANCH\` could not be read, so I cannot tell whether it is green. Re-running CI here retries the merge." default-branch-unreadable
             IFS='|' read -r red_conclusion red_sha red_url < <(jq -r '
-              [.workflow_runs[] | select(.conclusion | IN("cancelled", "skipped", "neutral") | not)]
+              [.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped" and .conclusion != "neutral")]
               | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs")
             if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
               hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again. Re-running CI here then retries the merge; a PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"

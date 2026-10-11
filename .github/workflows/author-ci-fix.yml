@@ -277,17 +277,21 @@ jobs:
             if runs=$(GH_TOKEN="$ACTIONS_TOKEN" gh api \
                 "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20"); then
               IFS='|' read -r red_conclusion red_sha red_url < <(jq -r '
-                [.workflow_runs[] | select(.conclusion | IN("cancelled", "skipped", "neutral") | not)]
+                [.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped" and .conclusion != "neutral")]
                 | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs")
               if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
                 # One note per breakage, not one per CI run on the PR.
                 red_marker="<!-- ci-fix-default-red:${red_sha} -->"
+                # Best-effort, like the read above: this runs before `number` is written, so a failure
+                # here would silence every reporter below. A note lost to a 5xx costs nothing worse
+                # than a second note next time.
                 comments=$(gh api "repos/${GH_REPO}/issues/${num}/comments?per_page=100" \
-                  --paginate --jq '.[].body')
+                  --paginate --jq '.[].body') || comments=""
                 if ! grep -qF "$red_marker" <<<"$comments"; then
                   printf '%s\nCI failed on `%s`, but CI on `%s` is red too, at `%s` ([run](%s)), and every branch cut from it inherits that failure. The repair belongs on `%s`, so I am not attempting one here. Once `%s` is green, re-running CI on this PR gets the automatic fix back.\n' \
                     "$red_marker" "${SHA:0:7}" "$DEFAULT_BRANCH" "${red_sha:0:7}" "$red_url" \
-                    "$DEFAULT_BRANCH" "$DEFAULT_BRANCH" | gh pr comment "$num" --body-file -
+                    "$DEFAULT_BRANCH" "$DEFAULT_BRANCH" | gh pr comment "$num" --body-file - \
+                    || echo "::warning::Could not post the red-default-branch note on PR #$num."
                 fi
                 skip "CI on $DEFAULT_BRANCH is red at ${red_sha:0:7} - leaving PR #$num alone."
               fi
