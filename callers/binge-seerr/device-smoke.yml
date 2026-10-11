@@ -1,0 +1,71 @@
+name: Device smoke (minified)
+
+# The emulator lane: the release keep rules proven across a real Binder, on the minified build. The
+# answer is a function of the committed tree plus the toolchain, so the paths that can change it
+# trigger it, with a weekly run behind them for what changes with time rather than with a diff: the
+# hosted runner image and the system image. See device-smoke.yml in binge-ci for the lane itself.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or SHA to run against
+        required: false
+        default: main
+  push:
+    branches: [main]
+    paths:
+      - 'app/build.gradle.kts'
+      - 'app/src/androidTest/**'
+      - 'app/src/main/keepRules/**'
+      - 'app/src/main/kotlin/io/github/scottcooper92/binge/seerr/service/**'
+      - 'app/src/main/kotlin/io/github/scottcooper92/binge/seerr/seerr/**'
+      - 'binge-companions'
+      - 'libs.versions.toml'
+      - '.github/workflows/device-smoke.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+
+# The weekly run has its own group. Sharing main's would let a push cancel it, and a cancelled
+# scheduled run reports as a failure.
+concurrency:
+  group: device-smoke-${{ github.event_name == 'schedule' && 'weekly' || inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+# actions: write is for the AVD cache save, which deletes the previous entry first. The called
+# workflow cannot hold more than this.
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  smoke:
+    name: Handshake and status over Binder on a minified build
+    uses: ScottCooper92/binge-ci/.github/workflows/device-smoke.yml@v1
+    with:
+      ref: ${{ inputs.ref }}
+      submodules: 'true'
+      device: smokeAtdApi34
+      api_level: '34'
+      system_image_source: aosp-atd
+      default_branch: main
+      tasks: ':app:smokeAtdApi34DebugAndroidTest -PminifyDebug'
+      # The JDK its other CI builds on today; it moves with the rest of its pins.
+      java_version: '17'
+
+  # A red weekly run has no PR or push to carry it. One issue stays open while it is red.
+  scheduled-report:
+    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: ScottCooper92/binge-ci/.github/actions/nightly-report@v1
+        with:
+          result: ${{ needs.smoke.result }}
+          title: Weekly device smoke is failing on main
+          note: >-
+            Nothing was pushed to cause this, so suspect the environment first: a runner image or
+            Android SDK update, the aosp-atd system image, or /dev/kvm on the hosted runner. The
+            device-smoke-results artifact is kept for seven days.
