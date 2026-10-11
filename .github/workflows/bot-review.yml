@@ -1921,3 +1921,33 @@ jobs:
               note "$pr" "the merge after \`$DEFAULT_BRANCH\` went green failed ([log]($RUN_URL)). It stays marked and is tried again on the next green run of \`$DEFAULT_BRANCH\`; re-running CI on this PR also retries the merge." "release-failed-${head}"
             fi
           done
+
+      # always(), not failure(), so a sweep cancelled by timeout-minutes is caught. The per-PR loop
+      # reports its own errors; this covers everything outside it: the token mint, the held-PR list
+      # and the runs read. Skipped when the mint failed, since no other token can comment. Deduped
+      # on the PR head, as the sweep's own notes are. Runs with -e off and guards each command, so one PR's
+      # failed post does not stop the notes on the rest.
+      - name: Report a sweep that did not finish
+        if: always() && job.status != 'success' && steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          HELD_LABEL: ${{ inputs.held_label }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          held=$(gh pr list --state open --label "$HELD_LABEL" --limit 1000 --json number,headRefOid \
+                   --jq '.[] | "\(.number) \(.headRefOid)"') \
+            || { echo "::warning::Could not list the PRs marked '$HELD_LABEL'; none was told the sweep failed."; exit 0; }
+          while read -r pr head; do
+            [ -n "$pr" ] || continue
+            marker="<!-- held-release:$(printf '%s' "sweep-failed-${head}" | sha1sum | cut -c1-12) -->"
+            existing=$(gh api "repos/${GH_REPO}/issues/${pr}/comments?per_page=100" --paginate --jq '.[].body') || existing=""
+            if ! grep -qF "$marker" <<<"$existing"; then
+              printf '%s\nThe sweep that merges PRs held for a red `%s` did not finish ([log](%s)). This PR stays marked and is tried again on the next green run of `%s`; re-running CI on this PR also retries the merge.\n' \
+                "$marker" "$DEFAULT_BRANCH" "$RUN_URL" "$DEFAULT_BRANCH" \
+                | gh pr comment "$pr" --body-file - \
+                || echo "::warning::Could not post the sweep failure on PR #$pr."
+            fi
+          done <<<"$held"
