@@ -1466,6 +1466,39 @@ jobs:
               "$missing" | gh pr comment "$url" --body-file -
           fi
 
+      # As in the job above: the step log is the only trace of an agent run that outlives its
+      # container, and it does not carry the files the run produced. This path runs only on a red
+      # default branch and nothing in CI exercises it, so a failed run's log, note and working tree
+      # are worth more here, not less. Only on a run that went wrong.
+      # Best-effort: -e is off so one missing file cannot lose the rest.
+      - name: Collect diagnostics
+        if: >
+          always() && job.status != 'success' &&
+          steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true'
+        env:
+          OUT: ${{ runner.temp }}/agent-diagnostics
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT"
+          [ -f "${{ runner.temp }}/ci-failure.trimmed.log" ] \
+            && cp "${{ runner.temp }}/ci-failure.trimmed.log" "$OUT/" || true
+          [ -f "${{ runner.temp }}/note.md" ] && cp "${{ runner.temp }}/note.md" "$OUT/" || true
+          git status --porcelain > "$OUT/git-status.txt" 2>&1 || true
+          { git diff; git diff --cached; } > "$OUT/working-tree.diff" 2>&1 || true
+          git log --oneline -5 > "$OUT/git-log.txt" 2>&1 || true
+          ls -la "$OUT" || true
+
+      - name: Upload diagnostics
+        if: >
+          always() && job.status != 'success' &&
+          steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-diagnostics-ci-fix-default-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}/agent-diagnostics
+          retention-days: 14
+          if-no-files-found: ignore
+
       # A run that dies before the push leaves no branch and no marker, so re-running CI on the commit
       # tries again. One that dies after the push leaves the branch, which the next run's guard counts
       # as the attempt: a re-run would skip, so the human is told to open the PR or delete the branch.
