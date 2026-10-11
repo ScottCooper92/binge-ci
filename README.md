@@ -214,7 +214,7 @@ drifted a word at a time, so they live here too:
 | --- | --- | --- |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
-| `nightly-report` | composite action | Keeps one issue open while a scheduled run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. The job needs `issues: write`. |
+| `nightly-report` | composite action | Keeps one issue open while a scheduled run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it. The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
 The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks

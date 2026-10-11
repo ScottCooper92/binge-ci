@@ -29,6 +29,17 @@ inputs:
       usually the environment.
     required: false
     default: Nothing was pushed to cause this, so suspect the environment first.
+  labels:
+    description: >
+      Comma-separated labels for a new issue. When set, the open issue is looked up among issues
+      carrying them, so a title shared with an unlabelled issue is not mistaken for this one. The
+      labels must already exist in the repository.
+    required: false
+    default: ''
+  assignees:
+    description: Comma-separated logins to assign a new issue to.
+    required: false
+    default: ''
   github-token:
     description: A token with `issues: write`.
     required: false
@@ -42,14 +53,20 @@ runs:
         RESULT: ${{ inputs.result }}
         TITLE: ${{ inputs.title }}
         NOTE: ${{ inputs.note }}
+        LABELS: ${{ inputs.labels }}
+        ASSIGNEES: ${{ inputs.assignees }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const { RESULT, TITLE, NOTE } = process.env;
+          const { RESULT, TITLE, NOTE, LABELS, ASSIGNEES } = process.env;
+          const list = (value) => value.split(',').map((s) => s.trim()).filter(Boolean);
+          const labels = list(LABELS);
+          const assignees = list(ASSIGNEES);
           const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
           const { owner, repo } = context.repo;
           const open = (await github.paginate(github.rest.issues.listForRepo, {
             owner, repo, state: 'open', per_page: 100,
+            ...(labels.length ? { labels: labels.join(',') } : {}),
           })).find((i) => !i.pull_request && i.title === TITLE);
 
           if (RESULT === 'success') {
@@ -71,7 +88,7 @@ runs:
             return;
           }
           await github.rest.issues.create({
-            owner, repo, title: TITLE,
+            owner, repo, title: TITLE, labels, assignees,
             body: [
               `The scheduled run failed (${RESULT}): ${runUrl}`,
               '',
