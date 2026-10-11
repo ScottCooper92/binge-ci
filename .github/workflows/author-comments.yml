@@ -91,7 +91,7 @@ on:
         description: >
           The JDK for `toolchain: jvm`. Ignored for `android`, where ci-setup owns it.
         type: string
-        default: '17'
+        default: '21'
       setup_buf:
         type: boolean
         default: false
