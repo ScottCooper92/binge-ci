@@ -162,8 +162,9 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 ## Layout
 
 ```
-.github/workflows/    The five reusable workflows, the two shared CI ones
-                      (submodule-pins, consumer-check), and this repo's own CI
+.github/workflows/    The five reusable workflows, the three shared CI ones
+                      (submodule-pins, consumer-check, device-smoke), and this
+                      repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report
@@ -207,18 +208,41 @@ these directories do not exist. The tag is immutable rather than `v1`, so a call
 
 ## The shared CI steps
 
-Not every repeated step is a bot. Four ordinary CI pieces were pasted between the repositories and
+Not every repeated step is a bot. Five ordinary CI pieces were pasted between the repositories and
 drifted a word at a time, so they live here too:
 
 | Piece | Kind | What it does |
 | --- | --- | --- |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
+| `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `nightly-report` | composite action | Keeps one issue open while a scheduled run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
 The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks
 them like the bot callers.
+
+### The emulator lane
+
+`device-smoke.yml` is the whole lane, so a consumer writes only its triggers and one `uses:`. It
+holds what each consumer learned separately:
+
+- **KVM.** A hosted Linux runner has it, but `/dev/kvm` is root-owned. A udev rule makes it
+  writable, and a check fails the job in seconds if it is still not, rather than at the timeout.
+- **Disk.** A stock runner has too little free for an AVD's userdata partition. The lane deletes
+  preinstalled toolchains first, on a GitHub-hosted runner only, and logs `df` either side.
+- **A readable boot failure.** The device setup task runs on its own, at `--info --stacktrace`
+  with `showKernelLogging`. Without both switches a failed boot reports an empty error list.
+- **The AVD cache**, through `restore-avd-cache` and `save-avd-cache`. It saves only on a push to
+  the default branch, and only once setup succeeded.
+- **A run that ran nothing.** A managed-device run whose instrumentation crashes before it finds a
+  test still reports success, so the lane fails when `results_dir` records no test case.
+  `expected_tests` names tests that must each appear.
+- **The artifact**, uploaded on success too.
+
+The caller keeps the triggers, the concurrency group and any report on a red scheduled run, which
+`nightly-report` makes from a job of its own. It does not use `ci-setup`: that action writes a
+consumer's own credentials file, which an emulator lane has no reason to need.
 
 ## Its own gate
 

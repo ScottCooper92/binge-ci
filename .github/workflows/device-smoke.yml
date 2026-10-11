@@ -1,0 +1,279 @@
+name: Device smoke
+
+# An emulator lane: a Gradle Managed Device run of instrumentation tests on a hosted runner. Every
+# step here is one a consumer learned the hard way, and each was copied between them until it lived
+# here.
+#
+# It runs on a GitHub-hosted Linux runner by default. Those have had KVM since April 2024, but
+# /dev/kvm is root-owned, so a udev rule has to make it writable before an emulator can use it. A
+# stock runner also has too little free disk for an AVD's userdata partition once the SDK and the
+# build's dependencies have landed, so the lane deletes preinstalled toolchains first.
+#
+# The device setup task runs on its own, at --info. An emulator that fails to boot otherwise reports
+# an empty error list: AGP collects only the emulator lines containing `ERROR` into the message and
+# logs the rest at info, which Gradle drops by default. showKernelLogging is the other half: without
+# it the emulator prints nothing to collect. Both are needed, and neither alone fills the message.
+# The test run gets showKernelLogging but not --info, so a full build is not logged at info level.
+#
+# The AVD, its system image and the emulator package are cached through restore-avd-cache and
+# save-avd-cache. The save runs only on a push to the default branch, so a dispatch or a scheduled
+# run reads the canonical entry without overwriting it. It is gated on the setup step rather than
+# the job: the AVD is valid once setup succeeds, whatever the tests then do.
+#
+# The caller owns the triggers and the concurrency group. A scheduled run should have a group of its
+# own, or a push cancels it mid-run and the cancellation reads as a failure. The caller also owns
+# any report on a red scheduled run: the nightly-report action does that from a job of its own.
+#
+# The caller must hold `actions: write`. save-avd-cache deletes the previous entry with
+# `gh cache delete` before saving, and without the permission that delete fails quietly and the
+# cache freezes at its first content.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >
+          runs-on, as a JSON array string. The runner needs KVM. A self-hosted one also needs the
+          runner user able to write /dev/kvm, since the udev step may have no sudo there.
+        type: string
+        default: '["ubuntu-latest"]'
+      timeout_minutes:
+        description: A first run downloads and boots the system image, and the build may be a full R8 pass.
+        type: number
+        default: 90
+      ref:
+        description: The branch or SHA to test. Empty tests the commit that triggered the run.
+        type: string
+        default: ''
+      submodules:
+        description: Passed to actions/checkout. A composite build that includes a submodule needs `true`.
+        type: string
+        default: 'false'
+      java_version:
+        description: The JDK the build runs on.
+        type: string
+        default: '21'
+      module:
+        description: The Gradle project that declares the managed device.
+        type: string
+        default: ':app'
+      device:
+        description: The managed device's name, as declared in the build (e.g. pixelApi34).
+        type: string
+        required: true
+      api_level:
+        description: The device's apiLevel. Part of the AVD cache key.
+        type: string
+        required: true
+      system_image_source:
+        description: The device's systemImageSource (e.g. aosp-atd). Part of the AVD cache key.
+        type: string
+        required: true
+      default_branch:
+        description: The caller's default branch. Part of the cache key, and the only branch whose pushes save it.
+        type: string
+        required: true
+      tasks:
+        description: >
+          The test run: Gradle tasks and flags, space-separated, e.g.
+          `:app:pixelApi34DebugAndroidTest -PminifyDebug`. The GPU and kernel-logging switches are
+          added here. A value cannot contain a space.
+        type: string
+        required: true
+      gpu:
+        description: The emulator's GPU mode. A hosted runner has no GPU to hand it.
+        type: string
+        default: swiftshader_indirect
+      free_disk:
+        description: >
+          Delete preinstalled toolchains to make room for the AVD. Only ever acts on a GitHub-hosted
+          runner, whatever this says.
+        type: boolean
+        default: true
+      results_dir:
+        description: >
+          Where the device run writes its JUnit XML. The lane fails if no test case is recorded
+          there, because a managed-device run whose instrumentation crashes before it finds a test
+          still reports success. Empty skips the check.
+        type: string
+        default: app/build/outputs/androidTest-results
+      expected_tests:
+        description: >
+          Test method names, space-separated, that must each appear in the results. Use it for the
+          tests the lane exists to run, so one quietly filtered out is a failure.
+        type: string
+        default: ''
+      artifact_name:
+        type: string
+        default: device-smoke-results
+      artifact_paths:
+        description: Newline-separated paths to upload, on success too.
+        type: string
+        default: |
+          app/build/reports/androidTests/**
+          app/build/outputs/androidTest-results/**
+      retention_days:
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  smoke:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      # github.sha rather than github.ref as the fallback: on a push or a schedule the ref
+      # re-resolves the branch and could test a newer commit than the one that triggered the run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          submodules: ${{ inputs.submodules }}
+
+      # The emulator's own preflight reports the disk requirement as met, then fails on the
+      # partition it cannot create, so a shortfall shows up only as a failed boot. The numbers
+      # either side are what make the next shortfall quick to diagnose. Hosted runners only:
+      # these are a hosted image's paths, and deleting them anywhere else is not this lane's call.
+      - name: Free disk space for the emulator
+        if: ${{ inputs.free_disk }}
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]; then
+            echo "Not a GitHub-hosted runner, so nothing is deleted."
+            exit 0
+          fi
+          df -h /
+          sudo rm -rf "${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk" /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /usr/share/swift /usr/local/share/powershell
+          docker system prune -af || true
+          df -h /
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      # Accepts the licences the system image download needs, and installs the SDK on a runner
+      # that has none. packages drops the action's default `tools`, which Google no longer serves.
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          log-accepted-android-sdk-licenses: false
+          packages: platform-tools
+
+      # continue-on-error because a self-hosted runner may have no sudo. Failing here would hide
+      # the check below, which says what is actually wrong.
+      - name: Enable KVM for the runner user
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Without KVM an x86_64 emulator refuses to start or falls back to software emulation, which
+      # looks like a hang. Fail in seconds rather than at the timeout.
+      - name: Check the runner can virtualise
+        run: |
+          set -euo pipefail
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::No /dev/kvm on this runner, so no emulator can run here."
+            exit 1
+          fi
+          if [ ! -w /dev/kvm ]; then
+            echo "::error::/dev/kvm exists but is not writable by $(id -un). Add the runner user to the 'kvm' group."
+            exit 1
+          fi
+          echo "/dev/kvm present and writable."
+
+      # A miss is not a failure: setup below falls back to the full download and boot.
+      - name: Restore AVD cache
+        uses: ScottCooper92/binge-ci/.github/actions/restore-avd-cache@v1.0.16
+        with:
+          device: ${{ inputs.device }}
+          api-level: ${{ inputs.api_level }}
+          system-image-source: ${{ inputs.system_image_source }}
+          default-branch: ${{ inputs.default_branch }}
+
+      # --stacktrace costs nothing on a success, and a setup failure otherwise ends in a bare
+      # message that Gradle suggests --stacktrace for without applying it.
+      - name: Create the managed-device snapshot
+        id: setup-device
+        env:
+          TASK: ${{ inputs.module }}:${{ inputs.device }}Setup
+          GPU: ${{ inputs.gpu }}
+        run: |
+          set -euo pipefail
+          ./gradlew "$TASK" \
+            "-Pandroid.testoptions.manageddevices.emulator.gpu=$GPU" \
+            -Pandroid.experimental.testOptions.managedDevices.emulator.showKernelLogging=true \
+            --info \
+            --stacktrace
+
+      - name: Run the tests on the device
+        id: tests
+        env:
+          TASKS: ${{ inputs.tasks }}
+          GPU: ${{ inputs.gpu }}
+        run: |
+          set -euo pipefail
+          read -ra tasks <<<"$TASKS"
+          ./gradlew "${tasks[@]}" \
+            "-Pandroid.testoptions.manageddevices.emulator.gpu=$GPU" \
+            -Pandroid.experimental.testOptions.managedDevices.emulator.showKernelLogging=true
+
+      - name: Require the tests to have run
+        if: ${{ inputs.results_dir != '' }}
+        env:
+          RESULTS_DIR: ${{ inputs.results_dir }}
+          EXPECTED: ${{ inputs.expected_tests }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          files=("$RESULTS_DIR"/**/TEST-*.xml)
+          # Read once into a variable: under pipefail, `grep | grep -q` can fail on the first
+          # grep's SIGPIPE and report a test missing that is there.
+          cases=""
+          if [ ${#files[@]} -gt 0 ]; then
+            cases=$(grep -h '<testcase' "${files[@]}" || true)
+          fi
+          if [ -z "$cases" ]; then
+            echo "::error::No test case recorded under $RESULTS_DIR, so no test ran. The instrumentation probably crashed before it found one."
+            exit 1
+          fi
+          read -ra expected <<<"$EXPECTED"
+          missing=0
+          for t in "${expected[@]}"; do
+            if ! grep -qF "name=\"$t\"" <<<"$cases"; then
+              echo "::error::Expected test $t is missing from the results."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      # A custom `if:` gets an implicit success() unless it names a status function, so without
+      # !cancelled() a failing test step would skip the save and the cache would never fill.
+      - name: Save AVD cache
+        if: >-
+          ${{ !cancelled() && steps.setup-device.outcome == 'success' &&
+          github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.default_branch) }}
+        uses: ScottCooper92/binge-ci/.github/actions/save-avd-cache@v1.0.16
+        with:
+          device: ${{ inputs.device }}
+          api-level: ${{ inputs.api_level }}
+          system-image-source: ${{ inputs.system_image_source }}
+          default-branch: ${{ inputs.default_branch }}
+          github-token: ${{ github.token }}
+
+      # On success too: a managed-device run that installs nothing and runs no tests still exits
+      # 0, and the report is the only place that shows.
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.artifact_paths }}
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.retention_days }}
