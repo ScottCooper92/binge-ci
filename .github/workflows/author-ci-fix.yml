@@ -838,6 +838,7 @@ jobs:
             A red PR told it is green is worse than a red PR told nobody looked.
 
       - name: Commit and push
+        id: commit
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
@@ -879,6 +880,10 @@ jobs:
             governed_merged=true
             governed_note=$(grep -vF -- "$governed_marker" <<<"$governed_note" || true)
           fi
+          # Written before the push, for "Report a failed attempt": if the push lands and the final
+          # comment carrying the marker then fails to post, the reporter is what puts the marker on
+          # the PR. Without it a governed change sits on the branch with nothing holding it for a human.
+          echo "governed_merged=$governed_merged" >> "$GITHUB_OUTPUT"
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
@@ -987,7 +992,15 @@ jobs:
               printf '\n%s\n_The governed-path change above is in `%s`, now on this branch._\n' \
                 "$governed_marker" "$(git rev-parse --short HEAD)"
             fi
-          } | gh pr comment "$PR" --body-file -
+          } > "${{ runner.temp }}/final-comment.md"
+          # Retried, because when it carries the governed marker this comment is what stops bot-review
+          # merging a change to a rules file. A post that still fails exits non-zero, and "Report a
+          # failed attempt" posts the marker in its place.
+          for attempt in 1 2 3; do
+            if gh pr comment "$PR" --body-file "${{ runner.temp }}/final-comment.md"; then break; fi
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
 
       # The step log is the only trace of an agent run that outlives its container, and it does
       # not carry the files the run produced - here the CI log it triaged from and the repair it
@@ -1045,10 +1058,27 @@ jobs:
           PR: ${{ steps.pr.outputs.number }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GOVERNED_MERGED: ${{ steps.commit.outputs.governed_merged }}
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
           set -euo pipefail
           comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
             --paginate --jq '.[].body')
+
+          # Ahead of every early exit below. A governed path the agent changed was merged into the
+          # repair, and the head has moved since the commit being repaired - so the push landed, and
+          # the final comment that carries the marker may not have. The marker holds the PR for a
+          # human; without it bot-review can merge a change to a rules file. Posting it when it is
+          # already there costs nothing, and the head-moved test errs towards holding: a push by
+          # anyone else also moves the head, and then a human merges a PR a bot could have.
+          if [ "$GOVERNED_MERGED" = "true" ] && [ -n "$GOVERNED_SCRIPT" ]; then
+            governed_marker=$(bash "$GOVERNED_SCRIPT" --merged-marker)
+            head_now=$(gh pr view "$PR" --json headRefOid --jq .headRefOid || echo "")
+            if ! grep -qF -- "$governed_marker" <<<"$comments" && [ -n "$head_now" ] && [ "$head_now" != "$SHA" ]; then
+              printf '%s\n_The fix for `%s` merged a change into a path that governs the agents, and the run failed before saying so. This PR is a human merge._\n' \
+                "$governed_marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file -
+            fi
+          fi
 
           # "Commit and push" reports the branch-moved outcome itself and then exits 1, landing here.
           grep -qF "<!-- ci-fix-unpushed:${SHA} -->" <<<"$comments" && exit 0
@@ -1393,9 +1423,22 @@ jobs:
 
           # A comment, not part of the body: bot-review's merge gate reads the governed-merged marker
           # from bot comments, and a repair that changed a rules file is a human's merge like any other.
+          # It is posted before any label because that comment is the guard: a PR that carries the agent
+          # label without it could be merged by a bot, so when it cannot be posted the labels stay off.
           if [ -n "$governed_note" ]; then
-            printf '%s\n' "$governed_note" | gh pr comment "$url" --body-file - \
-              || echo "::warning::Could not post the governed-path note on ${url}."
+            posted=false
+            for attempt in 1 2 3; do
+              if printf '%s\n' "$governed_note" | gh pr comment "$url" --body-file -; then
+                posted=true
+                break
+              fi
+              sleep $((attempt * 5))
+            done
+            if [ "$posted" = "false" ]; then
+              echo "governed_unposted=true" >> "$GITHUB_OUTPUT"
+              echo "::error::Could not post the governed-path note on ${url}; leaving the labels off."
+              exit 1
+            fi
           fi
 
           # One label at a time, after the PR exists: `gh pr create --label` refuses the whole PR when
@@ -1449,7 +1492,7 @@ jobs:
         if: >
           always() && job.status != 'success' &&
           steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true' &&
-          steps.open.outputs.url == ''
+          (steps.open.outputs.url == '' || steps.open.outputs.governed_unposted == 'true')
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -1457,6 +1500,8 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           BRANCH: ${{ steps.decide.outputs.branch }}
           PUSHED: ${{ steps.open.outputs.pushed }}
+          PR_URL: ${{ steps.open.outputs.url }}
+          GOVERNED_UNPOSTED: ${{ steps.open.outputs.governed_unposted }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1464,6 +1509,15 @@ jobs:
           comments=$(gh api "repos/${GH_REPO}/commits/${SHA}/comments?per_page=100" \
             --paginate --jq '.[].body')
           grep -qF "$marker" <<<"$comments" && exit 0
+          if [ "$GOVERNED_UNPOSTED" = "true" ]; then
+            # The PR carries no labels, so no bot reviews or merges it; a human has to take it from here.
+            text=$(printf 'CI on `%s` is red at `%s`. PR %s repairs it but changed a governed path, and the note saying so could not be posted, so the PR was left without its labels. It needs a human: read it, then add the labels yourself ([log](%s)).' \
+              "$DEFAULT_BRANCH" "${SHA:0:7}" "$PR_URL" "$RUN_URL")
+            printf '%s\n%s\n' "$marker" "$text" \
+              | gh api "repos/${GH_REPO}/commits/${SHA}/comments" -F body=@- --silent
+            printf '%s\n' "$text" | gh pr comment "$PR_URL" --body-file - || true
+            exit 0
+          fi
           if [ "$PUSHED" = "true" ]; then
             tail_text=$(printf 'The repair is pushed to `%s` but no PR was opened. Open the PR from that branch, or delete the branch so that re-running CI on this commit can try again.' "$BRANCH")
           else
