@@ -90,7 +90,7 @@ on:
         description: >
           The JDK for `toolchain: jvm`. Ignored for `android`, where ci-setup owns it.
         type: string
-        default: '17'
+        default: '21'
       setup_buf:
         description: Install the buf CLI, for a repo whose gate includes buf lint/breaking.
         type: boolean

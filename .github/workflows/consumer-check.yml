@@ -45,7 +45,7 @@ on:
       java_version:
         description: The JDK the consumer builds on, which need not be the caller's own.
         type: string
-        default: '17'
+        default: '21'
       timeout_minutes:
         type: number
         default: 45
