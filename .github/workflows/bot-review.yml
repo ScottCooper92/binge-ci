@@ -142,6 +142,14 @@ on:
           repair could never land. The label must exist in the repository to be applied.
         type: string
         default: fix-default-branch
+      held_label:
+        description: >
+          The label a clean review's PR carries while its merge waits for a red default branch to
+          go green. When a push run of CI on the default branch then succeeds, every open PR
+          carrying it is merged without re-running its CI, provided nothing about it changed. The
+          label must exist in the repository; without it a held PR waits for a CI re-run instead.
+        type: string
+        default: merge-held
       merge_method:
         description: >
           How a clean review merges: squash, merge or rebase. Squash is the default because it
@@ -1222,6 +1230,7 @@ jobs:
           ACTIONS_TOKEN: ${{ github.token }}
           CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
           FIX_LABEL: ${{ inputs.default_branch_fix_label }}
+          HELD_LABEL: ${{ inputs.held_label }}
         run: |
           set -euo pipefail
           # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
@@ -1432,7 +1441,13 @@ jobs:
               || hold "CI on \`$DEFAULT_BRANCH\` could not be read, so I cannot tell whether it is green. Re-running CI here retries the merge." default-branch-unreadable
             IFS='|' read -r red_conclusion red_sha red_url <<<"$latest"
             if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
-              hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again. Re-running CI here then retries the merge; a PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"
+              # The mark is what "Release merges held for a red default branch" sweeps when the
+              # default branch goes green again. Best-effort: without the label in the repository
+              # the PR still waits, and a CI re-run still retries it.
+              if ! gh pr edit "$PR" --add-label "$HELD_LABEL" >/dev/null 2>&1; then
+                echo "::warning::Could not add '$HELD_LABEL' to PR #$PR - it will wait for a CI re-run instead."
+              fi
+              hold "CI on \`$DEFAULT_BRANCH\` is red at \`${red_sha:0:7}\` ([run]($red_url)). Merging on top of it would bury that failure, so this waits until \`$DEFAULT_BRANCH\` is green again, and merges then without re-running anything here; a PR that repairs \`$DEFAULT_BRANCH\` carries the \`$FIX_LABEL\` label and is not held." "default-branch-red-${red_sha}"
             fi
           fi
 
@@ -1683,3 +1698,208 @@ jobs:
               || (job.status != 'success' && 'This run did not finish and posted no review; the log says where it stopped.'
               || 'The run finished without posting a review - the PR was not open, or there was nothing to review.') }}
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  # The other half of the default-branch gate in "Merge if the bar is met". A clean review held
+  # because the default branch was red is marked with `held_label`; when a push run of CI on the
+  # default branch then succeeds, this merges each marked PR in that same run.
+  #
+  # Without re-running its CI, deliberately: the PR was green against an older base, and that is
+  # what the gate accepts - it only declines to pile changes on a branch already known to be broken.
+  # Nor by starting another run: a dispatch or re-run made with the workflow's own token starts
+  # nothing, and the reviewer app holds no Actions permission. Merging here needs neither.
+  #
+  # The default-branch gate is the LAST guard before the merge-state poll, so a PR that reached it
+  # had passed every guard above it at that moment. What is re-checked here is what can have changed
+  # since: the labels, the head, the reviews and comments, the governed-path marker and the merge
+  # state. A PR that no longer qualifies loses the mark, with a note when a human has something to
+  # do; one held only by a transient merge state keeps it and is tried again on the next green run.
+  release-held:
+    if: >
+      inputs.auto_merge &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == inputs.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 15
+    # Two green runs close together would otherwise sweep the same PRs at once.
+    concurrency:
+      group: bot-review-release-held-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Mint reviewer app token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Release merges held for a red default branch
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          ACTIONS_TOKEN: ${{ github.token }}
+          CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          HELD_LABEL: ${{ inputs.held_label }}
+          MERGE_METHOD: ${{ inputs.merge_method }}
+        run: |
+          set -euo pipefail
+          case "$MERGE_METHOD" in
+            squash|merge|rebase) ;;
+            *) echo "::error::merge_method must be squash, merge or rebase - got '$MERGE_METHOD'."; exit 1 ;;
+          esac
+          [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
+
+          held=$(gh pr list --state open --label "$HELD_LABEL" --json number --jq '.[].number')
+          [ -n "$held" ] || { echo "No PR carries '$HELD_LABEL'."; exit 0; }
+
+          # The run that woke this is green, but a later push may already have gone red. The newest
+          # push run that reached a verdict decides, read the way the merge gate reads it.
+          runs=$(GH_TOKEN="$ACTIONS_TOKEN" gh api \
+            "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20")
+          newest=$(jq -r '[.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped" and .conclusion != "neutral")]
+                          | first // {} | .conclusion // ""' <<<"$runs")
+          [ "$newest" = "success" ] || { echo "CI on $DEFAULT_BRANCH is $newest again - leaving the held PRs held."; exit 0; }
+
+          unmark() { gh pr edit "$1" --remove-label "$HELD_LABEL" >/dev/null 2>&1 || true; }
+          # One note per reason, deduped on a marker, as the merge gate's `hold` does.
+          note() {
+            marker="<!-- held-release:$(printf '%s' "$3" | sha1sum | cut -c1-12) -->"
+            existing=$(gh api "repos/${GH_REPO}/issues/$1/comments?per_page=100" --paginate --jq '.[].body' || true)
+            if ! grep -qF "$marker" <<<"$existing"; then
+              printf '%s\nNot merging after all: %s\n' "$marker" "$2" | gh pr comment "$1" --body-file - || true
+            fi
+          }
+
+          # Each PR runs in a subshell under its own `set -e`, so one PR's API error ends that PR's
+          # checks and the sweep moves on, rather than stranding every PR after it. NOT called as
+          # `release || …`: bash ignores `set -e` inside anything run as part of an `||` list, and an
+          # API error would then fall through the checks below on empty values.
+          release() {
+            set -euo pipefail
+            pr=$1
+            view=$(gh pr view "$pr" --json headRefOid,baseRefName,labels,title)
+            head=$(jq -r .headRefOid <<<"$view")
+            labels=$(jq -r '[.labels[].name] | join(",")' <<<"$view")
+
+            echo ",$labels," | grep -qF ",${AGENT_LABEL}," || { echo "#$pr: no '$AGENT_LABEL' label."; unmark "$pr"; return 0; }
+            echo ",$labels," | grep -q ",hold," && { echo "#$pr: carries hold."; unmark "$pr"; return 0; }
+            [ "$(jq -r .baseRefName <<<"$view")" = "$DEFAULT_BRANCH" ] \
+              || { echo "#$pr: no longer targets $DEFAULT_BRANCH."; unmark "$pr"; return 0; }
+
+            # The approval must be this workflow's own, and for the head as it is now. A head that
+            # moved has its own CI run and review coming, which decide it from scratch.
+            approval=$(gh api "repos/${GH_REPO}/pulls/${pr}/reviews?per_page=100" --paginate --jq '.[]' \
+              | jq -s --arg pin "Reviewed \`${head:0:7}\`" --arg login "${APP_SLUG}[bot]" \
+                  '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))]
+                   | sort_by(.submitted_at) | last // {}')
+            [ "$(jq -r '.state // ""' <<<"$approval")" = "APPROVED" ] \
+              || { echo "#$pr: no approval of the current head ${head:0:7}."; unmark "$pr"; return 0; }
+            approved_at=$(jq -r .submitted_at <<<"$approval")
+
+            bot_comments=$(gh api "repos/${GH_REPO}/issues/${pr}/comments?per_page=100" \
+              --paginate --jq '.[] | select(.user.type == "Bot") | .body')
+            if grep -q -- '<!-- governed-merged -->' <<<"$bot_comments"; then
+              unmark "$pr"
+              note "$pr" "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
+              return 0
+            fi
+
+            human_blocks=$(gh api "repos/${GH_REPO}/pulls/${pr}/reviews?per_page=100" --paginate \
+              --jq '.[] | select(.user.type != "Bot") | select(.state != "COMMENTED")
+                        | {login: .user.login, state: .state, at: .submitted_at}' \
+              | jq -s '[group_by(.login)[] | (sort_by(.at) | last)
+                        | select(.state == "CHANGES_REQUESTED")] | length')
+            if [ "$human_blocks" != "0" ]; then
+              unmark "$pr"; note "$pr" "a human review requests changes." changes-requested; return 0
+            fi
+
+            # Human feedback left since the approval, by the merge gate's own rules: reviews and
+            # top-level comments (with the same two exemptions), and unresolved inline threads.
+            newer=0
+            for endpoint in "pulls/${pr}/reviews" "issues/${pr}/comments"; do
+              answered='select(true)'
+              if [ "$endpoint" = "issues/${pr}/comments" ]; then
+                answered='select(
+                            (((.body // "") | test("<!--\\s*answered\\s*-->"))
+                              or ((.body // "") | test("Generated by \\[Claude Code\\]")))
+                            and ((.author_association // "") | IN("OWNER", "MEMBER", "COLLABORATOR"))
+                            | not)'
+              fi
+              n=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
+                --jq "[.[]
+                       | select(.user.type != \"Bot\")
+                       | select(.state != \"APPROVED\")
+                       | select((.submitted_at // .created_at) > \"$approved_at\")
+                       | $answered] | length" \
+                | awk '{ s += $1 } END { print s + 0 }')
+              newer=$((newer + ${n:-0}))
+            done
+            n=$(gh api graphql --paginate \
+              -f owner="${GH_REPO%%/*}" -f name="${GH_REPO##*/}" -F pr="$pr" \
+              -f query='
+                query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $pr) {
+                      reviewThreads(first: 100, after: $endCursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          isResolved
+                          comments(first: 100) { nodes { createdAt author { __typename } } }
+                        }
+                      }
+                    }
+                  }
+                }' \
+              --jq "[.data.repository.pullRequest.reviewThreads.nodes[]
+                     | select(.isResolved | not)
+                     | .comments.nodes[]
+                     | select((.author.__typename // \"\") != \"Bot\")
+                     | select(.createdAt > \"$approved_at\")] | length" \
+              | awk '{ s += $1 } END { print s + 0 }')
+            newer=$((newer + ${n:-0}))
+            if [ "$newer" != "0" ]; then
+              unmark "$pr"; note "$pr" "there is human feedback newer than the approval." newer-feedback; return 0
+            fi
+
+            # CLEAN covers the PR's own checks still passing and no conflict. It reads UNKNOWN for a
+            # few seconds after another merge - including one this sweep just made - so it is polled.
+            state=""
+            for _ in 1 2 3 4 5 6; do
+              state=$(gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus)
+              [ "$state" = "CLEAN" ] && break
+              [ "$state" = "UNKNOWN" ] || [ "$state" = "UNSTABLE" ] || break
+              sleep 10
+            done
+            if [ "$state" != "CLEAN" ]; then
+              # A conflict is resolved by a push, which brings a new head and a new review. Anything
+              # else may clear on its own, so the mark stays for the next green run.
+              if [ "$state" = "DIRTY" ]; then unmark "$pr"; fi
+              echo "#$pr: merge state is $state - not merging now."
+              return 0
+            fi
+
+            title=$(jq -r .title <<<"$view")
+            message=()
+            if [ "$MERGE_METHOD" != "rebase" ]; then
+              message=(--subject "$title (#$pr)" --body "$(gh pr view "$pr" --json body --jq .body)")
+            fi
+            # --match-head-commit: the approval is for this head and no other, and the author bots
+            # push unattended.
+            gh pr merge "$pr" "--${MERGE_METHOD}" --match-head-commit "$head" "${message[@]}"
+            unmark "$pr"
+            echo "Merged #$pr, held while $DEFAULT_BRANCH was red."
+          }
+
+          for pr in $held; do
+            set +e
+            ( release "$pr" )
+            rc=$?
+            set -e
+            if [ "$rc" != "0" ]; then
+              echo "::warning::Could not release PR #$pr this time; it stays marked for the next green run."
+            fi
+          done
