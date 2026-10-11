@@ -838,6 +838,7 @@ jobs:
             A red PR told it is green is worse than a red PR told nobody looked.
 
       - name: Commit and push
+        id: commit
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
@@ -879,6 +880,13 @@ jobs:
             governed_merged=true
             governed_note=$(grep -vF -- "$governed_marker" <<<"$governed_note" || true)
           fi
+          # Written before the push, for "Report a failed attempt": if the push lands and the final
+          # comment carrying the marker then fails to post, the reporter is what puts the marker on
+          # the PR. Without it a governed change sits on the branch with nothing holding it for a human.
+          # Also written to a file, because a step that timeout-minutes cancels may not publish its
+          # outputs, and a cancel during the comment retries below is one of the cases this covers.
+          echo "governed_merged=$governed_merged" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$governed_merged" > "${{ runner.temp }}/governed-merged"
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
@@ -987,7 +995,15 @@ jobs:
               printf '\n%s\n_The governed-path change above is in `%s`, now on this branch._\n' \
                 "$governed_marker" "$(git rev-parse --short HEAD)"
             fi
-          } | gh pr comment "$PR" --body-file -
+          } > "${{ runner.temp }}/final-comment.md"
+          # Retried, because when it carries the governed marker this comment is what stops bot-review
+          # merging a change to a rules file. A post that still fails exits non-zero, and "Report a
+          # failed attempt" posts the marker in its place.
+          for attempt in 1 2 3; do
+            if gh pr comment "$PR" --body-file "${{ runner.temp }}/final-comment.md"; then break; fi
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
 
       # The step log is the only trace of an agent run that outlives its container, and it does
       # not carry the files the run produced - here the CI log it triaged from and the repair it
@@ -1045,13 +1061,41 @@ jobs:
           PR: ${{ steps.pr.outputs.number }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GOVERNED_MERGED: ${{ steps.commit.outputs.governed_merged }}
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
           set -euo pipefail
           comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
             --paginate --jq '.[].body')
 
+          head_now=$(gh pr view "$PR" --json headRefOid --jq .headRefOid || echo "")
+          unpushed="<!-- ci-fix-unpushed:${SHA} -->"
+
+          # Ahead of every early exit below. A governed path the agent changed was merged into the
+          # repair, and the head has moved since the commit being repaired - so the push landed, and
+          # the final comment that carries the marker may not have. The marker holds the PR for a
+          # human; without it bot-review can merge a change to a rules file. Posting it when it is
+          # already there costs nothing, and the head-moved test errs towards holding: a push by
+          # anyone else also moves the head, and then a human merges a PR a bot could have. The one
+          # case it can tell apart is the unpushed comment, which says the push did not land.
+          # A failed post only warns, so the failure report below still goes out.
+          governed_merged="$GOVERNED_MERGED"
+          if [ -z "$governed_merged" ]; then
+            governed_merged=$(cat "${{ runner.temp }}/governed-merged" 2>/dev/null || echo "")
+          fi
+          if [ "$governed_merged" = "true" ] && [ -n "$GOVERNED_SCRIPT" ] \
+            && [ -n "$head_now" ] && [ "$head_now" != "$SHA" ] \
+            && ! grep -qF -- "$unpushed" <<<"$comments"; then
+            governed_marker=$(bash "$GOVERNED_SCRIPT" --merged-marker)
+            if ! grep -qF -- "$governed_marker" <<<"$comments"; then
+              printf '%s\n_The fix for `%s` merged a change into a path that governs the agents, and the run failed before saying so. This PR is a human merge._\n' \
+                "$governed_marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file - \
+                || echo "::warning::Could not post the governed-path marker on PR #${PR}."
+            fi
+          fi
+
           # "Commit and push" reports the branch-moved outcome itself and then exits 1, landing here.
-          grep -qF "<!-- ci-fix-unpushed:${SHA} -->" <<<"$comments" && exit 0
+          grep -qF "$unpushed" <<<"$comments" && exit 0
 
           marker="<!-- ci-fix-failed:${SHA} -->"
           grep -qF "$marker" <<<"$comments" && exit 0
@@ -1064,7 +1108,6 @@ jobs:
           # The head is read as well, because the marker rides on the outcome comment: a `gh pr
           # comment` that fails after a successful push leaves a fix on the branch and no record of
           # it, and "nothing was attempted" would send the author after a commit they already have.
-          head_now=$(gh pr view "$PR" --json headRefOid --jq .headRefOid || echo "")
           if grep -qF "<!-- ci-fix-attempted:${SHA} -->" <<<"$comments"; then
             spent="That spent this commit's one attempt; push again for another."
           elif [ -n "$head_now" ] && [ "$head_now" != "$SHA" ]; then
@@ -1422,6 +1465,39 @@ jobs:
             printf 'Could not apply%s to this PR - the label does not exist in this repository. Create it and add it here.\n' \
               "$missing" | gh pr comment "$url" --body-file -
           fi
+
+      # As in the job above: the step log is the only trace of an agent run that outlives its
+      # container, and it does not carry the files the run produced. This path runs only on a red
+      # default branch and nothing in CI exercises it, so a failed run's log, note and working tree
+      # are worth more here, not less. Only on a run that went wrong.
+      # Best-effort: -e is off so one missing file cannot lose the rest.
+      - name: Collect diagnostics
+        if: >
+          always() && job.status != 'success' &&
+          steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true'
+        env:
+          OUT: ${{ runner.temp }}/agent-diagnostics
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT"
+          [ -f "${{ runner.temp }}/ci-failure.trimmed.log" ] \
+            && cp "${{ runner.temp }}/ci-failure.trimmed.log" "$OUT/" || true
+          [ -f "${{ runner.temp }}/note.md" ] && cp "${{ runner.temp }}/note.md" "$OUT/" || true
+          git status --porcelain > "$OUT/git-status.txt" 2>&1 || true
+          { git diff; git diff --cached; } > "$OUT/working-tree.diff" 2>&1 || true
+          git log --oneline -5 > "$OUT/git-log.txt" 2>&1 || true
+          ls -la "$OUT" || true
+
+      - name: Upload diagnostics
+        if: >
+          always() && job.status != 'success' &&
+          steps.decide.outputs.branch != '' && steps.log.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-diagnostics-ci-fix-default-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}/agent-diagnostics
+          retention-days: 14
+          if-no-files-found: ignore
 
       # A run that dies before the push leaves no branch and no marker, so re-running CI on the commit
       # tries again. One that dies after the push leaves the branch, which the next run's guard counts
