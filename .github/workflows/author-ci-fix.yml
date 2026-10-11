@@ -278,7 +278,7 @@ jobs:
                 "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=${DEFAULT_BRANCH}&event=push&status=completed&per_page=20"); then
               IFS='|' read -r red_conclusion red_sha red_url < <(jq -r '
                 [.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped" and .conclusion != "neutral")]
-                | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs")
+                | first // {} | "\(.conclusion // "")|\(.head_sha // "")|\(.html_url // "")"' <<<"$runs") || true
               if [ -n "$red_conclusion" ] && [ "$red_conclusion" != "success" ]; then
                 # One note per breakage, not one per CI run on the PR.
                 red_marker="<!-- ci-fix-default-red:${red_sha} -->"
