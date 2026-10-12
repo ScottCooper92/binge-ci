@@ -48,7 +48,11 @@ abstract class CheckTranslationStalenessTask : DefaultTask() {
 
     @TaskAction
     fun check() {
-        val expected = computeHashes(repoRoot.get().asFile, stringFiles.files)
+        val root = repoRoot.get().asFile
+        // Both tasks refuse, not only the check: an update that stamped nothing would write a file
+        // the check then agrees with on every later rewording.
+        misconfiguration(root, stringFiles.files)?.let { throw GradleException(it) }
+        val expected = computeHashes(root, stringFiles.files)
         val file = hashFile.get().asFile
 
         if (rewrite.getOrElse(false)) {
@@ -106,6 +110,50 @@ internal fun parseHashes(text: String): Map<String, String> =
         }.toMap()
 
 /**
+ * Why the files cannot be what the gate was meant to read, or null when they can. A gate that reads
+ * nothing passes everything, which is how a misconfigured one goes unnoticed: globs that match no
+ * strings file, or a [TranslationStalenessExtension.rootDirectory] that gives a module's translations
+ * a different key from its source, both produce an empty hash file the check then agrees with.
+ *
+ * Deliberately not "no hashes": a project whose locales translate none of the source strings yet is
+ * configured correctly, and must pass. So this asks about the files, not the result.
+ */
+internal fun misconfiguration(
+    root: File,
+    files: Collection<File>,
+): String? {
+    val sources = mutableSetOf<String>()
+    val translations = mutableSetOf<String>()
+    files.forEach { file ->
+        val relativePath = file.relativeTo(root).invariantSeparatorsPath
+        when (valuesDirectoryOf(relativePath)) {
+            null -> Unit
+            "values" -> sources += moduleOf(relativePath)
+            else -> translations += moduleOf(relativePath)
+        }
+    }
+    if (sources.isEmpty() && translations.isEmpty()) {
+        return "The translation-staleness gate found no strings file under a res/values directory, so it has " +
+            "nothing to check. Set translationStaleness.includes, excludes or rootDirectory so they match the " +
+            "project's strings.xml files."
+    }
+    val orphaned = translations - sources
+    if (orphaned.isNotEmpty()) {
+        return "The translation-staleness gate found translations with no source strings file under the same " +
+            "module key, so it cannot hash them: ${orphaned.sorted().joinToString(", ")}. Check that " +
+            "translationStaleness.includes reaches the res/values/strings.xml beside each translation, and that " +
+            "rootDirectory is where the module paths start."
+    }
+    return null
+}
+
+/** The module a strings file belongs to: its path up to `/src/`, or `.` for a project at the root. */
+private fun moduleOf(relativePath: String): String =
+    // The leading slash gives a project at the root a delimiter to find; without it substringBefore
+    // returns the whole path, source and translation get different keys, and nothing is hashed.
+    "/$relativePath".substringBefore("/src/").removePrefix("/").ifEmpty { "." }
+
+/**
  * Hashes the source value of every entry that at least one locale translates, keyed by module so
  * a failure names something a person can open. A module can contribute several `values/strings.xml`
  * (one per source set), so entries are merged, and the files are sorted first so the result depends
@@ -120,9 +168,7 @@ internal fun computeHashes(
 
     files.sortedBy { it.relativeTo(root).invariantSeparatorsPath }.forEach { file ->
         val relativePath = file.relativeTo(root).invariantSeparatorsPath
-        // The leading slash gives a project at the root a delimiter to find; without it substringBefore
-        // returns the whole path, source and translation get different keys, and nothing is hashed.
-        val module = "/$relativePath".substringBefore("/src/").removePrefix("/").ifEmpty { "." }
+        val module = moduleOf(relativePath)
         when (valuesDirectoryOf(relativePath)) {
             null -> Unit
             "values" -> sources.getOrPut(module) { linkedMapOf() }.putAll(readEntries(file))

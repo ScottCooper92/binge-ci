@@ -80,12 +80,43 @@ class CheckTranslationStalenessTaskTest {
         assertEquals(setOf(".:greeting"), hashes.keys)
     }
 
+    @Test
+    fun `refuses when the globs find no strings file`() {
+        val failure =
+            assertThrows(GradleException::class.java) {
+                task("updateWithNoFiles", rewrite = true, include = "nowhere/**/strings.xml").check()
+            }
+
+        assertTrue(failure.message.orEmpty().contains("found no strings file"), failure.message)
+    }
+
+    @Test
+    fun `refuses when translations have no source file under the same module key`() {
+        val failure =
+            assertThrows(GradleException::class.java) {
+                task("checkWithNoSource", rewrite = false, include = "app/src/*/res/values-*/strings.xml").check()
+            }
+
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("no source strings file"), message)
+        assertTrue(message.contains("app"), message)
+    }
+
+    @Test
+    fun `passes when no locale translates any source string yet`() {
+        File(root, "app/src/main/res/values-es/strings.xml").delete()
+        task("restamp", rewrite = true).check()
+
+        task("checkTranslationStaleness", rewrite = false).check()
+    }
+
     private fun task(
         name: String,
         rewrite: Boolean,
+        include: String = "app/src/*/res/values*/strings.xml",
     ) = project.tasks
         .register(name, CheckTranslationStalenessTask::class.java) {
-            stringFiles.from(project.fileTree(root) { include("app/src/*/res/values*/strings.xml") })
+            stringFiles.from(project.fileTree(root) { include(include) })
             hashFile.set(File(root, "translation-hashes.txt"))
             repoRoot.set(root)
             this.rewrite.set(rewrite)
