@@ -160,7 +160,8 @@ class GatesFunctionalTest {
     }
 
     // Two projects share one root baseline. Each one's own check would read the other's entry as
-    // stale, so the root check reads both runs and reports only the entry neither produces.
+    // stale, so the root check reads both runs and reports only the entry neither produces. A third
+    // project without the plugin publishes no report, and is passed over.
     @Test
     fun `aggregate baseline staleness reads every project's findings against one root baseline`() {
         val module =
@@ -170,11 +171,15 @@ class GatesFunctionalTest {
                 id("binge.gates.baseline-staleness")
             }
             $REPOSITORIES
-            detektGate { baselineFile.set(rootProject.layout.projectDirectory.file("detekt-baseline.xml")) }
+            detektGate { baselineFile.set(layout.settingsDirectory.file("detekt-baseline.xml")) }
             """.trimIndent()
-        build("plugins {\n    id(\"binge.gates.baseline-staleness-aggregate\")\n}\n", settings = "include(\"first\", \"second\")")
+        build("plugins {\n    id(\"binge.gates.baseline-staleness-aggregate\")\n}\n", settings = "include(\"first\", \"second\", \"docs\")")
+        // Under Isolated Projects, as a large consumer builds: the root must not reach into a subproject's model.
+        File(root, "gradle.properties").appendText("binge.gates.baseline-staleness.aggregate=true\norg.gradle.unsafe.isolated-projects=true\n")
         write("first/build.gradle.kts", module)
         write("second/build.gradle.kts", module)
+        // A library's own variants must not be mistaken for a findings report.
+        write("docs/build.gradle.kts", "plugins {\n    java\n}\n")
         write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
         write("first/src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
         write("second/src/main/kotlin/sample/Width.kt", "package sample\n\nfun width(text: String?): Int = text!!.length\n")

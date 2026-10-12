@@ -81,9 +81,20 @@ findings. A build whose projects share one root baseline needs the aggregate mod
 each project sees only its own findings, so every entry another project owns looks stale.
 
 Apply `binge.gates.baseline-staleness` to each project as before, pointing `baselineFile` at the
-root file. Then apply `binge.gates.baseline-staleness-aggregate` to the root project:
+root file. Set the aggregate property for the whole build, and apply
+`binge.gates.baseline-staleness-aggregate` to the root project:
+
+```properties
+# root gradle.properties
+binge.gates.baseline-staleness.aggregate=true
+```
 
 ```kotlin
+// each project
+detektGate {
+    baselineFile = layout.settingsDirectory.file("detekt-baseline.xml")
+}
+
 // root build.gradle.kts
 plugins {
     id("binge.gates.baseline-staleness-aggregate")
@@ -94,9 +105,15 @@ baselineStalenessAggregate {
 }
 ```
 
-The root `checkBaselineStaleness` reads every project's `detektWithoutBaseline` report and fails
-only on an entry no project produces any more. Each project's own check skips. A project that does
-not apply `binge.gates.baseline-staleness` is not read, so its findings keep no entry alive.
+The property tells each project to skip its own check. Each project publishes its
+`detektWithoutBaseline` report as an outgoing variant. The root `checkBaselineStaleness` resolves
+that variant from every subproject, and fails only on an entry no project produces any more. A
+project that does not apply `binge.gates.baseline-staleness` publishes nothing, so its findings keep
+no entry alive. The root plugin refuses to apply without the property.
+
+Nothing reads another project's model, so the aggregate works under Gradle's Isolated Projects. Its
+test runs with `org.gradle.unsafe.isolated-projects=true`. Name the baseline through
+`layout.settingsDirectory` rather than `rootProject`, which Isolated Projects does not allow.
 
 ### tv-material separation
 
