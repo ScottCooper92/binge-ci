@@ -67,14 +67,22 @@ class GatesFunctionalTest {
         // A rules project is a JVM library, as a real one is: an empty project offers no variant to resolve.
         write("rules/build.gradle.kts", "plugins { `java-library` }")
 
-        val rules = runner("printRules").build()
-        val staleness = runner("checkBaselineStaleness").build()
+        val rules = runner("printRules", withKotlin = true).build()
+        val staleness = runner("checkBaselineStaleness", withKotlin = true).build()
 
         assertTrue(rules.output.contains("rules=rules"), rules.output)
-        // No Kotlin plugin on this fixture's classpath is the non-Kotlin consumer, tested on purpose.
-        assertTrue(rules.output.contains("no Kotlin Gradle plugin on the build classpath"), rules.output)
         assertEquals(TaskOutcome.SKIPPED, staleness.task(":detektWithoutBaseline")?.outcome, staleness.output)
         assertEquals(TaskOutcome.SKIPPED, staleness.task(":checkBaselineStaleness")?.outcome, staleness.output)
+    }
+
+    // No Kotlin plugin on this fixture's classpath is the non-Kotlin consumer, tested on purpose.
+    @Test
+    fun `detekt gate says why it cannot apply without the Kotlin Gradle plugin`() {
+        build("plugins { id(\"binge.gates.detekt\") }")
+
+        val result = runner("help").buildAndFail()
+
+        assertTrue(result.output.contains("needs the Kotlin Gradle plugin on the build classpath"), result.output)
     }
 
     // UnsafeCallOnNullableType needs type resolution: with no classpath on the detekt task it loads
@@ -121,6 +129,33 @@ class GatesFunctionalTest {
         write("local.properties", "sdk.dir=${File(sdk).invariantSeparatorsPath}\n")
 
         assertTheBanFires("detekt", withKotlin = true, withAndroid = true)
+    }
+
+    // End to end against detekt's own output: the baseline it writes and the report it emits are the
+    // two formats staleness parses, and both changed between detekt majors.
+    @Test
+    fun `baseline staleness passes on a fresh baseline and fails once its finding is fixed`() {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.baseline-staleness")
+            }
+            $REPOSITORIES
+            detektGate { baselineFile.set(layout.projectDirectory.file("detekt-baseline.xml")) }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
+
+        runner("detektBaseline", withKotlin = true).build()
+        assertTrue(File(root, "detekt-baseline.xml").readText().contains("UnsafeCallOnNullableType"))
+        runner("check", withKotlin = true).build()
+
+        write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text?.length ?: 0\n")
+        val stale = runner("checkBaselineStaleness", withKotlin = true).buildAndFail()
+
+        assertTrue(stale.output.contains("UnsafeCallOnNullableType in Length.kt - baselined 1, reported 0"), stale.output)
     }
 
     /** A `!!` fails [task] naming the rule, and the same file without it passes. */

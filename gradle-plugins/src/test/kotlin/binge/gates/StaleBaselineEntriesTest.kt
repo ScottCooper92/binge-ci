@@ -3,6 +3,7 @@ package binge.gates
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
+// detekt 2.x's baseline format: `Rule:File.kt:signature`, where a signature may hold a colon itself.
 class StaleBaselineEntriesTest {
     private val baseline =
         """
@@ -10,9 +11,9 @@ class StaleBaselineEntriesTest {
         <SmellBaseline>
           <ManuallySuppressedIssues/>
           <CurrentIssues>
-            <ID>LongMethod:Screen.kt${'$'}fun Screen()</ID>
-            <ID>MagicNumber:Mapper.kt${'$'}42</ID>
-            <ID>MagicNumber:Mapper.kt${'$'}7</ID>
+            <ID>LongMethod:Screen.kt:fun Screen()</ID>
+            <ID>MagicNumber:Mapper.kt:42</ID>
+            <ID>MagicNumber:Mapper.kt:val ratio: Int = 7</ID>
           </CurrentIssues>
         </SmellBaseline>
         """.trimIndent()

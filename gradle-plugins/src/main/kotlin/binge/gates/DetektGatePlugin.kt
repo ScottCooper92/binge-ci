@@ -1,7 +1,8 @@
 package binge.gates
 
-import io.gitlab.arturbosch.detekt.Detekt
-import io.gitlab.arturbosch.detekt.DetektCreateBaselineTask
+import dev.detekt.gradle.Detekt
+import dev.detekt.gradle.DetektCreateBaselineTask
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.FileTree
@@ -55,7 +56,14 @@ abstract class DetektGateExtension {
  */
 class DetektGatePlugin : Plugin<Project> {
     override fun apply(project: Project) {
-        project.pluginManager.apply("io.gitlab.arturbosch.detekt")
+        // detekt 2.x reads the Kotlin plugin's types as it applies, and dies on a bare
+        // NoClassDefFoundError without them. Saying why is the whole of this check.
+        if (!kotlinGradlePluginVisible()) {
+            throw GradleException(
+                "binge.gates.detekt needs the Kotlin Gradle plugin on the build classpath: detekt 2.x will not apply without it.",
+            )
+        }
+        project.pluginManager.apply("dev.detekt")
 
         val gate = project.extensions.create("detektGate", DetektGateExtension::class.java)
         gate.configFile.convention(project.layout.settingsDirectory.file("detekt.yml"))
@@ -70,21 +78,21 @@ class DetektGatePlugin : Plugin<Project> {
         }
 
         // The extension's values are read when a task is configured, which is after the build script
-        // has set them. detekt's own extension takes a plain File, so the tasks are configured instead.
+        // has set them. The tasks are configured rather than detekt's extension, so that a task registered
+        // outside it, such as the baseline-staleness run, gets the same settings.
         project.tasks.withType(Detekt::class.java).configureEach {
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
-            buildUponDefaultConfig = gate.buildUponDefaultConfig.get()
-            parallel = gate.parallel.get()
-            jvmTarget = gate.jvmTarget.get()
+            buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
+            parallel.set(gate.parallel)
+            jvmTarget.set(gate.jvmTarget)
             // The baseline-staleness task must see every finding, and sets its own reports.
             if (name == DETEKT_WITHOUT_BASELINE) return@configureEach
             baseline.set(project.existingFile(gate.baselineFile))
             reports {
-                xml.required.set(false)
-                txt.required.set(false)
+                checkstyle.required.set(false)
                 sarif.required.set(false)
-                md.required.set(false)
+                markdown.required.set(false)
             }
         }
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
@@ -92,7 +100,7 @@ class DetektGatePlugin : Plugin<Project> {
             config.setFrom(gate.configFile)
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
             parallel.set(gate.parallel)
-            jvmTarget = gate.jvmTarget.get()
+            jvmTarget.set(gate.jvmTarget)
             if (gate.baselineFile.isPresent) baseline.set(gate.baselineFile)
         }
 
@@ -100,11 +108,7 @@ class DetektGatePlugin : Plugin<Project> {
         // Kotlin plugin applies, and a JVM project's `main` exists before the build script can name
         // another. configureEach inside still catches compilations created later.
         project.afterEvaluate {
-            if (kotlinGradlePluginVisible()) {
-                KotlinTypeResolution.wire(project, gate.typeResolutionCompilation.orNull)
-            } else {
-                project.logger.warn("binge.gates.detekt: no Kotlin Gradle plugin on the build classpath, so detekt runs without type resolution.")
-            }
+            KotlinTypeResolution.wire(project, gate.typeResolutionCompilation.orNull)
         }
     }
 }
