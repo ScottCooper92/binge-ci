@@ -11,8 +11,9 @@ CI is green on the head under review before a review starts. That means actionli
 shellcheck passed over every workflow, caller and script; the public callers fit the
 workflows in the tree and the `self-*.yml` callers fit the workflows at the tag they pin
 (`tools/check-callers.sh`); every composite action's `run:` blocks are shellcheck-clean
-(`tools/check-action-shell.sh`); and every self-reference pins one immutable tag with no
-`uses: ./` (`tools/check-internal-refs.sh`).
+(`tools/check-action-shell.sh`); every self-reference pins one immutable tag with no
+`uses: ./` (`tools/check-internal-refs.sh`); and `./gradlew build` in `gradle-plugins/`
+compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
 
 Do not re-report anything in that set. Green is necessary and not sufficient: everything
 below is ungated, and most of it only fails at run time in a consuming repository.
@@ -64,6 +65,12 @@ than author association, or run on a fork PR is a finding whatever the input is 
 **Pins.** Third-party actions at a full SHA with the version in a comment; self-references
 at the one release tag; never `./` inside a reusable workflow, because it resolves against
 the caller's workspace. A `uses:` bump that is not a release commit of its own is wrong.
+
+**A gate's names are a signature too.** The consumers apply the gates in `gradle-plugins/` by
+plugin id, configure them through an extension, and run their tasks by name. A renamed plugin
+id, extension, extension property or task is a change in every consumer that applies it, the
+same as a renamed workflow input, and the PR has to say so. The TestKit tests use the names
+the PR gives them, so a green build does not catch the rename.
 
 **The callers are documentation.** `callers/` is what a consumer copies. A change to what a
 workflow expects that leaves the worked callers stale, or the README's caller example, is a
