@@ -71,7 +71,7 @@ jobs:
       verify_guidance: >
         You have a JDK, Gradle and the buf CLI, so verify what you change rather
         than reasoning about it - `buf lint`, `buf breaking`, or
-        `./gradlew :contracts:test` for the round-trip test. Scope it to what you
+        `./gradlew :binge-companion-contracts:test` for the round-trip test. Scope it to what you
         touched rather than running the whole build.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add
