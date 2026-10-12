@@ -413,6 +413,12 @@ jobs:
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
 
+      # The retry on a connection error that never opened, for every gh call in this job. An
+      # API call that dies before it reaches GitHub would otherwise end the run unreviewed.
+      - name: Provide the gh retry
+        id: guards
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.24
+
       # workflow_run gives no PR context, so resolve by head branch.
       - name: Resolve the PR
         id: pr
@@ -440,8 +446,12 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           UNBUILT_PATHS: ${{ inputs.unbuilt_paths }}
           UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call below retries a connection that never opened.
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
           skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
 
           if [ -n "${DISPATCH_PR:-}" ]; then
@@ -626,8 +636,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.number || steps.number.outputs.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call below retries a connection that never opened. Guarded, because this
+          # reporter runs after a failure, which could in principle be the retry's own step.
+          # shellcheck source=/dev/null
+          if [ -n "${GH_RETRY:-}" ]; then . "$GH_RETRY"; fi
           state=$(gh pr view "$PR" --json state --jq .state)
           [ "$state" = "OPEN" ] || exit 0
 
@@ -728,6 +743,13 @@ jobs:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
+      # The guards the merge shares with "Release merges held for a red default branch", and the
+      # retry on a connection error that every gh step in this job sources. First, and with no
+      # condition, so a reporter that runs after any later failure still has the retry.
+      - name: Provide the merge guards
+        id: guards
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.24
+
       # Once per head, whichever door opened. A "Re-run all jobs" on a green CI run emits a second
       # workflow_run for the same head; a merge held by `hold`, a stack or auto_merge off sees one
       # per re-run; a label landing between CI completing and the workflow_run door reading labels
@@ -759,8 +781,12 @@ jobs:
           PR: ${{ needs.resolve.outputs.number }}
           SHA: ${{ needs.resolve.outputs.sha }}
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call below retries a connection that never opened.
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
           # This workflow's own reviews only (#90). Since #87 an approval found here also retries the
           # merge, so a pinned-looking approval from any other app must not count. Without the slug the
           # filter would match nothing and the head would be reviewed again, so it stops instead.
@@ -999,14 +1025,6 @@ jobs:
             plausible, most severe first. List any issues you filed in "filed" —
             an empty "filed" is a claim that nothing in this PR reaches beyond
             its own diff, so check it is true before you make it.
-
-      # The guards the merge shares with "Release merges held for a red default branch", and the
-      # retry on a connection error that both steps below source. Ahead of the review's post,
-      # because the post uses the retry whether or not this caller merges.
-      - name: Provide the merge guards
-        id: guards
-        if: steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.24
 
       - name: Submit the review
         id: submit
@@ -1495,8 +1513,13 @@ jobs:
           RETRY: ${{ steps.pin.outputs.approved }}
           MERGE_LOG: ${{ runner.temp }}/merge-error.txt
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call below retries a connection that never opened. Guarded, because this
+          # reporter runs after a failure, which could in principle be the retry's own step.
+          # shellcheck source=/dev/null
+          if [ -n "${GH_RETRY:-}" ]; then . "$GH_RETRY"; fi
           state=$(gh pr view "$PR" --json state --jq .state)
           [ "$state" = "OPEN" ] || exit 0
 
@@ -1663,8 +1686,12 @@ jobs:
           MERGE_METHOD: ${{ inputs.merge_method }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GUARDS: ${{ steps.guards.outputs.script }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call below retries a connection that never opened.
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
           "$GUARDS" method "$MERGE_METHOD"
           [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
 
@@ -1793,8 +1820,13 @@ jobs:
           HELD_LABEL: ${{ inputs.held_label }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -uo pipefail
+          # Every gh call below retries a connection that never opened. Guarded, because this
+          # reporter runs after a failure, which could in principle be the retry's own step.
+          # shellcheck source=/dev/null
+          if [ -n "${GH_RETRY:-}" ]; then . "$GH_RETRY"; fi
           held=$(gh pr list --state open --label "$HELD_LABEL" --limit 1000 --json number,headRefOid \
                    --jq '.[] | "\(.number) \(.headRefOid)"') \
             || { echo "::warning::Could not list the PRs marked '$HELD_LABEL'; none was told the sweep failed."; exit 0; }
