@@ -17,10 +17,10 @@ kotlin {
     }
 }
 
-// The Kotlin Gradle plugin is compileOnly, so TestKit's injected classpath would not carry it, and a
-// fixture applying it from the portal gets it in a classloader the gates cannot see. Adding it to the
-// injected classpath is what lets a fixture apply Kotlin and the detekt gate side by side, as a
-// consumer's build does.
+// The Kotlin Gradle plugin is compileOnly, so TestKit's injected classpath does not carry it, and a
+// fixture applying it from the portal gets it in a classloader the gates cannot see. Only the fixture
+// that needs Kotlin gets it, added to its runner's classpath; the others run without it, as a consumer
+// that does not use Kotlin does.
 val testKitKotlin: Configuration by configurations.creating
 
 dependencies {
@@ -40,11 +40,9 @@ tasks.validatePlugins {
     failOnWarning = true
 }
 
-tasks.pluginUnderTestMetadata {
-    pluginClasspath.from(testKitKotlin)
-}
-
 tasks.test {
+    inputs.files(testKitKotlin)
+    systemProperty("testKitKotlin", testKitKotlin.asPath)
     useJUnitPlatform()
     testLogging {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

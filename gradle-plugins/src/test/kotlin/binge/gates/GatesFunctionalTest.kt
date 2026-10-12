@@ -2,6 +2,7 @@ package binge.gates
 
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
+import org.gradle.testkit.runner.internal.PluginUnderTestMetadataReading
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -70,6 +71,8 @@ class GatesFunctionalTest {
         val staleness = runner("checkBaselineStaleness").build()
 
         assertTrue(rules.output.contains("rules=rules"), rules.output)
+        // No Kotlin plugin on this fixture's classpath is the non-Kotlin consumer, tested on purpose.
+        assertTrue(rules.output.contains("no Kotlin Gradle plugin on the build classpath"), rules.output)
         assertEquals(TaskOutcome.SKIPPED, staleness.task(":detektWithoutBaseline")?.outcome, staleness.output)
         assertEquals(TaskOutcome.SKIPPED, staleness.task(":checkBaselineStaleness")?.outcome, staleness.output)
     }
@@ -91,12 +94,12 @@ class GatesFunctionalTest {
         write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
         write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
 
-        val failing = runner("check").buildAndFail()
+        val failing = runner("check", withKotlin = true).buildAndFail()
 
         assertTrue(failing.output.contains("UnsafeCallOnNullableType"), failing.output)
 
         write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text?.length ?: 0\n")
-        runner("check").build()
+        runner("check", withKotlin = true).build()
     }
 
     private fun build(
@@ -117,10 +120,16 @@ class GatesFunctionalTest {
         }
     }
 
-    private fun runner(task: String): GradleRunner =
+    private fun runner(
+        task: String,
+        withKotlin: Boolean = false,
+    ): GradleRunner =
         GradleRunner
             .create()
             .withProjectDir(root)
-            .withPluginClasspath()
+            .withPluginClasspath(
+                PluginUnderTestMetadataReading.readImplementationClasspath() +
+                    if (withKotlin) System.getProperty("testKitKotlin").split(File.pathSeparator).map(::File) else emptyList(),
+            )
             .withArguments(task, "--stacktrace")
 }
