@@ -176,6 +176,28 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
+      # A hosted runner has far less RAM than a consumer's own gradle.properties usually sizes the daemon for,
+      # and this job runs a full R8 pass with the daemon resident beside the emulator. These are ci-setup's
+      # hosted-runner numbers, so keep them in step with its "Tune Gradle for CI runners" step. Hosted only: a
+      # self-hosted runner's memory is not this lane's to guess, and the consumer's own settings stand there.
+      # Written to GRADLE_USER_HOME, not ~/.gradle, which a container running as root never reads.
+      - name: Tune Gradle for a hosted runner
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]; then
+            echo "Not a GitHub-hosted runner, so the project's own Gradle settings stand."
+            exit 0
+          fi
+          guh="${GRADLE_USER_HOME:-$HOME/.gradle}"
+          mkdir -p "$guh"
+          {
+            echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
+            echo "kotlin.daemon.jvmargs=-Xmx1g"
+            echo "org.gradle.workers.max=2"
+          } > "$guh/gradle.properties"
+          echo "Gradle tuning written to $guh/gradle.properties:"
+          cat "$guh/gradle.properties"
+
       # Accepts the licences the system image download needs, and installs the SDK on a runner
       # that has none. packages drops the action's default `tools`, which Google no longer serves.
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
