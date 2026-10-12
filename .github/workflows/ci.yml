@@ -32,12 +32,12 @@ jobs:
       # --severity=warning. Two calls because a caller's `uses:` is a remote ref actionlint cannot
       # resolve from inside a PR; check-callers.sh covers what it therefore skips.
       - name: actionlint over the workflows
-        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.22
         with:
           args: .github/workflows/*.yml
 
       - name: actionlint over the callers
-        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.22
         with:
           args: callers/*/*.yml
 
