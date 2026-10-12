@@ -60,8 +60,8 @@ pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order
 ## Gates
 
 CI runs actionlint (with shellcheck) over the workflows and callers, shellcheck over the
-scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh` and
-`tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing the last against
+scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`
+and `tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing the last against
 fixtures. It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
