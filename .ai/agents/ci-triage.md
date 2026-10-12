@@ -39,8 +39,8 @@ Nothing builds. If the log shows a failure that is not in the table below, that 
 
 ## Verifying
 
-Run only what failed, scoped. shellcheck is on the runner; actionlint is not, and the
-`actionlint` step in `.github/workflows/ci.yml` shows the version and checksum to fetch.
+Run only what failed, scoped. shellcheck is on the runner; actionlint is not, and
+`.github/actions/actionlint/action.yml` shows the version and checksum to fetch.
 
 ```sh
 shellcheck --severity=warning <the file you changed>

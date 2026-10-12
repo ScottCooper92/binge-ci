@@ -23,28 +23,23 @@ jobs:
           # check-callers.sh reads each self caller's workflow at the tag it pins.
           fetch-tags: true
 
-      # actionlint shellchecks every `run:` block, but only when shellcheck is on PATH.
+      # For the plain-file shellcheck steps below. The actionlint action installs it too when it is
+      # missing, so this also saves it the apt round-trip.
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
 
-      - name: actionlint
-        env:
-          VERSION: 1.7.7
-          SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
-        run: |
-          set -euo pipefail
-          curl -sSLo actionlint.tar.gz \
-            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
-          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
-          tar xzf actionlint.tar.gz actionlint
-          # --severity=warning, not the default: info fires SC2016 on every `printf` format
-          # string here, where single quotes are correct. Disabling SC2016 outright would
-          # also drop the real case, so the floor is set by severity.
-          #
-          # Two invocations because a caller's `uses:` is a remote ref actionlint cannot
-          # resolve from inside a PR; check-callers.sh covers what it therefore skips.
-          ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
-          ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
+      # The same pinned, checksum-verified actionlint the consumers run, with shellcheck at
+      # --severity=warning. Two calls because a caller's `uses:` is a remote ref actionlint cannot
+      # resolve from inside a PR; check-callers.sh covers what it therefore skips.
+      - name: actionlint over the workflows
+        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        with:
+          args: .github/workflows/*.yml
+
+      - name: actionlint over the callers
+        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        with:
+          args: callers/*/*.yml
 
       - name: Check the draft callers against the workflows they call
         run: ./tools/check-callers.sh
