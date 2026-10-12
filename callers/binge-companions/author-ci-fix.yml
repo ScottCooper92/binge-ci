@@ -53,7 +53,7 @@ jobs:
       reports_artifact: test-reports
       verify_guidance: >
         Verify by running only the check that failed — `buf lint`, `buf breaking`,
-        `./gradlew :contracts:test` for the round-trip test. Do not run the whole
+        `./gradlew :binge-companion-contracts:test` for the round-trip test. Do not run the whole
         build; CI will do that when you push.
       gate_rules: |
         NEVER silence a gate instead of fixing it. In this repository that

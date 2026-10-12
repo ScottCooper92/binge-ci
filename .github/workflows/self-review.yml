@@ -17,7 +17,8 @@ run-name: >-
 # This repository's own caller: the same shape as callers/binge-companions, pointed at the
 # workflow this repository ships. Pinned to the release tag the actions pin, NOT `./`: a PR here
 # is reviewed by the reviewer that consumers run, never by the one it is changing, and a `./`
-# reference would fail tools/check-internal-refs.sh in any case. A fix to bot-review.yml
+# reference would fail tools/check-callers.sh in any case: it requires each self-*.yml caller to
+# name the workflow at a release ref. A fix to bot-review.yml
 # reaches this repo's own PRs the way it reaches everyone's - at the next release.
 #
 # PUBLIC repository. The same-repository guard inside the called workflow is the whole
