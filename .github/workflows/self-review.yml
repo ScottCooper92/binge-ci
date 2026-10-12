@@ -53,7 +53,7 @@ jobs:
     if: >-
       (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
       (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
-    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.23
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.24
     with:
       dispatch_pr: ${{ inputs.pr }}
       # Everything in this repository governs the agents, so a merge here is a human's
