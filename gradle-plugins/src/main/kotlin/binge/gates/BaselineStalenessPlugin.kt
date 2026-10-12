@@ -1,6 +1,6 @@
 package binge.gates
 
-import io.gitlab.arturbosch.detekt.Detekt
+import dev.detekt.gradle.Detekt
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.RegularFile
@@ -22,15 +22,14 @@ class BaselineStalenessPlugin : Plugin<Project> {
         val withoutBaseline =
             project.tasks.register(DETEKT_WITHOUT_BASELINE, Detekt::class.java) {
                 description = "Runs detekt with no baseline applied, for checkBaselineStaleness."
-                ignoreFailures = true
+                ignoreFailures.set(true)
                 baseline.set(null as RegularFile?)
                 reports {
-                    xml.required.set(true)
-                    xml.outputLocation.set(report)
+                    checkstyle.required.set(true)
+                    checkstyle.outputLocation.set(report)
                     html.required.set(false)
-                    txt.required.set(false)
                     sarif.required.set(false)
-                    md.required.set(false)
+                    markdown.required.set(false)
                 }
                 onlyIf("a detekt baseline exists") { hasBaseline.get() }
             }

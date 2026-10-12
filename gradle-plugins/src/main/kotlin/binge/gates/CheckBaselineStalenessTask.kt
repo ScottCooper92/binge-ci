@@ -51,9 +51,8 @@ internal fun staleBaselineEntries(
 ): List<String> {
     val baselined = mutableMapOf<String, Int>()
     Regex("<ID>([^<]+)</ID>").findAll(baselineXml).forEach { match ->
-        val id = match.groupValues[1]
-        val rule = id.substringBefore(':')
-        val file = id.substringAfter(':').substringBefore('$')
+        // detekt 2.x writes `Rule:File.kt:signature`. A file name holds no colon, and a signature can.
+        val (rule, file) = match.groupValues[1].split(':', limit = 3)
         baselined.merge("$rule in $file", 1, Int::plus)
     }
     val reported = mutableMapOf<String, Int>()

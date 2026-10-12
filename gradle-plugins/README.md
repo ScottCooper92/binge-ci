@@ -40,8 +40,11 @@ translationStaleness {
 
 ### detekt
 
-Applies `io.gitlab.arturbosch.detekt` at the version in this build's catalog, so a consumer applies
-`binge.gates.detekt` in its place. It does three things a bare detekt setup does not.
+Applies detekt 2.x (`dev.detekt`) at the version in this build's catalog, so a consumer applies
+`binge.gates.detekt` in its place. A consumer's `detekt.yml` and baseline have to be 2.x's: the
+rule and config names changed from 1.x. detekt 2.x will not apply without the Kotlin Gradle plugin
+on the build classpath, so the gate fails at once with a message saying so. It does three things a
+bare detekt setup does not.
 
 - **Production source only.** Every detekt task reads `src/main`, minus files named `…PreviewData.kt`.
 - **Type resolution.** A detekt task carries no classpath by default, and without one the rules
