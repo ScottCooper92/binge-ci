@@ -48,8 +48,10 @@ pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order
   it exists to remove, so every job has an `always()` reporter, and every comment it posts
   is deduped on a marker keyed to the PR head.
 - Third-party actions are pinned to a full commit SHA with the version in a trailing
-  comment. Self-references use the release tag and never `./` - inside a reusable workflow a
-  local path resolves against the caller's workspace.
+  comment. Self-references use the release tag and never `./` inside a reusable workflow or
+  composite action - there a local path resolves against the caller's workspace. `ci.yml` runs
+  only here, so it uses the actionlint action by `./`: a release PR pins a tag that does not
+  exist until it merges.
 - Workflow and caller files end in `.yml`. Every glob here says so.
 - A path that governs an agent (`CLAUDE.md`, `.claude`, `.ai/` and the rest of the
   governed-paths list) is read from the base branch, never from the PR head. Keep it that
@@ -59,7 +61,8 @@ pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order
 
 CI runs actionlint (with shellcheck) over the workflows and callers, shellcheck over the
 scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh` and
-`tools/check-internal-refs.sh`. It also runs `./gradlew build` in `gradle-plugins/`, which
+`tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing the last against
+fixtures. It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
 

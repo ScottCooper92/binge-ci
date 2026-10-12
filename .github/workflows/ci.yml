@@ -31,13 +31,18 @@ jobs:
       # The same pinned, checksum-verified actionlint the consumers run, with shellcheck at
       # --severity=warning. Two calls because a caller's `uses:` is a remote ref actionlint cannot
       # resolve from inside a PR; check-callers.sh covers what it therefore skips.
+      #
+      # From this checkout, not the release tag. A release PR pins the tag it is about to create,
+      # which does not exist until after the merge, so a tag here failed every release PR at "Set up
+      # job". This also lints with the action as the PR has it. ci.yml is not a reusable workflow,
+      # so `./` is this repository's own workspace; check-internal-refs.sh bans it only where it is not.
       - name: actionlint over the workflows
-        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        uses: ./.github/actions/actionlint
         with:
           args: .github/workflows/*.yml
 
       - name: actionlint over the callers
-        uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1.0.21
+        uses: ./.github/actions/actionlint
         with:
           args: callers/*/*.yml
 
@@ -58,6 +63,9 @@ jobs:
       # from inside a PR. This covers the two ways one goes wrong here.
       - name: Check this repo's references to its own actions
         run: ./tools/check-internal-refs.sh
+
+      - name: Test the references check against its fixtures
+        run: ./tools/test-internal-refs.sh
 
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.

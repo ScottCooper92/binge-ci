@@ -2,10 +2,12 @@
 #
 # Two rules about how a reusable workflow here reaches this repository's own actions.
 #
-# 1. NO `uses: ./`. Inside a reusable workflow a local action path resolves against the
-#    CALLER's workspace, not this repository. No consumer has .github/actions/, so the job
-#    dies with "Can't find 'action.yml' ... Did you forget to run actions/checkout" - at run
-#    time, in the consuming repo.
+# 1. NO `uses: ./` inside a reusable workflow or composite action. There a local action path
+#    resolves against the CALLER's workspace, not this repository. No consumer has
+#    .github/actions/, so the job dies with "Can't find 'action.yml' ... Did you forget to run
+#    actions/checkout" - at run time, in the consuming repo. A workflow that only ever runs here,
+#    ci.yml say, runs in this repository's own checkout, where `./` is the right reference: it
+#    tests the action at the PR's head rather than at a tag a release PR has not cut yet.
 #
 # 2. Every self-reference pins the SAME immutable vX.Y.Z tag, never the moving `v1`. A caller
 #    that pins `@v1.0.2` would otherwise still get the action at whatever `v1` points to now.
@@ -23,19 +25,26 @@
 # workflows pin, and a move of `v1` must land on the commit that tag names. Existence alone
 # let a commit that edits an action without bumping its references ship the old action.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+# CHECK_ROOT is for tools/test-internal-refs.sh, which runs this against fixture trees.
+cd "${CHECK_ROOT:-$(dirname "$0")/..}" || exit 1
 
 fail=0
 resolve=false
 [ "${1:-}" = "--resolve" ] && resolve=true
 
-# Both globs: a composite action referencing another action as `./` has the same problem, and
-# nothing today does, so this is about the next one.
 scan=(.github/workflows/*.yml .github/actions/*/action.yml)
 
-local_refs=$(grep -nE '^[[:space:]]*(- )?uses:[[:space:]]*\./' "${scan[@]}" || true)
+# Rule 1's files: every composite action, and every workflow that names `workflow_call` as a
+# trigger. The match is loose on purpose: a file wrongly counted as reusable only loses `./`, while
+# one wrongly left out would ship a reference that breaks in every consumer.
+reusable=(.github/actions/*/action.yml)
+for wf in .github/workflows/*.yml; do
+  if grep -qE '^[[:space:]]+workflow_call:|^on:.*workflow_call' "$wf"; then reusable+=("$wf"); fi
+done
+
+local_refs=$(grep -nE '^[[:space:]]*(- )?uses:[[:space:]]*\./' "${reusable[@]}" || true)
 if [ -n "$local_refs" ]; then
-  echo "FAIL  a reusable workflow cannot reference a local action - './' is the caller's workspace:"
+  echo "FAIL  a reusable workflow or composite action cannot reference a local action - './' is the caller's workspace:"
   printf '%s\n' "$local_refs" | sed 's/^/      /'
   fail=1
 fi
