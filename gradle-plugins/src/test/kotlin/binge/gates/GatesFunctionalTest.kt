@@ -4,6 +4,7 @@ import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.gradle.testkit.runner.internal.PluginUnderTestMetadataReading
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -156,6 +157,39 @@ class GatesFunctionalTest {
         val stale = runner("checkBaselineStaleness", withKotlin = true).buildAndFail()
 
         assertTrue(stale.output.contains("UnsafeCallOnNullableType in Length.kt - baselined 1, reported 0"), stale.output)
+    }
+
+    // AGP compiles BuildConfig with javac, outside the Kotlin compilation's own output. detekt 2.x counts
+    // every reference it cannot resolve as a compiler error, and stops applying the rules that need
+    // types to that code, while the build still passes. So a read of BuildConfig must resolve.
+    @Test
+    fun `detekt gate resolves an Android module's BuildConfig`() {
+        val sdk =
+            checkNotNull(System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")) {
+                "This test needs an Android SDK: set ANDROID_HOME."
+            }
+        build(
+            """
+            plugins {
+                id("com.android.library")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            android {
+                namespace = "sample"
+                compileSdk = 37
+                defaultConfig { minSdk = 26 }
+                buildFeatures { buildConfig = true }
+            }
+            """.trimIndent(),
+        )
+        write("local.properties", "sdk.dir=${File(sdk).invariantSeparatorsPath}\n")
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write("src/main/kotlin/sample/Flags.kt", "package sample\n\nfun isDebug(): Boolean = BuildConfig.DEBUG\n")
+
+        val result = runner("detekt", withKotlin = true, withAndroid = true).build()
+
+        assertFalse(result.output.contains("compiler errors"), result.output)
     }
 
     /** A `!!` fails [task] naming the rule, and the same file without it passes. */
