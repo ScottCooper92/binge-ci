@@ -114,6 +114,12 @@ on:
       retention_days:
         type: number
         default: 7
+    secrets:
+      local_properties:
+        description: >
+          Lines to write to `local.properties` before the build, for credentials the consumer's
+          Gradle reads from there. Never printed. Leave it unset when the build needs none.
+        required: false
 
 permissions:
   contents: read
@@ -130,6 +136,20 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           submodules: ${{ inputs.submodules }}
+
+      # Through the environment, not an inline expression, so the value stays masked if a step ever
+      # runs with `set -x`. The check is in the script because the secrets context cannot be read by a
+      # step's own `if`. It replaces any `local.properties` the checkout carries.
+      - name: Write local.properties
+        env:
+          LOCAL_PROPERTIES: ${{ secrets.local_properties }}
+        run: |
+          set -euo pipefail
+          if [ -z "$LOCAL_PROPERTIES" ]; then
+            echo "No local_properties secret passed; leaving local.properties alone."
+            exit 0
+          fi
+          printf '%s\n' "$LOCAL_PROPERTIES" > local.properties
 
       # The emulator's own preflight reports the disk requirement as met, then fails on the
       # partition it cannot create, so a shortfall shows up only as a failed boot. The numbers
