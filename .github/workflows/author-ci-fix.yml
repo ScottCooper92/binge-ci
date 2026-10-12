@@ -1192,6 +1192,32 @@ jobs:
           # Written last, the moment a repair is going ahead: the reporters below read it as that.
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
+      # The reporters further down are gated on `branch`, which is right for a skip and silent for a
+      # failure: a 5xx on one of the reads above, or an empty author_bot_id, ends the job before any
+      # decision. A red default branch holds every merge and every PR-branch repair, so a repair that
+      # dies here unannounced leaves it red with nobody told. Nothing was recorded either - no branch,
+      # no marker - so re-running CI on the commit tries again, and the comment says so. A failed token
+      # mint cannot be reported: the workflow's own token has no write access to comment with.
+      - name: Report a guard that failed
+        if: >
+          always() && steps.token.outcome == 'success' &&
+          (steps.decide.outcome == 'failure' || steps.decide.outcome == 'cancelled')
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker="<!-- ci-fix-default-guard-failed:${SHA} -->"
+          comments=$(gh api "repos/${GH_REPO}/commits/${SHA}/comments?per_page=100" \
+            --paginate --jq '.[].body')
+          grep -qF "$marker" <<<"$comments" && exit 0
+          printf '%s\nCI on `%s` is red at `%s`, and the automatic repair stopped before it started: its checks failed ([log](%s)). No attempt was recorded, so re-running CI on this commit will try again.\n' \
+            "$marker" "$DEFAULT_BRANCH" "${SHA:0:7}" "$RUN_URL" \
+            | gh api "repos/${GH_REPO}/commits/${SHA}/comments" -F body=@- --silent
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.decide.outputs.skip != 'true'
         with:
