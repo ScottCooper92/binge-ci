@@ -5,9 +5,11 @@ it as the source of truth; so should you.
 
 ## What this repository is
 
-The shared CI for Binge and its companions: five reusable workflows (a review bot and four
-author bots), the composite actions they need, the checks actionlint cannot do, and worked
-callers for the public consumers. Read `README.md` for the shape of it and
+The shared CI for Binge and its companions: eight reusable workflows, the composite actions
+they and the consumers need, the checks actionlint cannot do, and worked callers for the public
+consumers. Five of the workflows are the bots, a review bot and four author bots. The other three
+are shared steps a consumer would otherwise copy: the submodule-pin check, the consumer check and
+the emulator lane. Read `README.md` for the shape of it and
 `MIGRATION.md` for how the consumers got here.
 
 Most of it is shell and YAML, and it runs inside every repository that calls it. The one thing that builds is
