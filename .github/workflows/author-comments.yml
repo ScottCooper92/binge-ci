@@ -89,7 +89,7 @@ on:
         default: none
       java_version:
         description: >
-          The JDK for `toolchain: jvm`. Ignored for `android`, where ci-setup owns it.
+          The JDK the build toolchain installs, for `toolchain: jvm` and `android` alike.
         type: string
         default: '21'
       setup_buf:
@@ -365,6 +365,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.21
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
+          java-version: ${{ inputs.java_version }}
           # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle.
           persistent-gradle-home: 'false'
 
