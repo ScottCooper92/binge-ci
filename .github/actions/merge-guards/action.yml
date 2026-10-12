@@ -1,7 +1,8 @@
 name: Merge guards
 description: >
   Exposes merge-guards.sh, the merge guards bot-review's merge gate and its release-held sweep
-  share, to a reusable workflow.
+  share, and gh-retry.sh, the retry on a connection error they and the review's post use, to a
+  reusable workflow.
 
 # An action for the same reason as governed-paths: a reusable workflow runs against the CALLER's
 # checkout, and a composite action is the only way to hand it a file that travels with it.
@@ -13,6 +14,9 @@ outputs:
   script:
     description: Absolute path to merge-guards.sh.
     value: ${{ steps.locate.outputs.script }}
+  retry:
+    description: Absolute path to gh-retry.sh, for a run block to source.
+    value: ${{ steps.locate.outputs.retry }}
 
 runs:
   using: composite
@@ -26,6 +30,10 @@ runs:
       run: |
         set -euo pipefail
         script="${ACTION_PATH}/merge-guards.sh"
-        [ -f "$script" ] || { echo "::error::merge-guards.sh is missing from $ACTION_PATH."; exit 1; }
+        retry="${ACTION_PATH}/gh-retry.sh"
+        for f in "$script" "$retry"; do
+          [ -f "$f" ] || { echo "::error::${f##*/} is missing from $ACTION_PATH."; exit 1; }
+        done
         chmod +x "$script"
         echo "script=$script" >> "$GITHUB_OUTPUT"
+        echo "retry=$retry" >> "$GITHUB_OUTPUT"
