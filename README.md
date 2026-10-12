@@ -246,8 +246,9 @@ holds what each consumer learned separately:
 - **The artifact**, uploaded on success too.
 
 The caller keeps the triggers, the concurrency group and any report on a red scheduled run, which
-`nightly-report` makes from a job of its own. It does not use `ci-setup`: that action writes a
-consumer's own credentials file, which an emulator lane has no reason to need.
+`nightly-report` makes from a job of its own. It does not use `ci-setup`. A build that reads
+credentials from `local.properties` passes them as the optional `local_properties` secret, which the
+lane writes to that file before the build and never prints.
 
 ## The shared Gradle gates
 
