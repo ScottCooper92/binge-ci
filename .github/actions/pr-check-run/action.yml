@@ -93,11 +93,26 @@ runs:
         SUMMARY: ${{ inputs.summary }}
         DETAILS_URL: ${{ inputs.details-url }}
         ONLY_UPDATE: ${{ inputs.only-update }}
+        # The only handle a composite action has on files shipped alongside it. The whole repository comes with it, so
+        # merge-guards' retry sits next door.
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         # Deliberately not `set -e`: see the header. Every exit below is 0.
         set -uo pipefail
 
         skip() { echo "::warning::Not reporting on the PR: $*"; echo "id=" >> "$GITHUB_OUTPUT"; exit 0; }
+
+        # A connection that never opened is tried again rather than losing the note. Without the retry the calls below
+        # still run, once each, so a missing file costs the retry and nothing else.
+        retry="${ACTION_PATH}/../merge-guards/gh-retry.sh"
+        if [ -f "$retry" ]; then
+          # shellcheck source=/dev/null
+          . "$retry"
+        else
+          echo "::warning::gh-retry.sh is missing beside $ACTION_PATH; posting without the connection retry."
+        fi
+        # The retry reports itself on stderr, so stderr is kept apart from the id the calls print.
+        err=$(mktemp)
 
         [ -n "$SHA" ] || skip "no head SHA was passed."
 
@@ -134,10 +149,10 @@ runs:
         if [ -n "$existing" ]; then
           # head_sha is not a field PATCH accepts, which is why it is added only on the POST.
           id=$(gh api --method PATCH "repos/${REPO}/check-runs/${existing}" \
-                 --input - --jq .id <<<"$payload" 2>&1) || skip "could not update check run ${existing}: ${id}"
+                 --input - --jq .id <<<"$payload" 2>"$err") || skip "could not update check run ${existing}: $(cat "$err")"
         else
           id=$(jq --arg sha "$SHA" '.head_sha = $sha' <<<"$payload" \
-                 | gh api --method POST "repos/${REPO}/check-runs" --input - --jq .id 2>&1) || skip "could not create the check run: ${id}"
+                 | gh api --method POST "repos/${REPO}/check-runs" --input - --jq .id 2>"$err") || skip "could not create the check run: $(cat "$err")"
         fi
 
         echo "Reported '${NAME}' (${CONCLUSION}) on ${SHA} as check run ${id}."
