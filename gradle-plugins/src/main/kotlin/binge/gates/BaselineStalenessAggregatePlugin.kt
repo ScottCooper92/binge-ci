@@ -71,7 +71,7 @@ class BaselineStalenessAggregatePlugin : Plugin<Project> {
                 project.subprojects.forEach { dependencies.add(project.dependencies.project(mapOf("path" to it.path))) }
             }
         val reports =
-            project.configurations.resolvable("${BASELINE_REPORTS}Path") {
+            project.configurations.resolvable("detektBaselineReportFiles") {
                 extendsFrom(declared.get())
                 attributes { baselineReportAttributes(project.objects) }
             }

@@ -111,6 +111,9 @@ that variant from every subproject, and fails only on an entry no project produc
 project that does not apply `binge.gates.baseline-staleness` publishes nothing, so its findings keep
 no entry alive. The root plugin refuses to apply without the property.
 
+The property and the root plugin go together. With the property set and no root plugin, every
+project skips its own check, and nothing checks the baseline at all.
+
 Nothing reads another project's model, so the aggregate works under Gradle's Isolated Projects. Its
 test runs with `org.gradle.unsafe.isolated-projects=true`. Name the baseline through
 `layout.settingsDirectory` rather than `rootProject`, which Isolated Projects does not allow.
