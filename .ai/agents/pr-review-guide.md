@@ -135,8 +135,6 @@ summary as a finding and go on reviewing from this file as read from `main`.
 
 Each PR body carries the checklist from `.github/pull_request_template.md`. Read it against the run:
 
-- A box ticked for a check that then failed CI is a finding: the author said it ran and it didn't pass. Name the check.
-- A box left unticked without a reason is a nit, unless CI failed on exactly that check.
+- You only review a head whose CI passed, so a ticked box cannot be checked against a failed run on that head. Treat the ticks as claims, not as proof.
+- A box left unticked without a reason is a nit.
 - A PR with no checklist at all, other than a Renovate dependency update, gets a nit asking for it.
-- "Screenshots viewed" ticked on a PR that re-records a lot of frames: check the body says how they were checked, all by eye or by script plus a sample.
-
