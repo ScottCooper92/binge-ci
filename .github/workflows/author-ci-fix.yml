@@ -891,6 +891,11 @@ jobs:
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
+          # note.md was written before the restore, so it can claim an edit the restore threw away.
+          governed_caveat=""
+          if [ -n "$governed_note" ] && grep -qF -- "$(bash "$GOVERNED_SCRIPT" --discarded-marker)" <<<"$governed_note"; then
+            governed_caveat=$(bash "$GOVERNED_SCRIPT" --discarded-caveat)
+          fi
 
           dirty=$(git status --porcelain)
           # Agents commit anyway often enough that trusting the porcelain alone would leave the repair
@@ -923,6 +928,7 @@ jobs:
               printf '%s\n%s\n' "$attempted" "$declined"
               if [ -n "$note" ]; then
                 printf 'Looked at the CI failure on `%s` and changed nothing.\n\n%s\n' "${SHA:0:7}" "$note"
+                if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
               else
                 # Only when the agent wrote nothing at all. Stopping is a legitimate outcome for this job,
                 # so the fallback is a plain sentence rather than an error.
@@ -974,6 +980,7 @@ jobs:
                     "<!-- ci-fix-unpushed:${SHA} -->" "${SHA:0:7}"
                 fi
                 if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
+                if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
               } | gh pr comment "$PR" --body-file -
               exit 1
             fi
@@ -987,6 +994,7 @@ jobs:
             printf '%s\n' "$attempted"
             printf 'Pushed a fix for the CI failure on `%s`.\n' "${SHA:0:7}"
             if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
+            if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
             if [ -n "$commit_stat" ]; then
               printf '\n<details><summary>Files this push changed</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"
             fi
@@ -1424,6 +1432,11 @@ jobs:
           governed_note=$(bash "$GOVERNED_SCRIPT" "$SHA")
 
           note=$(cat "${{ runner.temp }}/note.md" 2>/dev/null || true)
+          # note.md was written before the restore, so it can claim an edit the restore threw away.
+          governed_caveat=""
+          if [ -n "$governed_note" ] && grep -qF -- "$(bash "$GOVERNED_SCRIPT" --discarded-marker)" <<<"$governed_note"; then
+            governed_caveat=$(bash "$GOVERNED_SCRIPT" --discarded-caveat)
+          fi
           dirty=$(git status --porcelain)
           committed=false
           [ "$(git rev-parse HEAD)" = "$SHA" ] || committed=true
@@ -1435,6 +1448,7 @@ jobs:
                 "$DEFAULT_BRANCH" "${SHA:0:7}" "$RUN_URL"
               if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
               if [ -n "$governed_note" ]; then printf '\n%s\n' "$governed_note"; fi
+              if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
             } | comment_on_commit
             exit 0
           fi
@@ -1456,6 +1470,7 @@ jobs:
             printf 'While `%s` is red, merges of other PRs are held and their CI is not repaired, so this PR carries `%s` and is exempt from both.\n' \
               "$DEFAULT_BRANCH" "$FIX_LABEL"
             if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
+            if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
             printf '\n<details><summary>Files this repair changes</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"
           )
           url=$(gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
