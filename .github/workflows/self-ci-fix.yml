@@ -35,8 +35,8 @@ jobs:
         Verify with the same tools ci.yml runs, scoped to what failed: `shellcheck
         --severity=warning` on the file you changed, `./tools/check-callers.sh`,
         `./tools/check-action-shell.sh` or `./tools/check-internal-refs.sh` for the check
-        that reported. actionlint is not preinstalled; fetch it the way the `actionlint`
-        step in .github/workflows/ci.yml does (same version, same checksum) rather than
+        that reported. actionlint is not preinstalled; fetch it the way
+        .github/actions/actionlint/action.yml does (same version, same checksum) rather than
         reasoning about its message. Do not run the whole gate; CI will when you push.
       gate_rules: |
         NEVER silence a gate instead of fixing it. In this repository that means,

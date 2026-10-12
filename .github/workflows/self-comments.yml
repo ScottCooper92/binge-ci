@@ -51,7 +51,7 @@ jobs:
         `shellcheck --severity=warning` on a changed script or `run:` block, and
         `./tools/check-callers.sh`, `./tools/check-action-shell.sh` or
         `./tools/check-internal-refs.sh` for the invariant you touched. actionlint is not
-        preinstalled; fetch it the way the `actionlint` step in .github/workflows/ci.yml
+        preinstalled; fetch it the way .github/actions/actionlint/action.yml
         does if a workflow file changed.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add
