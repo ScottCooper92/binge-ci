@@ -126,10 +126,10 @@ internal fun misconfiguration(
     val translations = mutableSetOf<String>()
     files.forEach { file ->
         val relativePath = file.relativeTo(root).invariantSeparatorsPath
-        when (valuesDirectoryOf(relativePath)) {
+        when (resourceKindOf(relativePath)) {
+            StringsKind.SOURCE -> sources += moduleOf(relativePath)
+            StringsKind.TRANSLATION -> translations += moduleOf(relativePath)
             null -> Unit
-            "values" -> sources += moduleOf(relativePath)
-            else -> translations += moduleOf(relativePath)
         }
     }
     if (sources.isEmpty() && translations.isEmpty()) {
@@ -169,10 +169,10 @@ internal fun computeHashes(
     files.sortedBy { it.relativeTo(root).invariantSeparatorsPath }.forEach { file ->
         val relativePath = file.relativeTo(root).invariantSeparatorsPath
         val module = moduleOf(relativePath)
-        when (valuesDirectoryOf(relativePath)) {
+        when (resourceKindOf(relativePath)) {
+            StringsKind.SOURCE -> sources.getOrPut(module) { linkedMapOf() }.putAll(readEntries(file))
+            StringsKind.TRANSLATION -> translated.getOrPut(module) { mutableSetOf() } += readEntries(file).keys
             null -> Unit
-            "values" -> sources.getOrPut(module) { linkedMapOf() }.putAll(readEntries(file))
-            else -> translated.getOrPut(module) { mutableSetOf() } += readEntries(file).keys
         }
     }
 
@@ -182,6 +182,35 @@ internal fun computeHashes(
             entries.filterKeys { it in hasTranslation }.map { (name, value) -> "$module:$name" to sha256(value) }
         }.toMap()
 }
+
+internal enum class StringsKind { SOURCE, TRANSLATION }
+
+/**
+ * Whether a strings file is the source, a translation, or neither. Only a `values` directory whose
+ * qualifiers name a locale is a translation. `values-night`, `values-sw600dp` or `values-v21`
+ * override strings for a configuration, not a language, so they are left out: stamping them would
+ * hash strings no translator reads, and a module with only such an override is not orphaned.
+ */
+internal fun resourceKindOf(relativePath: String): StringsKind? {
+    val directory = valuesDirectoryOf(relativePath) ?: return null
+    if (directory == "values") return StringsKind.SOURCE
+    if (!directory.startsWith("values-")) return null
+    return if (hasLocaleQualifier(directory.removePrefix("values-"))) StringsKind.TRANSLATION else null
+}
+
+/**
+ * Android orders qualifiers with the mobile country and network codes first and the locale next,
+ * so the locale is the first qualifier after any `mccNNN` or `mncNN`. It is a two- or three-letter
+ * language (`es`, `es-rUS`) or the BCP 47 form (`b+sr+Latn`). `car` is the one three-letter
+ * qualifier that is not a language: it is a UI mode, and it can only appear first when no locale does.
+ */
+private fun hasLocaleQualifier(qualifiers: String): Boolean {
+    val first = qualifiers.split('-').firstOrNull { !MOBILE_CODE.matches(it) } ?: return false
+    return first.startsWith("b+") || (LANGUAGE.matches(first) && first != "car")
+}
+
+private val MOBILE_CODE = Regex("(mcc|mnc)[0-9]+")
+private val LANGUAGE = Regex("[a-z]{2,3}")
 
 /** The `values`-ish directory a resource file sits in, or null if the path is not under `res/`. */
 private fun valuesDirectoryOf(relativePath: String): String? {

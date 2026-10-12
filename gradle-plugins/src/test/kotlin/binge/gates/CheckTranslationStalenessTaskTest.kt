@@ -110,6 +110,36 @@ class CheckTranslationStalenessTaskTest {
         task("checkTranslationStaleness", rewrite = false).check()
     }
 
+    @Test
+    fun `reads only locale-qualified directories as translations`() {
+        val kinds =
+            listOf(
+                "values", "values-es", "values-es-rUS", "values-b+sr+Latn", "values-mcc310-es", "values-es-night",
+                "values-night", "values-sw600dp", "values-v21", "values-land", "values-car", "values-mcc310",
+            ).associateWith { resourceKindOf("app/src/main/res/$it/strings.xml") }
+
+        assertEquals(StringsKind.SOURCE, kinds["values"])
+        listOf("values-es", "values-es-rUS", "values-b+sr+Latn", "values-mcc310-es", "values-es-night")
+            .forEach { assertEquals(StringsKind.TRANSLATION, kinds[it], it) }
+        listOf("values-night", "values-sw600dp", "values-v21", "values-land", "values-car", "values-mcc310")
+            .forEach { assertEquals(null, kinds[it], it) }
+    }
+
+    @Test
+    fun `a configuration override is neither hashed nor read as an orphaned translation`() {
+        strings("values-night", "greeting" to "Hello, night owl")
+        task("restampWithNight", rewrite = true).check()
+
+        val hashes = computeHashes(root, project.fileTree(root) { include("app/src/*/res/values*/strings.xml") }.files)
+        assertEquals(setOf("app:greeting", "app:farewell"), hashes.keys)
+
+        File(root, "app/src/main/res/values-es/strings.xml").delete()
+        assertEquals(
+            null,
+            misconfiguration(root, project.fileTree(root) { include("app/src/*/res/values*/strings.xml") }.files),
+        )
+    }
+
     private fun task(
         name: String,
         rewrite: Boolean,
