@@ -928,6 +928,7 @@ jobs:
               printf '%s\n%s\n' "$attempted" "$declined"
               if [ -n "$note" ]; then
                 printf 'Looked at the CI failure on `%s` and changed nothing.\n\n%s\n' "${SHA:0:7}" "$note"
+                if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
               else
                 # Only when the agent wrote nothing at all. Stopping is a legitimate outcome for this job,
                 # so the fallback is a plain sentence rather than an error.
