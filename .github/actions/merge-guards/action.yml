@@ -1,0 +1,31 @@
+name: Merge guards
+description: >
+  Exposes merge-guards.sh, the merge guards bot-review's merge gate and its release-held sweep
+  share, to a reusable workflow.
+
+# An action for the same reason as governed-paths: a reusable workflow runs against the CALLER's
+# checkout, and a composite action is the only way to hand it a file that travels with it.
+#
+# It outputs a path rather than running anything, because both callers use the script from the
+# middle of larger shell blocks, one subcommand at a time, and word each outcome their own way.
+
+outputs:
+  script:
+    description: Absolute path to merge-guards.sh.
+    value: ${{ steps.locate.outputs.script }}
+
+runs:
+  using: composite
+  steps:
+    - name: Locate the merge-guards script
+      id: locate
+      shell: bash
+      env:
+        # The only handle a composite action has on files shipped alongside it.
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        script="${ACTION_PATH}/merge-guards.sh"
+        [ -f "$script" ] || { echo "::error::merge-guards.sh is missing from $ACTION_PATH."; exit 1; }
+        chmod +x "$script"
+        echo "script=$script" >> "$GITHUB_OUTPUT"
