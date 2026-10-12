@@ -516,6 +516,11 @@ jobs:
           if [ -n "$governed_note" ]; then
             printf '%s\n' "$governed_note" | gh pr comment "$PR" --body-file -
           fi
+          # reply.md was written before the restore, so it can claim an edit the restore threw away.
+          governed_caveat=""
+          if [ -n "$governed_note" ] && grep -qF -- "$(bash "$GOVERNED_SCRIPT" --discarded-marker)" <<<"$governed_note"; then
+            governed_caveat=$(bash "$GOVERNED_SCRIPT" --discarded-caveat)
+          fi
 
           dirty=$(git status --porcelain)
           # Agents commit anyway often enough that trusting the porcelain alone would strand the
@@ -555,6 +560,7 @@ jobs:
           {
             echo "<!-- author-response -->"
             cat "${{ runner.temp }}/reply.md" 2>/dev/null || echo "_No reply written._"
+            if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
             if [ -n "$push_note" ]; then printf '\n\n%s\n' "$push_note"; fi
             # The reply above is the agent's account; this is the commit's. Listing the files does
             # not make the account true - it makes it falsifiable without re-diffing the branch.

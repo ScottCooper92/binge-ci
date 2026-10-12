@@ -27,6 +27,12 @@
 #   between takes the disclosure down with it. A caller splits the two apart, and reads the
 #   string from here rather than keeping its own copy.
 #
+# Usage: restore-agent-governed-paths.sh --discarded-marker | --discarded-caveat
+#   The marker the note carries when it threw an agent edit away, and the line a caller adds to
+#   the agent's own account when it sees it. That account was written before the discard, so it
+#   can claim a change that is not on the branch; the caveat says it does not hold. Read from here
+#   so the marker and its wording have one definition.
+#
 # Usage: restore-agent-governed-paths.sh --rewrite
 #   Performs the rewrite itself: every governed path in the WORKING TREE becomes the base's
 #   copy, and the index is left alone - the same state claude-code-action leaves behind. The
@@ -53,9 +59,20 @@ if [ -n "${GOVERNED_EXTRA_PATHS:-}" ]; then
 fi
 
 merged_marker="<!-- governed-merged -->"
+discarded_marker="<!-- governed-discarded -->"
 
 if [ "${1:-}" = "--merged-marker" ]; then
   printf '%s\n' "$merged_marker"
+  exit 0
+fi
+
+if [ "${1:-}" = "--discarded-marker" ]; then
+  printf '%s\n' "$discarded_marker"
+  exit 0
+fi
+
+if [ "${1:-}" = "--discarded-caveat" ]; then
+  printf '%s\n' "_The governed-path edits the note above names were thrown away and are not on this branch. Anything said above about changing them does not hold._"
   exit 0
 fi
 
@@ -222,7 +239,8 @@ fi
 if [ ${#discarded[@]} -gt 0 ]; then
   echo "Discarded changes to governed paths: ${discarded[*]}" >&2
   list=$(printf '`%s`, ' "${discarded[@]}")
-  note+=$'\n'"_Note: I changed ${list%, } and threw that away. Those paths are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so my edit was made against the wrong base, and keeping it would have reverted your version. Change them yourself if they still need changing._"$'\n'
+  note+=$'\n'"$discarded_marker"$'\n'
+  note+="_Note: I changed ${list%, } and threw that away. Those paths are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so my edit was made against the wrong base, and keeping it would have reverted your version. Change them yourself if they still need changing._"$'\n'
 fi
 
 # The one unresolvable case: no version in the PR to restore, so it is committed as-is.
