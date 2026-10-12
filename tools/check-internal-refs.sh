@@ -35,11 +35,12 @@ resolve=false
 scan=(.github/workflows/*.yml .github/actions/*/action.yml)
 
 # Rule 1's files: every composite action, and every workflow that names `workflow_call` as a
-# trigger. The match is loose on purpose: a file wrongly counted as reusable only loses `./`, while
-# one wrongly left out would ship a reference that breaks in every consumer.
+# trigger. The match is loose on purpose: any uncommented mention of `workflow_call` counts, so the
+# mapping, inline, block-sequence and quoted forms all do. A file wrongly counted as reusable only
+# loses `./`, while one wrongly left out would ship a reference that breaks in every consumer.
 reusable=(.github/actions/*/action.yml)
 for wf in .github/workflows/*.yml; do
-  if grep -qE '^[[:space:]]+workflow_call:|^on:.*workflow_call' "$wf"; then reusable+=("$wf"); fi
+  if grep -qE '^[^#]*workflow_call' "$wf"; then reusable+=("$wf"); fi
 done
 
 local_refs=$(grep -nE '^[[:space:]]*(- )?uses:[[:space:]]*\./' "${reusable[@]}" || true)

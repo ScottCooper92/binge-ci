@@ -56,6 +56,24 @@ jobs:
       - uses: ./.github/actions/sample" "$plain_action"
 expect reusable-inline-local fail
 
+fixture reusable-list-local "on:
+  - workflow_call
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/sample" "$plain_action"
+expect reusable-list-local fail
+
+fixture reusable-quoted-local "on:
+  \"workflow_call\":
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/sample" "$plain_action"
+expect reusable-quoted-local fail
+
 fixture repo-only-local "on:
   pull_request:
 jobs:

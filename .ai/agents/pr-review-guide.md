@@ -65,7 +65,8 @@ than author association, or run on a fork PR is a finding whatever the input is 
 
 **Pins.** Third-party actions at a full SHA with the version in a comment; self-references
 at the one release tag; never `./` inside a reusable workflow or composite action, because it
-resolves against the caller's workspace. A workflow that only runs here, `ci.yml`, may use `./`. A `uses:` bump that is not a release commit of its own is wrong.
+resolves against the caller's workspace. A workflow that only runs here, `ci.yml`, may use `./`.
+A `uses:` bump that is not a release commit of its own is wrong.
 
 **A gate's names are a signature too.** The consumers apply the gates in `gradle-plugins/` by
 plugin id, configure them through an extension, and run their tasks by name. A renamed plugin
