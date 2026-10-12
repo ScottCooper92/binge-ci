@@ -192,6 +192,10 @@ class GatesFunctionalTest {
     ) {
         write("settings.gradle.kts", "rootProject.name = \"sample\"\n$settings\n")
         write("build.gradle.kts", script)
+        // The memory every consumer gives its own build. detekt 2.x runs the Kotlin analysis API in the
+        // daemon, and TestKit reuses one daemon across fixtures, so Gradle's default 384 MiB of metaspace
+        // runs out partway through the suite.
+        write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
     }
 
     private fun write(
