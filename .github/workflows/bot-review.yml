@@ -1212,7 +1212,7 @@ jobs:
       - name: Provide the merge guards
         id: guards
         if: inputs.auto_merge && (steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true')
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.20
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.21
 
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
@@ -1636,7 +1636,7 @@ jobs:
 
       - name: Provide the merge guards
         id: guards
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.20
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.21
 
       - name: Release merges held for a red default branch
         env:
