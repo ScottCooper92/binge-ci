@@ -11,7 +11,8 @@ CI is green on the head under review before a review starts. That means actionli
 shellcheck passed over every workflow, caller and script; the public callers fit the
 workflows in the tree and the `self-*.yml` callers fit the workflows at the tag they pin
 (`tools/check-callers.sh`); every composite action's `run:` blocks are shellcheck-clean
-(`tools/check-action-shell.sh`); every self-reference pins one immutable tag, with no
+(`tools/check-action-shell.sh`); every `${{ env.X }}` a composite action reads is set in that
+action (`tools/check-action-env.sh`); every self-reference pins one immutable tag, with no
 `uses: ./` in a reusable workflow or composite action (`tools/check-internal-refs.sh`, tested
 by `tools/test-internal-refs.sh`); and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
