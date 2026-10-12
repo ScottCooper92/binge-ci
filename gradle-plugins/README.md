@@ -15,6 +15,7 @@ commit, so the gates arrive at that commit with no new repository and no new pin
 | `binge.gates.translation-staleness` | `checkTranslationStaleness` | A translated source string changed and its translations were not re-confirmed. |
 | `binge.gates.detekt` | `detekt` | detekt finds a new violation. The plugin is the wiring; the rules are the consumer's. |
 | `binge.gates.baseline-staleness` | `checkBaselineStaleness` | The detekt baseline holds an entry the code no longer produces. |
+| `binge.gates.baseline-staleness-aggregate` | `checkBaselineStaleness`, at the root | A baseline several projects share holds an entry none of them produces. |
 | `binge.gates.tv-material-separation` | `checkTvMaterialSeparation` | TV source imports Material 3, or phone source imports tv-material. |
 
 ### Translation staleness
@@ -74,6 +75,28 @@ longer reports.
 
 It applies `binge.gates.detekt` and reads the same config, source and `baselineFile`, so the two runs
 agree on which rules are on. With no baseline set, or none on disk, both tasks skip.
+
+That is the per-project mode, and the default: each project's baseline is judged by that project's
+findings. A build whose projects share one root baseline needs the aggregate mode instead. There,
+each project sees only its own findings, so every entry another project owns looks stale.
+
+Apply `binge.gates.baseline-staleness` to each project as before, pointing `baselineFile` at the
+root file. Then apply `binge.gates.baseline-staleness-aggregate` to the root project:
+
+```kotlin
+// root build.gradle.kts
+plugins {
+    id("binge.gates.baseline-staleness-aggregate")
+}
+
+baselineStalenessAggregate {
+    baselineFile = layout.projectDirectory.file("detekt-baseline.xml") // the default
+}
+```
+
+The root `checkBaselineStaleness` reads every project's `detektWithoutBaseline` report and fails
+only on an entry no project produces any more. Each project's own check skips. A project that does
+not apply `binge.gates.baseline-staleness` is not read, so its findings keep no entry alive.
 
 ### tv-material separation
 

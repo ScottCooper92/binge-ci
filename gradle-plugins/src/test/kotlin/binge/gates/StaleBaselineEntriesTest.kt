@@ -26,7 +26,7 @@ class StaleBaselineEntriesTest {
                 "src/main/kotlin/data/Mapper.kt" to listOf("MagicNumber", "MagicNumber"),
             )
 
-        assertEquals(emptyList<String>(), staleBaselineEntries(baseline, report))
+        assertEquals(emptyList<String>(), staleBaselineEntries(baseline, listOf(report)))
     }
 
     @Test
@@ -38,8 +38,20 @@ class StaleBaselineEntriesTest {
                 "LongMethod in Screen.kt - baselined 1, reported 0",
                 "MagicNumber in Mapper.kt - baselined 2, reported 1",
             ),
-            staleBaselineEntries(baseline, report),
+            staleBaselineEntries(baseline, listOf(report)),
         )
+    }
+
+    @Test
+    fun `sums one rule and file across the reports of several projects`() {
+        val first = report("first/src/main/kotlin/data/Mapper.kt" to listOf("MagicNumber"))
+        val second =
+            report(
+                "second/src/main/kotlin/data/Mapper.kt" to listOf("MagicNumber"),
+                "second/src/main/kotlin/ui/Screen.kt" to listOf("LongMethod"),
+            )
+
+        assertEquals(emptyList<String>(), staleBaselineEntries(baseline, listOf(first, second)))
     }
 
     private fun report(vararg files: Pair<String, List<String>>): String =

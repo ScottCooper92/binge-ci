@@ -2,8 +2,10 @@ package binge.gates
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
@@ -21,15 +23,19 @@ abstract class CheckBaselineStalenessTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val baselineFile: RegularFileProperty
 
-    /** The XML report of a detekt run with no baseline applied. */
-    @get:InputFile
+    /**
+     * The XML reports of detekt runs with no baseline applied: one per project that shares the
+     * baseline. A report that does not exist is read as no findings, for a run that was skipped.
+     */
+    @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val reportFile: RegularFileProperty
+    abstract val reportFiles: ConfigurableFileCollection
 
     @TaskAction
     fun check() {
         val baseline = baselineFile.get().asFile
-        val stale = staleBaselineEntries(baseline.readText(), reportFile.get().asFile.readText())
+        val reports = reportFiles.files.filter { it.exists() }.map { it.readText() }
+        val stale = staleBaselineEntries(baseline.readText(), reports)
         if (stale.isEmpty()) return
         throw GradleException(
             "${baseline.name} holds ${stale.size} entr${if (stale.size == 1) "y" else "ies"} " +
@@ -41,13 +47,14 @@ abstract class CheckBaselineStalenessTask : DefaultTask() {
 }
 
 /**
- * Each baselined rule-and-file pair the report no longer accounts for, sorted. Entries are compared
- * per rule and file rather than by full signature, because the report carries no signature; a rule
- * with several findings in one file is therefore counted.
+ * Each baselined rule-and-file pair the reports no longer account for, sorted. Entries are compared
+ * per rule and file rather than by full signature, because a report carries no signature; a rule
+ * with several findings in one file is therefore counted. Findings are summed across [reportXmls],
+ * because a baseline shared by several projects names a file by its name alone.
  */
 internal fun staleBaselineEntries(
     baselineXml: String,
-    reportXml: String,
+    reportXmls: List<String>,
 ): List<String> {
     val baselined = mutableMapOf<String, Int>()
     Regex("<ID>([^<]+)</ID>").findAll(baselineXml).forEach { match ->
@@ -57,7 +64,7 @@ internal fun staleBaselineEntries(
     }
     val reported = mutableMapOf<String, Int>()
     var currentFile = ""
-    reportXml.lines().forEach { line ->
+    reportXmls.flatMap { it.lines() }.forEach { line ->
         Regex("""<file name="([^"]+)"""").find(line)?.let { currentFile = it.groupValues[1].substringAfterLast('/') }
         Regex("""source="detekt\.([^"]+)"""").find(line)?.let {
             reported.merge("${it.groupValues[1]} in $currentFile", 1, Int::plus)

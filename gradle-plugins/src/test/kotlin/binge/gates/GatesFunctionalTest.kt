@@ -159,6 +159,46 @@ class GatesFunctionalTest {
         assertTrue(stale.output.contains("UnsafeCallOnNullableType in Length.kt - baselined 1, reported 0"), stale.output)
     }
 
+    // Two projects share one root baseline. Each one's own check would read the other's entry as
+    // stale, so the root check reads both runs and reports only the entry neither produces.
+    @Test
+    fun `aggregate baseline staleness reads every project's findings against one root baseline`() {
+        val module =
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.baseline-staleness")
+            }
+            $REPOSITORIES
+            detektGate { baselineFile.set(rootProject.layout.projectDirectory.file("detekt-baseline.xml")) }
+            """.trimIndent()
+        build("plugins {\n    id(\"binge.gates.baseline-staleness-aggregate\")\n}\n", settings = "include(\"first\", \"second\")")
+        write("first/build.gradle.kts", module)
+        write("second/build.gradle.kts", module)
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write("first/src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
+        write("second/src/main/kotlin/sample/Width.kt", "package sample\n\nfun width(text: String?): Int = text!!.length\n")
+
+        // detekt writes one project's baseline at a time, so the shared one is the two spliced together.
+        val baseline = File(root, "detekt-baseline.xml")
+        runner(":first:detektBaseline", withKotlin = true).build()
+        val first = baseline.readText()
+        runner(":second:detektBaseline", withKotlin = true).build()
+        val ids = Regex("<ID>[^<]+</ID>").findAll(baseline.readText()).joinToString("") { it.value }
+        baseline.writeText(first.replace("</CurrentIssues>", "$ids</CurrentIssues>"))
+        assertTrue(baseline.readText().contains("Length.kt") && baseline.readText().contains("Width.kt"), baseline.readText())
+
+        val fresh = runner("check", withKotlin = true).build()
+        assertEquals(TaskOutcome.SKIPPED, fresh.task(":first:checkBaselineStaleness")?.outcome)
+        assertEquals(TaskOutcome.SUCCESS, fresh.task(":checkBaselineStaleness")?.outcome)
+
+        write("second/src/main/kotlin/sample/Width.kt", "package sample\n\nfun width(text: String?): Int = text?.length ?: 0\n")
+        val stale = runner("check", withKotlin = true).buildAndFail()
+
+        assertTrue(stale.output.contains("UnsafeCallOnNullableType in Width.kt - baselined 1, reported 0"), stale.output)
+        assertTrue(stale.output.contains("holds 1 entry"), stale.output)
+    }
+
     // AGP compiles BuildConfig with javac, outside the Kotlin compilation's own output. detekt 2.x counts
     // every reference it cannot resolve as a compiler error, and stops applying the rules that need
     // types to that code, while the build still passes. So a read of BuildConfig must resolve.

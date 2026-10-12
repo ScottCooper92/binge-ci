@@ -72,6 +72,12 @@ gradlePlugin {
             displayName = "Baseline staleness"
             description = "Fails when the detekt baseline holds an entry the code no longer produces."
         }
+        register("baselineStalenessAggregate") {
+            id = "binge.gates.baseline-staleness-aggregate"
+            implementationClass = "binge.gates.BaselineStalenessAggregatePlugin"
+            displayName = "Baseline staleness, aggregated at the root"
+            description = "Fails when a detekt baseline shared by several projects holds an entry none of them produces."
+        }
         register("tvMaterialSeparation") {
             id = "binge.gates.tv-material-separation"
             implementationClass = "binge.gates.TvMaterialSeparationPlugin"
