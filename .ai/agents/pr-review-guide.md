@@ -135,6 +135,6 @@ summary as a finding and go on reviewing from this file as read from `main`.
 
 Each PR body carries the checklist from `.github/pull_request_template.md`. Read it against the run:
 
-- You only review a head whose CI passed, so a ticked box cannot be checked against a failed run on that head. Treat the ticks as claims, not as proof.
+- You only review a head whose CI passed, so look back: list this PR's earlier CI runs (`gh run list --branch <head branch>`). A check the body ticks that failed in one of those runs, on a head the author called final, is a finding: they said it ran clean and it didn't. Name the run and the check.
 - A box left unticked without a reason is a nit.
 - A PR with no checklist at all, other than a Renovate dependency update, gets a nit asking for it.
