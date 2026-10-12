@@ -13,6 +13,8 @@ dependencyResolutionManagement {
     repositories {
         maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "MavenCentralMirror" }
         mavenCentral()
+        // AGP, for the Android TestKit fixture only.
+        google()
         gradlePluginPortal()
     }
 }

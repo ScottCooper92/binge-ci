@@ -88,18 +88,67 @@ class GatesFunctionalTest {
                 id("org.jetbrains.kotlin.jvm")
                 id("binge.gates.detekt")
             }
-            repositories { mavenCentral() }
+            $REPOSITORIES
             """.trimIndent(),
         )
+        assertTheBanFires("check", withKotlin = true)
+    }
+
+    // The same proof on an Android library, where the gate resolves types against a variant's
+    // compilation rather than `main`: AGP's compilations exist only after evaluation, and the
+    // classpath comes from the variant's compile task. The SDK is the runner's own.
+    @Test
+    fun `detekt gate resolves types on an Android project, against the debug compilation`() {
+        val sdk =
+            checkNotNull(System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")) {
+                "This test needs an Android SDK: set ANDROID_HOME."
+            }
+        build(
+            """
+            plugins {
+                id("com.android.library")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            android {
+                namespace = "sample"
+                compileSdk = 37
+                defaultConfig { minSdk = 26 }
+            }
+            detektGate { typeResolutionCompilation.set("debug") }
+            """.trimIndent(),
+        )
+        write("local.properties", "sdk.dir=${File(sdk).invariantSeparatorsPath}\n")
+
+        assertTheBanFires("detekt", withKotlin = true, withAndroid = true)
+    }
+
+    /** A `!!` fails [task] naming the rule, and the same file without it passes. */
+    private fun assertTheBanFires(
+        task: String,
+        withKotlin: Boolean,
+        withAndroid: Boolean = false,
+    ) {
         write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
         write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
 
-        val failing = runner("check", withKotlin = true).buildAndFail()
+        val failing = runner(task, withKotlin, withAndroid).buildAndFail()
 
         assertTrue(failing.output.contains("UnsafeCallOnNullableType"), failing.output)
 
         write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text?.length ?: 0\n")
-        runner("check", withKotlin = true).build()
+        runner(task, withKotlin, withAndroid).build()
+    }
+
+    private companion object {
+        // Google's mirror of Maven Central first, as this build's own settings do: Central rate-limits
+        // shared runners, and Gradle treats a 429 as a failure rather than a miss.
+        const val REPOSITORIES =
+            "repositories {\n" +
+                "    maven(\"https://maven-central.storage-download.googleapis.com/maven2/\")\n" +
+                "    google()\n" +
+                "    mavenCentral()\n" +
+                "}"
     }
 
     private fun build(
@@ -123,13 +172,17 @@ class GatesFunctionalTest {
     private fun runner(
         task: String,
         withKotlin: Boolean = false,
+        withAndroid: Boolean = false,
     ): GradleRunner =
         GradleRunner
             .create()
             .withProjectDir(root)
             .withPluginClasspath(
                 PluginUnderTestMetadataReading.readImplementationClasspath() +
-                    if (withKotlin) System.getProperty("testKitKotlin").split(File.pathSeparator).map(::File) else emptyList(),
+                    (if (withKotlin) classpath("testKitKotlin") else emptyList()) +
+                    (if (withAndroid) classpath("testKitAndroid") else emptyList()),
             )
             .withArguments(task, "--stacktrace")
+
+    private fun classpath(property: String): List<File> = System.getProperty(property).split(File.pathSeparator).map(::File)
 }
