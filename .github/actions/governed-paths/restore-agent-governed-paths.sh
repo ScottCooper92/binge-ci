@@ -72,7 +72,7 @@ if [ "${1:-}" = "--discarded-marker" ]; then
 fi
 
 if [ "${1:-}" = "--discarded-caveat" ]; then
-  printf '%s\n' "_The governed-path edits this agent made were thrown away and are not on this branch. Anything said above about changing them does not hold._"
+  printf '%s\n' "_Some governed-path edits this agent made were thrown away. They are the ones the discard note names, and they are not on this branch. Anything said above about changing those paths does not hold._"
   exit 0
 fi
 
