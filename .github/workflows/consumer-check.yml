@@ -63,11 +63,15 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      # Recursive, because the change can carry submodules of its own: a repository that applies
+      # binge-ci's Gradle gates includes them from a binge-ci submodule, and the consumer's build
+      # includes this one, so without them the consumer's build cannot configure.
       - name: Check out the change
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: candidate
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
 
       # Submodules are fetched one by one below: the consumer's pin of the calling repository is
       # exactly what this job replaces, so cloning it would be wasted work.
@@ -102,7 +106,7 @@ jobs:
           mapfile -t others < <(git config -f "$modules" --get-regexp '^submodule\..*\.path$' \
             | awk -v p="$path" '$2 != p { print $2 }')
           if [ "${#others[@]}" -gt 0 ]; then
-            git -C consumer submodule update --init --depth 1 -- "${others[@]}"
+            git -C consumer submodule update --init --recursive --depth 1 -- "${others[@]}"
           fi
           rm -rf "consumer/${path}"
           mv candidate "consumer/${path}"
