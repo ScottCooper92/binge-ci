@@ -66,8 +66,8 @@ jobs:
 
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.
-      - name: shellcheck the governed-paths script and the tools
-        run: shellcheck --severity=warning .github/actions/governed-paths/restore-agent-governed-paths.sh tools/*.sh
+      - name: shellcheck the action scripts and the tools
+        run: shellcheck --severity=warning .github/actions/*/*.sh tools/*.sh
 
       # GitHub loads `.yaml` as readily as `.yml`, but every glob in this repo - actionlint's
       # above and the three tools' - reads `.yml` only, so a workflow or caller added as

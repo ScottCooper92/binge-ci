@@ -1208,6 +1208,12 @@ jobs:
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           only-update: 'true'
 
+      # The guards the merge below shares with "Release merges held for a red default branch".
+      - name: Provide the merge guards
+        id: guards
+        if: inputs.auto_merge && (steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true')
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.20
+
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
       # than being deleted so that turning it on is one input and not a re-derivation.
@@ -1231,15 +1237,13 @@ jobs:
           CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
           FIX_LABEL: ${{ inputs.default_branch_fix_label }}
           HELD_LABEL: ${{ inputs.held_label }}
+          GUARDS: ${{ steps.guards.outputs.script }}
         run: |
           set -euo pipefail
           # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
           # typo would otherwise surface as a merge refusal at the end of a review, and anything
           # else a string can carry has no business being spliced into that command.
-          case "$MERGE_METHOD" in
-            squash|merge|rebase) ;;
-            *) echo "::error::merge_method must be squash, merge or rebase - got '$MERGE_METHOD'."; exit 1 ;;
-          esac
+          "$GUARDS" method "$MERGE_METHOD"
 
           # As in "Submit the review": the queued duplicate can arrive after the run ahead of it
           # merged, and every guard below reports its refusal on the PR.
@@ -1290,20 +1294,14 @@ jobs:
           #
           # Checked here rather than by having the author jobs add `hold`: a label has to exist in
           # the repository to be applied, and one that silently fails to apply restores nothing.
-          # The call is separate from the reading of it. `grep -c … || true` folded a failing
-          # gh api into the same `0` a clean "no marker" gives, so a 502 or a rate limit read as
-          # "no bot touched a governed path" and merged - on the one guard added to stop that.
-          # Every other guard in this step fails closed; so does this one now.
-          #
-          # Bot-authored comments only: the marker is a literal string, so a review quoting it or
-          # a maintainer asking what it does would otherwise park the PR for good.
+          # The marker is read from bot comments only, and a failed read fails the step rather than
+          # reading as "no marker": every other guard in this step fails closed, and so does this one.
           #
           # There is deliberately no way to lift it. The `hold` label can be taken off because a
           # human decides it no longer applies; this says a bot put a change into the rules file,
           # which stays true. It stops the BOT merging, and a human merging by hand is the point.
-          bot_comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
-            --paginate --jq '.[] | select(.user.type == "Bot") | .body')
-          if grep -q -- '<!-- governed-merged -->' <<<"$bot_comments"; then
+          governed=$("$GUARDS" governed "$PR")
+          if [ "$governed" = "yes" ]; then
             hold "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
           fi
 
@@ -1318,105 +1316,12 @@ jobs:
           [ "$head_now" = "$REVIEWED_SHA" ] \
             || hold "the head moved since review ($REVIEWED_SHA -> $head_now)." head-moved
 
-          # Unaddressed human feedback blocks. Bot chatter does not.
-          #
-          # --paginate is load-bearing: /reviews pages at 30, oldest first, so a CHANGES_REQUESTED
-          # past the first page would be invisible and the merge would go straight through it.
-          #
-          # Only the LATEST review per person counts, as GitHub's own merge box does - otherwise a
-          # maintainer who requests changes, gets them fixed and then approves leaves a block that can
-          # never clear. COMMENTED is dropped first: it does not supersede a prior verdict.
-          human_blocks=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate \
-            --jq '.[] | select(.user.type != "Bot") | select(.state != "COMMENTED")
-                      | {login: .user.login, state: .state, at: .submitted_at}' \
-            | jq -s '[group_by(.login)[] | (sort_by(.at) | last)
-                      | select(.state == "CHANGES_REQUESTED")] | length')
-          [ "$human_blocks" = "0" ] || hold "a human review requests changes."
-
-          # Anything a human left after the head was pushed is unaddressed by definition, and it lands
-          # in three places. Reading only the third is how a review carrying inline objections gets
-          # merged over: a COMMENTED review lives in /reviews, its inline notes in the review threads,
-          # and only top-level chat in /issues/{n}/comments.
-          #
-          # These page at 30, oldest first, so unpaginated the newest feedback - the only kind this
-          # guard exists to find - is the first thing off the end. --jq runs once per page, hence the
-          # awk sum.
-          #
-          # Two exemptions, on different grounds. `<!-- answered -->` is a top-level comment's
-          # counterpart to resolving a thread, since it has no resolved state of its own: without it,
-          # answering the reviewer bot parked the PR until unrelated code happened to be pushed. It is
-          # set deliberately, per comment, and reviews do not honour it - a review body is the
-          # objection itself, not a note about one.
-          #
-          # The Claude Code footer is exempt because an agent session posts as the repo owner, so
-          # `author_association` reads OWNER and this guard cannot tell its comments from a
-          # maintainer's - which collides with the convention that REQUIRES a comment when standing
-          # down on a CI failure that is not the PR's own. It keys on a signal already mandated on
-          # every agent-authored comment. A human who pastes it is skipped too, and that fails safe:
-          # the only consequence is a merge the reviewer had already approved.
-          newer=0
-          for endpoint in "pulls/${PR}/reviews" "issues/${PR}/comments"; do
-            # Both exemptions are markers anyone can paste, so they exempt a comment only when its
-            # author could have been trusted without them: a maintainer or collaborator by
-            # association. A drive-by comment carrying the marker holds the merge like any other.
-            answered='select(true)'
-            if [ "$endpoint" = "issues/${PR}/comments" ]; then
-              answered='select(
-                          (((.body // "") | test("<!--\\s*answered\\s*-->"))
-                            or ((.body // "") | test("Generated by \\[Claude Code\\]")))
-                          and ((.author_association // "") | IN("OWNER", "MEMBER", "COLLABORATOR"))
-                          | not)'
-            fi
-            n=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
-              --jq "[.[]
-                     | select(.user.type != \"Bot\")
-                     | select(.state != \"APPROVED\")
-                     | select((.submitted_at // .created_at) > \"$PUSHED_AT\")
-                     | $answered] | length" \
-              | awk '{ s += $1 } END { print s + 0 }')
-            newer=$((newer + ${n:-0}))
-          done
-
-          # Inline notes are counted by THREAD, not by comment, which is why they come from GraphQL.
-          # A thread's RESOLVED state is the question: resolved means addressed, whoever resolved it,
-          # and an unresolved thread counts however its newest comment is shaped. Counting replies
-          # instead penalised the reviews that were ANSWERED - push the fix, say so on the thread, and
-          # that reply is always newer than the head - while exempting replies let a reviewer's
-          # escalation on their own thread go unseen.
-          #
-          # `isResolved` is GraphQL-only, absent from the REST payload, which is why this reads
-          # differently from the two endpoints above.
-          #
-          # The one case this misses is a reply added to an already-resolved thread and left resolved.
-          # Telling that apart needs a resolution timestamp, and the published schema has none:
-          # `resolvedAt` is on no type, the timeline carries the thread but no resolve event, and
-          # `resolvedBy` says who and never when. Un-resolving is the affordance for reopening a
-          # point, and a reviewer who does that is counted again here.
-          n=$(gh api graphql --paginate \
-            -f owner="${GH_REPO%%/*}" -f name="${GH_REPO##*/}" -F pr="$PR" \
-            -f query='
-              query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-                repository(owner: $owner, name: $name) {
-                  pullRequest(number: $pr) {
-                    reviewThreads(first: 100, after: $endCursor) {
-                      pageInfo { hasNextPage endCursor }
-                      nodes {
-                        isResolved
-                        comments(first: 100) { nodes { createdAt author { __typename } } }
-                      }
-                    }
-                  }
-                }
-              }' \
-            --jq "[.data.repository.pullRequest.reviewThreads.nodes[]
-                   | select(.isResolved | not)
-                   | .comments.nodes[]
-                   | select((.author.__typename // \"\") != \"Bot\")
-                   | select(.createdAt > \"$PUSHED_AT\")] | length" \
-            | awk '{ s += $1 } END { print s + 0 }')
-          newer=$((newer + ${n:-0}))
-
-          [ "$newer" = "0" ] || hold "there is human feedback newer than the head commit."
+          # Unaddressed human feedback blocks. Bot chatter does not. A human's latest verdict
+          # requesting changes, or anything a human left after the head was pushed; merge-guards.sh
+          # says what counts and why.
+          feedback=$("$GUARDS" feedback "$PR" "$PUSHED_AT")
+          [ "$feedback" != "changes-requested" ] || hold "a human review requests changes."
+          [ "$feedback" != "newer" ] || hold "there is human feedback newer than the head commit."
 
           # Two PRs can each be green against the base they were tested on and still break the
           # default branch together: one renames a parameter, the other adds a call that uses the old
@@ -1512,15 +1417,6 @@ jobs:
             hold "$reason" "merge-state-$state"
           fi
 
-          title=$(gh pr view "$PR" --json title --jq .title)
-          # GitHub ignores a commit title and message on a REBASE merge, and gh sends them anyway -
-          # there is no validation in cli/cli rejecting the pair, so they go into the payload and
-          # are dropped server-side. Passing them only where they mean something keeps the command
-          # honest about what it is asking for.
-          message=()
-          if [ "$MERGE_METHOD" != "rebase" ]; then
-            message=(--subject "$title (#$PR)" --body "$(gh pr view "$PR" --json body --jq .body)")
-          fi
           # Kept so "Report a failed review" can name WHY a merge failed instead of pointing at a log.
           # A refusal is usually one line from the API, and it is the line that decides whether a
           # maintainer retries or merges by hand.
@@ -1529,11 +1425,10 @@ jobs:
           # success output too. Left in place, a non-empty log would mean "the merge was reached"
           # rather than "the merge errored".
           merge_log="${{ runner.temp }}/merge-error.txt"
-          # --match-head-commit: the head check above is minutes old by now - three paginated
-          # fetches and a poll that can sleep half a minute sit between it and this call - and the
-          # author bots push unattended. GitHub refuses the merge when the head is no longer the
-          # commit the review and the CI run were for, and "Report a failed review" quotes it.
-          if ! gh pr merge "$PR" "--${MERGE_METHOD}" --match-head-commit "$REVIEWED_SHA" "${message[@]}" > "$merge_log" 2>&1; then
+          # The merge matches the head the review and the CI run were for: the head check above is
+          # minutes old by now, and GitHub's refusal when it moved is what "Report a failed review"
+          # quotes.
+          if ! "$GUARDS" merge "$PR" "$MERGE_METHOD" "$REVIEWED_SHA" > "$merge_log" 2>&1; then
             cat "$merge_log" >&2
             exit 1
           fi
@@ -1739,6 +1634,10 @@ jobs:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
+      - name: Provide the merge guards
+        id: guards
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.20
+
       - name: Release merges held for a red default branch
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -1750,12 +1649,10 @@ jobs:
           HELD_LABEL: ${{ inputs.held_label }}
           MERGE_METHOD: ${{ inputs.merge_method }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GUARDS: ${{ steps.guards.outputs.script }}
         run: |
           set -euo pipefail
-          case "$MERGE_METHOD" in
-            squash|merge|rebase) ;;
-            *) echo "::error::merge_method must be squash, merge or rebase - got '$MERGE_METHOD'."; exit 1 ;;
-          esac
+          "$GUARDS" method "$MERGE_METHOD"
           [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
 
           held=$(gh pr list --state open --label "$HELD_LABEL" --limit 1000 --json number --jq '.[].number')
@@ -1787,7 +1684,7 @@ jobs:
           release() {
             set -euo pipefail
             pr=$1
-            view=$(gh pr view "$pr" --json headRefOid,baseRefName,labels,title)
+            view=$(gh pr view "$pr" --json headRefOid,baseRefName,labels)
             head=$(jq -r .headRefOid <<<"$view")
             labels=$(jq -r '[.labels[].name] | join(",")' <<<"$view")
 
@@ -1806,68 +1703,21 @@ jobs:
               || { echo "#$pr: no approval of the current head ${head:0:7}."; unmark "$pr"; return 0; }
             approved_at=$(jq -r .submitted_at <<<"$approval")
 
-            bot_comments=$(gh api "repos/${GH_REPO}/issues/${pr}/comments?per_page=100" \
-              --paginate --jq '.[] | select(.user.type == "Bot") | .body')
-            if grep -q -- '<!-- governed-merged -->' <<<"$bot_comments"; then
+            # The merge gate's own guards, from the same script: a governed-path change, a human
+            # requesting changes, and human feedback left since the approval.
+            # Assigned before the test: a failed read inside `[ "$(…)" = … ]` is not caught by
+            # `set -e`, and would read as "no marker".
+            governed=$("$GUARDS" governed "$pr")
+            if [ "$governed" = "yes" ]; then
               unmark "$pr"
               note "$pr" "an author bot merged a change into a path that governs the agents - that is a human's merge." governed-path
               return 0
             fi
-
-            human_blocks=$(gh api "repos/${GH_REPO}/pulls/${pr}/reviews?per_page=100" --paginate \
-              --jq '.[] | select(.user.type != "Bot") | select(.state != "COMMENTED")
-                        | {login: .user.login, state: .state, at: .submitted_at}' \
-              | jq -s '[group_by(.login)[] | (sort_by(.at) | last)
-                        | select(.state == "CHANGES_REQUESTED")] | length')
-            if [ "$human_blocks" != "0" ]; then
+            feedback=$("$GUARDS" feedback "$pr" "$approved_at")
+            if [ "$feedback" = "changes-requested" ]; then
               unmark "$pr"; note "$pr" "a human review requests changes." "changes-requested-${head}"; return 0
             fi
-
-            # Human feedback left since the approval, by the merge gate's own rules: reviews and
-            # top-level comments (with the same two exemptions), and unresolved inline threads.
-            newer=0
-            for endpoint in "pulls/${pr}/reviews" "issues/${pr}/comments"; do
-              answered='select(true)'
-              if [ "$endpoint" = "issues/${pr}/comments" ]; then
-                answered='select(
-                            (((.body // "") | test("<!--\\s*answered\\s*-->"))
-                              or ((.body // "") | test("Generated by \\[Claude Code\\]")))
-                            and ((.author_association // "") | IN("OWNER", "MEMBER", "COLLABORATOR"))
-                            | not)'
-              fi
-              n=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
-                --jq "[.[]
-                       | select(.user.type != \"Bot\")
-                       | select(.state != \"APPROVED\")
-                       | select((.submitted_at // .created_at) > \"$approved_at\")
-                       | $answered] | length" \
-                | awk '{ s += $1 } END { print s + 0 }')
-              newer=$((newer + ${n:-0}))
-            done
-            n=$(gh api graphql --paginate \
-              -f owner="${GH_REPO%%/*}" -f name="${GH_REPO##*/}" -F pr="$pr" \
-              -f query='
-                query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-                  repository(owner: $owner, name: $name) {
-                    pullRequest(number: $pr) {
-                      reviewThreads(first: 100, after: $endCursor) {
-                        pageInfo { hasNextPage endCursor }
-                        nodes {
-                          isResolved
-                          comments(first: 100) { nodes { createdAt author { __typename } } }
-                        }
-                      }
-                    }
-                  }
-                }' \
-              --jq "[.data.repository.pullRequest.reviewThreads.nodes[]
-                     | select(.isResolved | not)
-                     | .comments.nodes[]
-                     | select((.author.__typename // \"\") != \"Bot\")
-                     | select(.createdAt > \"$approved_at\")] | length" \
-              | awk '{ s += $1 } END { print s + 0 }')
-            newer=$((newer + ${n:-0}))
-            if [ "$newer" != "0" ]; then
+            if [ "$feedback" = "newer" ]; then
               unmark "$pr"; note "$pr" "there is human feedback newer than the approval." "newer-feedback-${head}"; return 0
             fi
 
@@ -1898,14 +1748,9 @@ jobs:
               return 0
             fi
 
-            title=$(jq -r .title <<<"$view")
-            message=()
-            if [ "$MERGE_METHOD" != "rebase" ]; then
-              message=(--subject "$title (#$pr)" --body "$(gh pr view "$pr" --json body --jq .body)")
-            fi
-            # --match-head-commit: the approval is for this head and no other, and the author bots
-            # push unattended.
-            gh pr merge "$pr" "--${MERGE_METHOD}" --match-head-commit "$head" "${message[@]}"
+            # Matched to the approved head: the approval is for this head and no other, and the
+            # author bots push unattended.
+            "$GUARDS" merge "$pr" "$MERGE_METHOD" "$head"
             unmark "$pr"
             echo "Merged #$pr, held while $DEFAULT_BRANCH was red."
           }

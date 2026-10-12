@@ -13,7 +13,7 @@ CI is one job, `lint`, with these steps in order:
 | shellcheck the composite actions | `tools/check-action-shell.sh` - every `run:` block in `.github/actions/*/action.yml` |
 | Check composite-action env references | `tools/check-action-env.sh` - every `${{ env.X }}` in an `action.yml` is set by an `env:` key or a `$GITHUB_ENV` write in that action |
 | Check this repo's references | `tools/check-internal-refs.sh` - no `uses: ./`, one immutable tag on every self-reference |
-| shellcheck the governed-paths script | shellcheck on `restore-agent-governed-paths.sh` |
+| shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
 
 Nothing builds. If the log shows a failure that is not in the table below, that is a
 **stop**, not an invitation to improvise.
