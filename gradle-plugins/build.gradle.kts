@@ -20,8 +20,9 @@ kotlin {
 // The Kotlin Gradle plugin is compileOnly, so TestKit's injected classpath does not carry it, and a
 // fixture applying it from the portal gets it in a classloader the gates cannot see. Only the fixture
 // that needs Kotlin gets it, added to its runner's classpath; the others run without it, as a consumer
-// that does not use Kotlin does.
+// that does not use Kotlin does. AGP is supplied the same way, to the Android fixture alone.
 val testKitKotlin: Configuration by configurations.creating
+val testKitAndroid: Configuration by configurations.creating
 
 dependencies {
     // binge.gates.detekt applies the detekt plugin itself, so it ships with these plugins.
@@ -30,6 +31,7 @@ dependencies {
     // does not must not be handed it. The detekt gate checks for it before touching its types.
     compileOnly(libs.kotlin.gradlePlugin)
     testKitKotlin(libs.kotlin.gradlePlugin)
+    testKitAndroid(libs.android.gradlePlugin)
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -41,8 +43,9 @@ tasks.validatePlugins {
 }
 
 tasks.test {
-    inputs.files(testKitKotlin)
+    inputs.files(testKitKotlin, testKitAndroid)
     systemProperty("testKitKotlin", testKitKotlin.asPath)
+    systemProperty("testKitAndroid", testKitAndroid.asPath)
     useJUnitPlatform()
     testLogging {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
