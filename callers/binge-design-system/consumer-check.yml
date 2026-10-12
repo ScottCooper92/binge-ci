@@ -43,4 +43,3 @@ jobs:
     with:
       consumer: ScottCooper92/binge-seerr
       tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
-      java_version: '17'

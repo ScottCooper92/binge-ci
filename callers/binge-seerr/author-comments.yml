@@ -71,7 +71,7 @@ jobs:
       # not run in. The Android SDK is preinstalled on the hosted runner image, which is
       # why ci.yml installs one too.
       toolchain: jvm
-      java_version: '17'
+      java_version: '21'
       verify_guidance: >
         You have a JDK, an Android SDK and Gradle, so verify what you change
         rather than reasoning about it. Scope Gradle to the module - `:app:test`,

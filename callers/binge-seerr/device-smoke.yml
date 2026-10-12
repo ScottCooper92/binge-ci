@@ -49,8 +49,8 @@ jobs:
       system_image_source: aosp-atd
       default_branch: main
       tasks: ':app:smokeAtdApi34DebugAndroidTest -PminifyDebug'
-      # The JDK its other CI builds on today; it moves with the rest of its pins.
-      java_version: '17'
+      # The JDK its other CI builds on; it moves with the rest of its pins.
+      java_version: '21'
 
   # A red weekly run has no PR or push to carry it. One issue stays open while it is red.
   scheduled-report:
