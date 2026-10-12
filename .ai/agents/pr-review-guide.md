@@ -11,8 +11,9 @@ CI is green on the head under review before a review starts. That means actionli
 shellcheck passed over every workflow, caller and script; the public callers fit the
 workflows in the tree and the `self-*.yml` callers fit the workflows at the tag they pin
 (`tools/check-callers.sh`); every composite action's `run:` blocks are shellcheck-clean
-(`tools/check-action-shell.sh`); every self-reference pins one immutable tag with no
-`uses: ./` (`tools/check-internal-refs.sh`); and `./gradlew build` in `gradle-plugins/`
+(`tools/check-action-shell.sh`); every self-reference pins one immutable tag, with no
+`uses: ./` in a reusable workflow or composite action (`tools/check-internal-refs.sh`, tested
+by `tools/test-internal-refs.sh`); and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
 
 Do not re-report anything in that set. Green is necessary and not sufficient: everything
@@ -63,8 +64,9 @@ what an agent read and ran into a world-readable log, admit a commenter by anyth
 than author association, or run on a fork PR is a finding whatever the input is called.
 
 **Pins.** Third-party actions at a full SHA with the version in a comment; self-references
-at the one release tag; never `./` inside a reusable workflow, because it resolves against
-the caller's workspace. A `uses:` bump that is not a release commit of its own is wrong.
+at the one release tag; never `./` inside a reusable workflow or composite action, because it
+resolves against the caller's workspace. A workflow that only runs here, `ci.yml`, may use `./`.
+A `uses:` bump that is not a release commit of its own is wrong.
 
 **A gate's names are a signature too.** The consumers apply the gates in `gradle-plugins/` by
 plugin id, configure them through an extension, and run their tasks by name. A renamed plugin

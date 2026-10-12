@@ -205,10 +205,11 @@ its own `if:`. The SDK root is an input, `android-sdk-root`; left empty it is re
 works too. The save step deletes the old entry first, so it needs a token with `actions: write`
 (see "Writing a caller").
 
-They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`. Inside a
-reusable workflow a local action path resolves against the **caller's** workspace, where
-these directories do not exist. The tag is immutable rather than `v1`, so a caller pinning
-`@v1.0.N` gets the actions that shipped with it; `uses:` takes no expression, so
+They are referenced by **full repo ref at an exact patch tag**, never `uses: ./`, from a
+reusable workflow or another action. There a local action path resolves against the
+**caller's** workspace, where these directories do not exist. `ci.yml` is the exception: it
+runs only in this repository, so it uses the actionlint action by `./`, at the PR's own head.
+The tag is immutable rather than `v1`, so a caller pinning `@v1.0.N` gets the actions that shipped with it; `uses:` takes no expression, so
 `tools/check-internal-refs.sh` is what keeps the five in step.
 
 ## The shared CI steps
