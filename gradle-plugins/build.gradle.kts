@@ -17,12 +17,19 @@ kotlin {
     }
 }
 
+// The Kotlin Gradle plugin is compileOnly, so TestKit's injected classpath would not carry it, and a
+// fixture applying it from the portal gets it in a classloader the gates cannot see. Adding it to the
+// injected classpath is what lets a fixture apply Kotlin and the detekt gate side by side, as a
+// consumer's build does.
+val testKitKotlin: Configuration by configurations.creating
+
 dependencies {
     // binge.gates.detekt applies the detekt plugin itself, so it ships with these plugins.
     implementation(libs.detekt.gradlePlugin)
     // compileOnly: a consumer that uses Kotlin already has it on its build classpath, and one that
     // does not must not be handed it. The detekt gate checks for it before touching its types.
     compileOnly(libs.kotlin.gradlePlugin)
+    testKitKotlin(libs.kotlin.gradlePlugin)
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -31,6 +38,10 @@ dependencies {
 tasks.validatePlugins {
     enableStricterValidation = true
     failOnWarning = true
+}
+
+tasks.pluginUnderTestMetadata {
+    pluginClasspath.from(testKitKotlin)
 }
 
 tasks.test {

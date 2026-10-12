@@ -74,6 +74,31 @@ class GatesFunctionalTest {
         assertEquals(TaskOutcome.SKIPPED, staleness.task(":checkBaselineStaleness")?.outcome, staleness.output)
     }
 
+    // UnsafeCallOnNullableType needs type resolution: with no classpath on the detekt task it loads
+    // and never fires. So a `!!` failing `check` here, and passing once removed, is the proof that
+    // the gate wired the compile classpath on.
+    @Test
+    fun `detekt gate resolves types, so the !! ban fires on a JVM project`() {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            repositories { mavenCentral() }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
+
+        val failing = runner("check").buildAndFail()
+
+        assertTrue(failing.output.contains("UnsafeCallOnNullableType"), failing.output)
+
+        write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text?.length ?: 0\n")
+        runner("check").build()
+    }
+
     private fun build(
         script: String,
         settings: String = "",
