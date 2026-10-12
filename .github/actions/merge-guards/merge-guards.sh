@@ -19,10 +19,14 @@
 #       Merges with the PR's title and body as the commit message, only if the head is still
 #       <head_sha>. gh's own output and exit status pass through.
 #
-# Reads GH_REPO and GH_TOKEN from the environment, as gh does.
+# Reads GH_REPO and GH_TOKEN from the environment, as gh does. Every gh call goes through
+# gh-retry.sh, so a merge whose connection never opened is tried again, still matched to <head_sha>.
 set -euo pipefail
 
 : "${GH_REPO:?GH_REPO must be set}"
+
+# shellcheck source=gh-retry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 
 method() {
   case "${1:-}" in

@@ -1000,6 +1000,14 @@ jobs:
             an empty "filed" is a claim that nothing in this PR reaches beyond
             its own diff, so check it is true before you make it.
 
+      # The guards the merge shares with "Release merges held for a red default branch", and the
+      # retry on a connection error that both steps below source. Ahead of the review's post,
+      # because the post uses the retry whether or not this caller merges.
+      - name: Provide the merge guards
+        id: guards
+        if: steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true'
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.21
+
       - name: Submit the review
         id: submit
         if: steps.pin.outputs.skip != 'true'
@@ -1014,8 +1022,14 @@ jobs:
           BODY_FILE: ${{ runner.temp }}/review-body.md
           POST_LOG: ${{ runner.temp }}/review-post-error.txt
           PAYLOAD: ${{ runner.temp }}/review-payload.json
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # From here every gh call retries a connection that never opened. The POST below keeps
+          # its own loop, and calls the real gh, since a retry there has to check the review did
+          # not land first.
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
           # The concurrency group serialises a duplicate trigger rather than dropping it, so a queued
           # run can arrive after the first one merged. A second review on a closed PR is noise.
           pr_state=$(gh pr view "$PR" --json state --jq .state)
@@ -1096,7 +1110,7 @@ jobs:
           landed=false
           while :; do
             attempt=$((attempt + 1))
-            if gh api -i --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input "$PAYLOAD" \
+            if command gh api -i --method POST "repos/${GH_REPO}/pulls/${PR}/reviews" --input "$PAYLOAD" \
                  > "$POST_LOG" 2>&1; then
               posted=true
               break
@@ -1140,9 +1154,10 @@ jobs:
               landed=true
               break
             fi
-            [ "$attempt" -lt 3 ] || break
-            echo "Review POST attempt $attempt failed (HTTP ${status:-none}); retrying." >&2
-            sleep $((attempt * 10))
+            [ "$attempt" -le "${#GH_RETRY_WAITS[@]}" ] || break
+            wait=${GH_RETRY_WAITS[$((attempt - 1))]}
+            echo "Review POST attempt $attempt failed (HTTP ${status:-none}); retrying in ${wait}s." >&2
+            sleep "$wait"
           done
           if [ "$posted" != "true" ]; then
             cat "$POST_LOG" >&2
@@ -1208,12 +1223,6 @@ jobs:
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           only-update: 'true'
 
-      # The guards the merge below shares with "Release merges held for a red default branch".
-      - name: Provide the merge guards
-        id: guards
-        if: inputs.auto_merge && (steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true')
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.21
-
       # Merge discipline. Skipped wholesale when a caller leaves auto_merge off - the review and
       # every guard above still run, the PR just waits for a human. The logic stays intact rather
       # than being deleted so that turning it on is one input and not a re-derivation.
@@ -1238,8 +1247,12 @@ jobs:
           FIX_LABEL: ${{ inputs.default_branch_fix_label }}
           HELD_LABEL: ${{ inputs.held_label }}
           GUARDS: ${{ steps.guards.outputs.script }}
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
+          # Every gh call here, and in merge-guards.sh, retries a connection that never opened.
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
           # Checked rather than trusted, because it reaches `gh pr merge` as a flag: a caller's
           # typo would otherwise surface as a merge refusal at the end of a review, and anything
           # else a string can carry has no business being spliced into that command.
