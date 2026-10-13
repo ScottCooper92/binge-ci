@@ -29,15 +29,21 @@ jobs:
     uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1.0.27
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
-      # Shell and YAML only: nothing here builds.
-      toolchain: none
+      # A JDK for the gradle-plugins job, the one thing here that builds. 17, as ci.yml's job uses,
+      # because the gates run inside consumer builds on it. Without it the bot cannot verify a fix there.
+      toolchain: jvm
+      java_version: '17'
       verify_guidance: >
         Verify with the same tools ci.yml runs, scoped to what failed: `shellcheck
         --severity=warning` on the file you changed, `./tools/check-callers.sh`,
         `./tools/check-action-shell.sh` or `./tools/check-internal-refs.sh` for the check
         that reported. actionlint is not preinstalled; fetch it the way
         .github/actions/actionlint/action.yml does (same version, same checksum) rather than
-        reasoning about its message. Do not run the whole gate; CI will when you push.
+        reasoning about its message. For a red gradle-plugins job, run the failing test class
+        or `./gradlew validatePlugins` from gradle-plugins/, as ci-triage.md says. The detekt
+        gate's Android case needs an Android SDK, which this runner may not have; if that case
+        cannot run, say so rather than skipping it. Do not run the whole gate; CI will when
+        you push.
       gate_rules: |
         NEVER silence a gate instead of fixing it. In this repository that means,
         specifically:
