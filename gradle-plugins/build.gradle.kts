@@ -21,8 +21,8 @@ kotlin {
 // fixture applying it from the portal gets it in a classloader the gates cannot see. Only the fixture
 // that needs Kotlin gets it, added to its runner's classpath; the others run without it, as a consumer
 // that does not use Kotlin does. AGP is supplied the same way, to the Android fixture alone.
-val testKitKotlin: Configuration by configurations.creating
-val testKitAndroid: Configuration by configurations.creating
+val testKitKotlin: Configuration = configurations.create("testKitKotlin")
+val testKitAndroid: Configuration = configurations.create("testKitAndroid")
 
 dependencies {
     // binge.gates.detekt applies the detekt plugin itself, so it ships with these plugins.
