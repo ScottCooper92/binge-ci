@@ -2,6 +2,7 @@ package binge.gates
 
 import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.DetektCreateBaselineTask
+import dev.detekt.gradle.plugin.DetektPlugin
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -63,7 +64,9 @@ class DetektGatePlugin : Plugin<Project> {
                 "binge.gates.detekt needs the Kotlin Gradle plugin on the build classpath: detekt 2.x will not apply without it.",
             )
         }
-        project.pluginManager.apply("dev.detekt")
+        // By class, not by id. An id is looked up in the applying project's plugin registry, and
+        // under Isolated Projects a subproject configured in parallel could intermittently miss it (#182).
+        project.pluginManager.apply(DetektPlugin::class.java)
 
         val gate = project.extensions.create("detektGate", DetektGateExtension::class.java)
         gate.configFile.convention(project.layout.settingsDirectory.file("detekt.yml"))
