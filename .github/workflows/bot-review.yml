@@ -884,6 +884,71 @@ jobs:
           git show "origin/${DEFAULT_BRANCH}:${CONVENTIONS_PATH}" > "$RULES_DIR/conventions.md"
           echo "dir=$RULES_DIR" >> "$GITHUB_OUTPUT"
 
+      # The guide reads a PR body's checklist against this PR's earlier CI runs: a check the author
+      # ticked that failed one of them is a finding. The agent cannot list those runs itself, since
+      # the Actions API is outside the reviewer app's grant, so they are gathered here with the
+      # workflow's own GITHUB_TOKEN (`actions: read`) and handed to the prompt as a file. Every
+      # attempt counts, because a re-run that passed does not undo the failure the author ticked.
+      # Best effort: a lookup that fails says so in the file rather than stopping the review.
+      - name: Gather this PR's earlier CI runs
+        id: history
+        if: steps.pin.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          CI_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ needs.resolve.outputs.number }}
+          CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
+          HISTORY_FILE: ${{ runner.temp }}/ci-history.md
+          GH_RETRY: ${{ steps.guards.outputs.retry }}
+          # The newest runs only. A long-lived PR can have hundreds, and the prompt has to stay readable.
+          MAX_RUNS: '30'
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . "$GH_RETRY"
+          note() { printf '%s\n' "$1" > "$HISTORY_FILE"; echo "$1"; exit 0; }
+
+          branch=$(gh pr view "$PR" --json headRefName --jq .headRefName) \
+            || note "The PR's head branch could not be read, so its earlier CI runs are unknown."
+          runs=$(GH_TOKEN="$CI_TOKEN" gh api -X GET \
+            "repos/${GH_REPO}/actions/workflows/${CI_WORKFLOW}/runs" \
+            -f event=pull_request -f branch="$branch" -F per_page=100 \
+            --jq '[.workflow_runs[]
+                  | select(.head_repository.full_name == env.GH_REPO)
+                  | select((.pull_requests | length) == 0 or any(.pull_requests[]; (.number | tostring) == env.PR))]' \
+            ) || note "The CI runs for this PR could not be listed, so its earlier CI runs are unknown."
+          [ "$(jq 'length' <<<"$runs")" != "0" ] || note "No CI runs were found for this PR."
+
+          {
+            echo "CI runs of \`${CI_WORKFLOW}\` on this PR, newest first, at most ${MAX_RUNS}. One line per attempt."
+            echo "A failed attempt lists its failed jobs, and each job's failed steps in brackets."
+            echo
+            jq -c --argjson max "$MAX_RUNS" 'sort_by(.created_at) | reverse | .[:$max][]
+                  | {id, sha: .head_sha[0:7], attempts: .run_attempt, url: .html_url}' <<<"$runs" \
+            | while IFS= read -r run; do
+                id=$(jq -r .id <<<"$run"); sha=$(jq -r .sha <<<"$run"); url=$(jq -r .url <<<"$run")
+                attempts=$(jq -r .attempts <<<"$run")
+                for attempt in $(seq "$attempts" -1 1); do
+                  if ! jobs=$(GH_TOKEN="$CI_TOKEN" gh api \
+                      "repos/${GH_REPO}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=100" \
+                      --jq '.jobs'); then
+                    echo "- \`${sha}\` run ${url} attempt ${attempt}: jobs could not be read"
+                    continue
+                  fi
+                  conclusion=$(jq -r 'if any(.[]; .status != "completed") then "in progress"
+                      elif any(.[]; .conclusion == "failure" or .conclusion == "timed_out") then "failure"
+                      elif any(.[]; .conclusion == "cancelled") then "cancelled"
+                      else "success" end' <<<"$jobs")
+                  failed=$(jq -r '[.[] | select(.conclusion == "failure" or .conclusion == "timed_out")
+                      | "\(.name) [\([.steps[]? | select(.conclusion == "failure") | .name] | join(", "))]"]
+                      | join("; ")' <<<"$jobs")
+                  echo "- \`${sha}\` run ${url} attempt ${attempt}: ${conclusion}${failed:+ - ${failed}}"
+                done
+              done
+          } > "$HISTORY_FILE"
+          cat "$HISTORY_FILE"
+
       - name: Review with Claude
         if: steps.pin.outputs.skip != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
@@ -970,6 +1035,10 @@ jobs:
               ${{ inputs.gated_checks }} would have caught.
             - Review against the PR head, not a local checkout. Use the diff
               and `gh api` against the head ref for evidence.
+            - This PR's earlier CI runs, every attempt with its failed jobs and
+              steps, are in ${{ runner.temp }}/ci-history.md. Read the author's
+              checklist against that file, as the guide says. The Actions API is
+              outside your token's grant, so `gh run list` cannot replace it.
 
             Calibrate the verdict as the guide says: request changes only on a
             concrete, traced bug, down-rank an unverifiable hypothesis to a
