@@ -4,7 +4,7 @@ Maps a red CI run to its correct fix. `author-ci-fix.yml` reads this file from `
 works from the table below; it gets a bounded number of repair attempts, so a guess is
 expensive and stopping is cheap.
 
-CI is one job, `lint`, with these steps in order:
+CI is two jobs. The first, `lint`, runs these steps in order:
 
 | Step | Runs |
 | --- | --- |
@@ -16,8 +16,14 @@ CI is one job, `lint`, with these steps in order:
 | Test the references check | `tools/test-internal-refs.sh` - `check-internal-refs.sh` against fixture trees: `./` fails in a `workflow_call` file and an action, and passes in a workflow that runs only here |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
 
-Nothing builds. If the log shows a failure that is not in the table below, that is a
-**stop**, not an invitation to improvise.
+The second, `gradle-plugins`, is the one thing that builds. It runs `./gradlew build` in
+`gradle-plugins/`: the shared Gradle gates' Kotlin compile, plugin validation (`validatePlugins`,
+with stricter validation and warnings as failures), and their unit and TestKit tests. The TestKit
+tests run each gate in a real fixture build, and the detekt gate's Android case builds against the
+runner's own SDK.
+
+If the log shows a failure that is not in the table below, that is a **stop**, not an invitation
+to improvise.
 
 ## The table
 
@@ -35,6 +41,11 @@ Nothing builds. If the log shows a failure that is not in the table below, that 
 | `check-action-env.sh` failure | A composite action reads `${{ env.X }}` that no `env:` key or `$GITHUB_ENV` write in it sets, so it expands to nothing on the runner | Set `X` in the step's `env:`, write it to `$GITHUB_ENV` in an earlier step (`echo "X=…" >> "$GITHUB_ENV"`, quoted or not, in a one-line `run:` or any block scalar, or the `X<<delim` heredoc form), or take it as an input; the runner's own environment is not in the `env` context. The check looks only for the name in the same action file, not for the write coming first or the `env:` key being on the reading step |
 | `check-internal-refs.sh`: `cannot reference a local action` | A `uses: ./` inside a reusable workflow (one that declares `workflow_call`) or a composite action | Replace it with the full `ScottCooper92/binge-ci/...@vX.Y.Z` reference at the tag every other self-reference uses |
 | `check-internal-refs.sh`: `self-references disagree` or `moving alias` | One reference was bumped, or points at `v1` | **Stop** unless this PR is the release bump itself. A pin is bumped in a release commit that does nothing else; a repair must not do it |
+| `gradle-plugins`: Kotlin compile error | The PR changed a gate's code, or a test, and it no longer compiles | Fix the code this PR changed. A gate's plugin id, extension or task name is its public signature, so do not rename one to make a call site compile |
+| `gradle-plugins`: `validatePlugins` failure | A task property is missing its input or output annotation, or a plugin's metadata is wrong | Add the annotation the message names (`@Input`, `@InputFiles` with a `@PathSensitive`, `@OutputFile`, `@Internal` for what is not an input), or fix the `gradlePlugin {}` entry. Never turn off `enableStricterValidation` or `failOnWarning` |
+| `gradle-plugins`: a unit or TestKit test fails on code this PR changed | The gate no longer does what the test says it must | Fix the gate. The test is the gate's contract: never loosen an assertion, swap `buildAndFail()` for `build()`, delete a case or add `@Disabled` to make it pass. Change a test only where this PR deliberately changed the behaviour it pins, and say so |
+| `gradle-plugins`: a test fails on a PR that does not touch `gradle-plugins/` | A flaky test, or a fault in the gates that this PR only exposed | **Stop.** It is not this PR's to fix, and a re-run is a human's call. Say which test failed and quote its error |
+| `gradle-plugins`: dependency resolution fails (`Could not resolve`, HTTP 429, a timeout) | The network or a repository, not the code | **Stop.** Nothing in the PR fixes it |
 | `tag-check.yml` red on `main` | The pinned tag does not exist or does not name this release | **Stop.** This runs after a merge, not on a PR; cutting the tag is a human's step and no PR fixes it |
 | Empty or unreadable log | Nothing to triage from | **Stop.** The workflow already handles this and comments on the PR |
 
@@ -52,6 +63,8 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-internal-refs.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
+(cd gradle-plugins && ./gradlew test --tests '<the failing test class>')
+(cd gradle-plugins && ./gradlew validatePlugins)
 ```
 
 Do not run the full gate. CI does that on push.
@@ -62,6 +75,7 @@ Do not run the full gate. CI does that on push.
 - Remove, weaken or skip a step in `ci.yml` or a check in `tools/`.
 - Change a `uses:` pin outside a release commit.
 - Widen a `permissions:` block beyond what the called workflow's header says it needs.
+- Loosen, skip or delete a `gradle-plugins` test, or relax `validatePlugins`, to make the build pass.
 
 ## When in doubt
 
