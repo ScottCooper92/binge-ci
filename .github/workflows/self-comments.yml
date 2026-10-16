@@ -53,14 +53,20 @@ jobs:
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
-      toolchain: none
+      # A JDK for gradle-plugins, the one thing here that builds, as self-ci-fix.yml has. 17, as
+      # ci.yml's job uses. Without it a comment asking for a change to a gate gets an untested reply.
+      toolchain: jvm
+      java_version: '17'
       verify_guidance: >
         Verify what you change with the tools ci.yml runs, scoped to what you touched:
         `shellcheck --severity=warning` on a changed script or `run:` block, and
-        `./tools/check-callers.sh`, `./tools/check-action-shell.sh` or
-        `./tools/check-internal-refs.sh` for the invariant you touched. actionlint is not
-        preinstalled; fetch it the way .github/actions/actionlint/action.yml
-        does if a workflow file changed.
+        `./tools/check-callers.sh`, `./tools/check-action-shell.sh`,
+        `./tools/check-action-env.sh`, `./tools/check-internal-refs.sh`,
+        `./tools/test-internal-refs.sh` or `./tools/test-governed-paths.sh` for the invariant
+        you touched. actionlint is not preinstalled; fetch it the way
+        .github/actions/actionlint/action.yml does if a workflow file changed. For a change
+        under gradle-plugins/, run the affected test class or `./gradlew build` from
+        gradle-plugins/.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add
         `# shellcheck disable=` comments, do not remove or weaken a step in ci.yml

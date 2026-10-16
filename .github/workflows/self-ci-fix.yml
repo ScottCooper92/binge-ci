@@ -33,6 +33,9 @@ jobs:
       # because the gates run inside consumer builds on it. Without it the bot cannot verify a fix there.
       toolchain: jvm
       java_version: '17'
+      # The name ci.yml's gradle-plugins job uploads its reports and test results under, on
+      # failure. The default, build-reports, names nothing here and would silently read nothing.
+      reports_artifact: gradle-plugins-reports
       verify_guidance: >
         Verify with the same tools ci.yml runs, scoped to what failed: `shellcheck
         --severity=warning` on the file you changed, `./tools/check-callers.sh`,
