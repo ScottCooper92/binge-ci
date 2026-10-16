@@ -55,9 +55,11 @@ name: Bot review
 # reviewer bot's own "Not merging" note.
 #
 # Same head as the verdict being disputed, which is the whole point, so "Skip a head already
-# reviewed" below is bypassed for this door alone (`resolve`'s `rebuttal` output): every other
+# reviewed" below lets this door alone through (`resolve`'s `rebuttal` output): every other
 # door treats a SHA that already carries a review as nothing new to do, and this one exists
-# because that is exactly wrong for a rebuttal.
+# because that is exactly wrong for a rebuttal. Only while that verdict is CHANGES_REQUESTED:
+# author-comments marks every reply, including an answer to a maintainer's question on an
+# approved head, and there is nothing to dispute there.
 #
 # Still demands a green CI run on the head, same as the other PR-scoped doors - a rebuttal does
 # not buy a review CI never vouched for, and one with no completed run on this sha (conclusion
@@ -286,7 +288,7 @@ jobs:
       vouched: ${{ steps.pr.outputs.vouched }}
       # Read by "Skip a head already reviewed" in the review job: a rebuttal is new
       # information about a SHA that already has a verdict, not a new head, so that guard
-      # is bypassed for this door alone. See "THE FOURTH DOOR" above.
+      # lets this door through while the verdict is CHANGES_REQUESTED. See "THE FOURTH DOOR".
       rebuttal: ${{ steps.pr.outputs.rebuttal }}
       # For the failed-before-review reporter below, which names the step that broke.
       token: ${{ steps.token.outcome }}
@@ -760,11 +762,12 @@ jobs:
       # Before "Show the review as running", which would otherwise overwrite the verdict check the
       # first review left with a neutral "Reviewing this commit".
       #
-      # Bypassed on the fourth door's `rebuttal` output (#2663): a rebuttal comment is new
-      # information about a SHA that already carries a verdict, not a duplicate trigger on one
-      # that doesn't - so the one case every other door treats as "nothing to do" is the exact
-      # case this door exists for. The step itself is skipped rather than made to compute a
-      # `skip` it would ignore, since nothing downstream needs the lookup on this path either.
+      # On the fourth door's `rebuttal` output it inverts: a rebuttal comment is new information
+      # about a SHA that already carries a verdict, so the one case every other door treats as
+      # "nothing to do" is the case this door exists for. But only a CHANGES_REQUESTED verdict can
+      # be disputed. author-comments marks every reply it posts, so an answer to a maintainer's
+      # question on an approved head also opens the door, and reviewing again there costs a run
+      # and can flip a verdict nobody disputed.
       #
       # A head whose latest pinned verdict is an APPROVAL is skipped for review but not for the
       # merge (#84). A merge held on a transient state would otherwise stay held for good: the pin
@@ -774,7 +777,6 @@ jobs:
       # check on the head, which holds `mergeStateStatus` at UNSTABLE while the merge polls.
       - name: Skip a head already reviewed
         id: pin
-        if: needs.resolve.outputs.rebuttal != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -782,6 +784,7 @@ jobs:
           SHA: ${{ needs.resolve.outputs.sha }}
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
           GH_RETRY: ${{ steps.guards.outputs.retry }}
+          REBUTTAL: ${{ needs.resolve.outputs.rebuttal }}
         run: |
           set -euo pipefail
           # Every gh call below retries a connection that never opened.
@@ -797,6 +800,16 @@ jobs:
                 '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))]
                  | sort_by(.submitted_at)')
           reviewed=$(jq 'length' <<<"$pinned")
+          if [ "$REBUTTAL" = "true" ]; then
+            latest=$(jq -r '.[-1].state // empty' <<<"$pinned")
+            if [ "$latest" = "CHANGES_REQUESTED" ]; then
+              echo "A rebuttal to the CHANGES_REQUESTED verdict on $SHA - reviewing it again."
+              exit 0
+            fi
+            echo "A reply from the author bot, but the latest verdict on $SHA is '${latest:-none}', not CHANGES_REQUESTED - nothing to reconsider."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "${reviewed:-0}" != "0" ]; then
             echo "PR #$PR was already reviewed at $SHA - not reviewing it again."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -883,6 +896,26 @@ jobs:
           git show "origin/${DEFAULT_BRANCH}:${GUIDE_PATH}" > "$RULES_DIR/pr-review-guide.md"
           git show "origin/${DEFAULT_BRANCH}:${CONVENTIONS_PATH}" > "$RULES_DIR/conventions.md"
           echo "dir=$RULES_DIR" >> "$GITHUB_OUTPUT"
+
+      # The guide and conventions above are only the prompt's rules. Claude Code also loads the
+      # checkout's own CLAUDE.md, .claude/ and .mcp.json as project context, and claude-code-action
+      # resets those to the base's copy only on an entity event (a comment, a review). On the
+      # workflow_run and dispatch doors it does nothing, so without this the reviewer runs under the
+      # PR head's own instructions. Nothing here is committed, so there is nothing to undo.
+      - name: Provide the governed-paths script
+        id: governed
+        if: steps.pin.outputs.skip != 'true'
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.28
+        with:
+          base-ref: origin/${{ inputs.default_branch }}
+
+      - name: Rewrite the governed paths to the default branch's copy
+        if: steps.pin.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          bash "$GOVERNED_SCRIPT" --rewrite
 
       # The guide reads a PR body's checklist against this PR's earlier CI runs: a check the author
       # ticked that failed one of them is a finding. The agent cannot list those runs itself, since
