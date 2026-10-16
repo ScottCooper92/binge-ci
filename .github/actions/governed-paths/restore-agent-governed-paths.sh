@@ -42,6 +42,12 @@
 #   undo - the guard the README describes is not in force. bot-review calls it too, from the
 #   default branch, so a PR cannot add to the rules its own review runs under.
 #
+# Usage: restore-agent-governed-paths.sh --prompt-note
+#   Prints the paragraph an agent's prompt carries about the rewrite, or nothing when it changes
+#   nothing here. Run it BEFORE the rewrite: it names the governed paths whose working-tree copy
+#   differs from the base's, which are the ones the rewrite is about to replace. Without it the
+#   agent finds those paths modified, edits it did not make, and reports them as tampering.
+#
 # $GOVERNED_BASE_REF (default origin/main) is the ref the rewrite is taken from, and for the
 # undo the ref it was taken from: on an entity event the action restores from the PR's BASE
 # branch, so a caller on a stacked PR passes that, not the default branch.
@@ -82,6 +88,33 @@ if [ "${1:-}" = "--list" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "--prompt-note" ]; then
+  base=$(git rev-parse -q --verify "${GOVERNED_BASE_REF:-origin/main}") \
+    || { echo "Cannot describe the rewrite: ${GOVERNED_BASE_REF:-origin/main} does not resolve." >&2; exit 1; }
+  differs=()
+  for path in "${governed[@]}"; do
+    in_base=false
+    git cat-file -e "$base:$path" 2>/dev/null && in_base=true
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      if [ "$in_base" = false ] || ! git diff --quiet "$base" -- "$path"; then
+        differs+=("$path")
+      fi
+    elif [ "$in_base" = true ]; then
+      differs+=("$path")
+    fi
+  done
+  [ ${#differs[@]} -eq 0 ] && exit 0
+  named=""
+  for path in "${differs[@]}"; do named+="${named:+, }\`$path\`"; done
+  printf 'Before you started, these paths were reset to the copy on `%s`, in the working tree only: %s. ' \
+    "${GOVERNED_BASE_REF:-origin/main}" "$named"
+  printf '%s\n' "$(cat <<'NOTE'
+They govern the agents, and a branch is not trusted to change the rules its own agent reads. So `git status` and `git diff` show them as modified. That is expected: nobody edited them, and you should not report them as unexplained or suspicious changes. Leave them alone unless your task is to change one. If it is, edit the copy you see; the workflow merges your edit onto the branch's own version afterwards and says on the PR what happened to it.
+NOTE
+)"
+  exit 0
+fi
+
 if [ "${1:-}" = "--rewrite" ]; then
   base=$(git rev-parse -q --verify "${GOVERNED_BASE_REF:-origin/main}") \
     || { echo "Cannot rewrite the governed paths: ${GOVERNED_BASE_REF:-origin/main} does not resolve." >&2; exit 1; }
@@ -101,7 +134,7 @@ if [ "${1:-}" = "--rewrite" ]; then
   exit 0
 fi
 
-ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite|--merged-marker}"
+ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite|--prompt-note|--merged-marker}"
 
 # Telling the action's rewrite apart from an edit the agent made needs the base branch's copy:
 # "the worktree is byte-identical to the base" is the whole discriminator. Without the ref,

@@ -672,8 +672,9 @@ jobs:
             - Re-record only the failing classes, never the whole suite: the update task for
               the variant that failed, scoped with `--tests <fully.qualified.Class>` per class
               (for example `./gradlew :app:updateDebugScreenshotTest --tests <Class>`).
-            - `git status` must show only the reference PNGs of the failing frames. Any other
-              changed file, or any other PNG, means revert everything and stop.
+            - `git status` must show only the reference PNGs of the failing frames, besides any
+              governed path this prompt names as reset. Any other changed file, or any other PNG,
+              means revert everything and stop.
             - Look before keeping. For each frame, write the old PNG out with
               `git show HEAD:<path> > <tmp>.png` and Read both images. Keep the change only if
               the difference is confined to the component the PR changed. If it is anywhere
@@ -703,6 +704,23 @@ jobs:
         with:
           base-ref: origin/${{ steps.pr.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
+
+      # Named in the agent's prompt, before the rewrite replaces them: otherwise the agent finds
+      # the governed paths modified, edits it did not make, and reports them as tampering.
+      - name: Describe the governed-path rewrite for the agent
+        id: governed_note
+        if: >
+          steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
+          steps.log.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          # A missing note costs a confused report, not the run, so it does not stop the job.
+          note=$(bash "$GOVERNED_SCRIPT" --prompt-note) \
+            || { echo "::warning::Could not describe the governed-path rewrite for the agent."; note=""; }
+          delim="EOF_$(date +%s%N)"
+          { echo "block<<${delim}"; printf '%s\n' "$note"; echo "$delim"; } >> "$GITHUB_OUTPUT"
 
       # claude-code-action rewrites the governed paths to the base's copy only on an ENTITY event
       # (a comment, a review). This job runs on workflow_run, where it does nothing - so without
@@ -848,6 +866,8 @@ jobs:
             ${{ inputs.gate_rules }}
 
             ${{ steps.suppression.outputs.block }}
+
+            ${{ steps.governed_note.outputs.block }}
 
             ${{ steps.rerecord.outputs.block }}
 
@@ -1357,6 +1377,21 @@ jobs:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
+      # Named in the agent's prompt, before the rewrite replaces them: otherwise the agent finds
+      # the governed paths modified, edits it did not make, and reports them as tampering.
+      - name: Describe the governed-path rewrite for the agent
+        id: governed_note
+        if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          # A missing note costs a confused report, not the run, so it does not stop the job.
+          note=$(bash "$GOVERNED_SCRIPT" --prompt-note) \
+            || { echo "::warning::Could not describe the governed-path rewrite for the agent."; note=""; }
+          delim="EOF_$(date +%s%N)"
+          { echo "block<<${delim}"; printf '%s\n' "$note"; echo "$delim"; } >> "$GITHUB_OUTPUT"
+
       - name: Rewrite the governed paths to the base's copy
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
         env:
@@ -1451,6 +1486,8 @@ jobs:
             ${{ inputs.gate_rules }}
 
             ${{ steps.suppression.outputs.block }}
+
+            ${{ steps.governed_note.outputs.block }}
 
             Do not commit and do not push; leave the working tree modified.
 
