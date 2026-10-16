@@ -190,7 +190,9 @@ and every author bot undoes it against the PR's base. Without that, an agent run
 reads the PR head's own `CLAUDE.md` live, and the guard is not in force. `bot-review` runs the
 same `--rewrite`, from the default branch, before its reviewer starts. It runs on `workflow_run`
 and dispatch too, and without the rewrite a PR's own `CLAUDE.md` would join the rules it is
-judged by. The reviewer commits nothing, so it needs no undo.
+judged by. The reviewer commits nothing, so it needs no undo. It takes `governed_extra_paths`
+as the author workflows do, so a consumer's extra governed paths are rewritten for the
+reviewer too.
 
 **`suppression-files`** expands a caller's `suppression_files` globs against the checkout and
 the default branch, and outputs the prompt block that tells an agent not to edit what they
