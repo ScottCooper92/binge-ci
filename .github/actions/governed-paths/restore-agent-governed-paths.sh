@@ -39,7 +39,8 @@
 #   action only does this on an entity event (a comment, a review); on a workflow_run it does
 #   nothing, so author-ci-fix and author-conflicts call this before their agent step. Without
 #   it those two agents read the PR head's own copies live, and the undo above has nothing to
-#   undo - the guard the README describes is not in force.
+#   undo - the guard the README describes is not in force. bot-review calls it too, from the
+#   default branch, so a PR cannot add to the rules its own review runs under.
 #
 # $GOVERNED_BASE_REF (default origin/main) is the ref the rewrite is taken from, and for the
 # undo the ref it was taken from: on an entity event the action restores from the PR's BASE
@@ -227,7 +228,8 @@ if [ ${#merged[@]} -gt 0 ]; then
   list=$(printf '`%s`, ' "${merged[@]}")
   # A marker, because this note is the only trace that a bot put a governed-path change into
   # this PR. bot-review's merge gate holds on it: `hold` is decided when a PR is opened, and
-  # this is the one route that adds such a change AFTER that decision was taken.
+  # this and a new file under a governed path (below) are the routes that add such a change
+  # AFTER that decision was taken.
   note+=$'\n'"$merged_marker"$'\n'
   note+="_Note: I changed ${list%, }. Those paths govern the agents and are rewritten to the base branch's copy before I run — a PR does not get to change what governs the agent reading it — so I never saw your version. My edit applied cleanly on top of it and is in this commit; read that part of the diff, because I was not shown what I was editing around._"$'\n'
 fi
@@ -244,10 +246,13 @@ if [ ${#discarded[@]} -gt 0 ]; then
 fi
 
 # The one unresolvable case: no version in the PR to restore, so it is committed as-is.
-# Flagged rather than deleted - least-bad, not safe.
+# Flagged rather than deleted - least-bad, not safe. The marker too, for the same reason as a
+# merged edit: this is a bot adding a governed file after `hold` was decided, so the merge gate
+# must leave it to a human.
 if [ ${#added[@]} -gt 0 ]; then
   echo "Kept, but flagged, new files under governed paths: ${added[*]}" >&2
   list=$(printf '`%s`, ' "${added[@]}")
+  if [ ${#merged[@]} -eq 0 ]; then note+=$'\n'"$merged_marker"$'\n'; fi
   note+=$'\n'"_Note: this commit adds ${list%, }, under a path that governs the agents. I have left it in rather than delete work, but it was not reviewed as such — check it before merging._"$'\n'
 fi
 

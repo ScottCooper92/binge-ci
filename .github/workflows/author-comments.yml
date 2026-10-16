@@ -212,7 +212,9 @@ jobs:
       # comment, review or inline note: counting every response ever posted would leave the
       # bot permanently and silently dead on the PR once the cap was hit, with no way to reset
       # short of editing comment bodies. A human joining in is the evidence that this is a
-      # conversation and not the runaway the cap exists to stop.
+      # conversation and not the runaway the cap exists to stop - a human with standing, the same
+      # OWNER, MEMBER or COLLABORATOR the caller's gate admits. On a public repository anyone can
+      # comment, and a stranger's comment every few rounds would otherwise keep the volley going.
       - name: Round cap
         id: rounds
         if: steps.ctx.outputs.skip != 'true'
@@ -224,13 +226,16 @@ jobs:
         run: |
           set -euo pipefail
           # Bot feedback does not reset the count - the reviewer bot is the other half of the
-          # volley. API timestamps are ISO-8601 UTC, so they order correctly as plain strings.
+          # volley - and nor does a comment from someone without standing. API timestamps are
+          # ISO-8601 UTC, so they order correctly as plain strings.
           last_human=""
           for endpoint in "issues/${PR}/comments" "pulls/${PR}/comments" "pulls/${PR}/reviews"; do
             # select(. != null) is load-bearing: jq prints a missing timestamp as the string "null",
             # which sorts ABOVE every real one, silently disabling the circuit breaker.
             newest=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
               --jq '.[] | select(.user.type != "Bot")
+                        | select(.author_association == "OWNER" or .author_association == "MEMBER"
+                                 or .author_association == "COLLABORATOR")
                         | (.submitted_at // .created_at) | select(. != null)' \
               | sort | tail -n1)
             if [ "$newest" \> "$last_human" ]; then last_human="$newest"; fi
@@ -270,6 +275,16 @@ jobs:
           # as one), and an agent that cannot build the checkout cannot fix or judge it.
           submodules: recursive
           token: ${{ steps.token.outputs.token }}
+
+      # Recorded now, before the agent runs. Read later from origin/<branch>, it would move with any
+      # `git fetch` or push the agent makes, and the undo and the "did it commit" check would then
+      # measure against the wrong commit.
+      - name: Record the checked-out commit
+        id: checked_out
+        if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Collect the feedback
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
@@ -425,9 +440,12 @@ jobs:
           # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent
           # tool from it does not stop an agent starting one. Both names it has shipped under,
           # since an unmatched entry is inert and a missed one is the failure again.
+          #
+          # `git push` too: the workflow pushes after the governed-path undo, and an agent's own push
+          # would land the base's copy of those paths on the branch before the undo could run.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
-            --disallowedTools "Task,Agent"
+            --disallowedTools "Task,Agent,Bash(git push:*)"
             --max-turns ${{ inputs.max_turns }}
             ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           prompt: |
@@ -481,14 +499,13 @@ jobs:
           BRANCH: ${{ steps.ctx.outputs.branch }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+          CHECKED_OUT: ${{ steps.checked_out.outputs.sha }}
         run: |
           set -euo pipefail
           push_note=""
           commit_stat=""
           pushed=false
-          # origin/$BRANCH is not refetched during the job, so it still points at what was
-          # checked out - exactly the question being asked.
-          checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
+          checked_out="$CHECKED_OUT"
 
           # Ahead of the porcelain read, not after it. claude-code-action rewrites the paths that
           # govern an agent to the base's copy in the WORKING TREE before it starts, so `git add
