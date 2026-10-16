@@ -175,5 +175,7 @@ The Gradle wrapper matches the consumers' too.
 
 `./gradlew build` in this directory compiles the plugins, validates them and runs the tests. The
 other gates are tested against a case they must pass and a case they must fail, because a gate
-that breaks usually breaks by passing everything. `binge.gates.detekt` is only checked for wiring
-its custom rules into `detektPlugins`; nothing runs detekt yet (#117). CI runs it as the `gradle-plugins` job.
+that breaks usually breaks by passing everything. `binge.gates.detekt` is tested end to end: its
+custom rules are wired into `detektPlugins`, type resolution makes the `!!` ban fire on a JVM project
+and on an Android one, an Android module's `BuildConfig` resolves, and baseline staleness runs against
+detekt's own output. CI runs it as the `gradle-plugins` job.
