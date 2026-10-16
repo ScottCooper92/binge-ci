@@ -495,9 +495,12 @@ jobs:
           # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent tool
           # does not stop an agent starting one. Both names it has shipped under, since an unmatched
           # entry is inert and a missed one is the failure again.
+          #
+          # `git push` too: the workflow pushes after the governed-path undo, and an agent's own push
+          # would land the base's copy of those paths on the branch before the undo could run.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
-            --disallowedTools "Task,Agent"
+            --disallowedTools "Task,Agent,Bash(git push:*)"
             --max-turns ${{ inputs.max_turns }}
             ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           prompt: |

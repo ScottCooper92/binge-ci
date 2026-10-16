@@ -271,6 +271,16 @@ jobs:
           submodules: recursive
           token: ${{ steps.token.outputs.token }}
 
+      # Recorded now, before the agent runs. Read later from origin/<branch>, it would move with any
+      # `git fetch` or push the agent makes, and the undo and the "did it commit" check would then
+      # measure against the wrong commit.
+      - name: Record the checked-out commit
+        id: checked_out
+        if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Collect the feedback
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         env:
@@ -425,9 +435,12 @@ jobs:
           # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent
           # tool from it does not stop an agent starting one. Both names it has shipped under,
           # since an unmatched entry is inert and a missed one is the failure again.
+          #
+          # `git push` too: the workflow pushes after the governed-path undo, and an agent's own push
+          # would land the base's copy of those paths on the branch before the undo could run.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
-            --disallowedTools "Task,Agent"
+            --disallowedTools "Task,Agent,Bash(git push:*)"
             --max-turns ${{ inputs.max_turns }}
             ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           prompt: |
@@ -481,14 +494,13 @@ jobs:
           BRANCH: ${{ steps.ctx.outputs.branch }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+          CHECKED_OUT: ${{ steps.checked_out.outputs.sha }}
         run: |
           set -euo pipefail
           push_note=""
           commit_stat=""
           pushed=false
-          # origin/$BRANCH is not refetched during the job, so it still points at what was
-          # checked out - exactly the question being asked.
-          checked_out=$(git rev-parse --verify -q "origin/$BRANCH" || echo "")
+          checked_out="$CHECKED_OUT"
 
           # Ahead of the porcelain read, not after it. claude-code-action rewrites the paths that
           # govern an agent to the base's copy in the WORKING TREE before it starts, so `git add
