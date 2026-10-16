@@ -138,6 +138,13 @@ SHA, so it lands on the PR even though the run does not.
 > because a check run can only be updated by the app that created it. A caller that misses
 > that permission dies as `startup_failure` with no log — the trap described below.
 
+> **Prerequisite: the author GitHub App needs contents and pull requests**, read and write, and
+> workflows for a fix that touches one. The author workflows mint a second, read-only token for
+> the agent from the same `AUTHOR_APP_*` secrets, asking for `contents` and `pull-requests` only.
+> A mint can only narrow the installation's grant, so an author app without either fails there and
+> the job stops before its agent runs. `tools/check-token-permissions.sh` holds every mint to the
+> grant it records, so a mint that asks for more fails here first.
+
 The action only ever posts an **already-completed** check, and `bot-review` posts one at the
 start of a review as well as at the end. Both are the same constraint: a queued or
 in-progress check holds `mergeStateStatus` at `UNSTABLE`, and the merge gate holds on

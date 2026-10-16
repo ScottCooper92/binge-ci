@@ -12,8 +12,10 @@
 # installation's settings, and move only when those do. A mint that asks for no `permission-*` gets
 # the whole installation and is not checked. One that does, from an app not listed here, fails until
 # that app's grant is added.
+#
+# CHECK_ROOT names another tree to check, for tools/test-token-permissions.sh's fixtures.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "${CHECK_ROOT:-$(dirname "$0")/..}" || exit 1
 
 python3 - <<'PY'
 import glob, re, sys
@@ -24,8 +26,7 @@ GRANTS = {
     "AUTHOR_APP_ID": {"contents", "pull-requests", "workflows", "metadata"},
 }
 
-USES = re.compile(r'^(\s*)(?:-\s+)?uses:\s*actions/create-github-app-token@')
-STEP = re.compile(r'^(\s*)-\s')
+USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')
 APP = re.compile(r'^\s*app-id:\s*\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}')
 PERM = re.compile(r'^\s*permission-([a-z-]+):')
 
@@ -39,23 +40,25 @@ for path in files:
         if not match:
             continue
         mints += 1
+        # The column the step's keys start at, past a `- ` the `uses:` line may open the step with.
+        # Anything less indented than that - a sibling step's dash, the next job - ends the step.
         key_col = len(match.group(1))
+        start = i
+        if '-' not in match.group(1):
+            while start > 0 and not lines[start].lstrip().startswith('- '):
+                start -= 1
         app, perms = None, []
-        j = i + 1
-        while j < len(lines):
+        for j in range(start, len(lines)):
             text = lines[j]
-            if text.strip() and not text.lstrip().startswith('#'):
-                indent = len(text) - len(text.lstrip())
-                step = STEP.match(text)
-                if indent < key_col or (step and len(step.group(1)) < key_col):
+            if j > i and text.strip() and not text.lstrip().startswith('#'):
+                if len(text) - len(text.lstrip()) < key_col:
                     break
-                found = APP.match(text)
-                if found:
-                    app = found.group(1)
-                found = PERM.match(text)
-                if found:
-                    perms.append((j + 1, found.group(1)))
-            j += 1
+            found = APP.match(text)
+            if found:
+                app = found.group(1)
+            found = PERM.match(text)
+            if found:
+                perms.append((j + 1, found.group(1)))
         if not perms:
             continue
         granted = GRANTS.get(app)
