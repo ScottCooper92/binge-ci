@@ -738,12 +738,76 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
-      - name: Mint reviewer app token
-        id: token
+      # Retried as resolve's mint is, and for the same reason: every reporter below posts with this
+      # token, so a mint that fails once on a GitHub blip would leave the PR with nothing on it.
+      # A mint that fails all three times is reported with the workflow's own token at the end.
+      - name: Mint reviewer app token (attempt 1)
+        id: token1
+        continue-on-error: true
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Wait before retrying the token mint (1)
+        if: steps.token1.outcome != 'success'
+        run: |
+          set -euo pipefail
+          sleep 10
+
+      - name: Mint reviewer app token (attempt 2)
+        id: token2
+        if: steps.token1.outcome != 'success'
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Wait before retrying the token mint (2)
+        if: steps.token1.outcome != 'success' && steps.token2.outcome != 'success'
+        run: |
+          set -euo pipefail
+          sleep 20
+
+      - name: Mint reviewer app token (attempt 3)
+        id: token3
+        if: steps.token1.outcome != 'success' && steps.token2.outcome != 'success'
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      # Collapses the attempts to the one `token` id the rest of the job reads, app-slug included,
+      # and fails exactly when every attempt did.
+      - name: Mint reviewer app token
+        id: token
+        env:
+          OUTCOME1: ${{ steps.token1.outcome }}
+          OUTCOME2: ${{ steps.token2.outcome }}
+          OUTCOME3: ${{ steps.token3.outcome }}
+          TOKEN1: ${{ steps.token1.outputs.token }}
+          TOKEN2: ${{ steps.token2.outputs.token }}
+          TOKEN3: ${{ steps.token3.outputs.token }}
+          SLUG1: ${{ steps.token1.outputs.app-slug }}
+          SLUG2: ${{ steps.token2.outputs.app-slug }}
+          SLUG3: ${{ steps.token3.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          if [ "$OUTCOME1" = "success" ]; then
+            token="$TOKEN1"; slug="$SLUG1"
+          elif [ "$OUTCOME2" = "success" ]; then
+            token="$TOKEN2"; slug="$SLUG2"
+          elif [ "$OUTCOME3" = "success" ]; then
+            token="$TOKEN3"; slug="$SLUG3"
+          else
+            echo "All 3 token mint attempts failed." >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "app-slug=$slug" >> "$GITHUB_OUTPUT"
 
       # The guards the merge shares with "Release merges held for a red default branch", and the
       # retry on a connection error that every gh step in this job sources. First, and with no
@@ -1734,6 +1798,23 @@ jobs:
             ${{ steps.report.outputs.check_summary
               || (job.status != 'success' && 'This run did not finish and posted no review; the log says where it stopped.'
               || 'The run finished without posting a review - the PR was not open, or there was nothing to review.') }}
+          details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # Every reporter above posts with the app's token, so when no attempt could mint one they all
+      # fail quietly and the PR shows nothing. The workflow's own token can still post a check, under
+      # the name report-resolve-failure uses, since a check run can only be updated by the app that
+      # created it. The next run's "Supersede a note about a run that failed before the review" clears it.
+      - name: Record that the review could not get a token
+        if: always() && steps.token.outcome == 'failure' && needs.resolve.outputs.sha != ''
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.28
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ needs.resolve.outputs.sha }}
+          name: Bot review (run failed)
+          conclusion: neutral
+          title: The review run failed before it started
+          summary: Minting the reviewer app's token failed three times, which is a GitHub API error and usually transient. Nothing has judged this commit. Re-run the workflow, or re-run CI on this commit, and it tries again.
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   # The other half of the default-branch gate in "Merge if the bar is met". A clean review held
