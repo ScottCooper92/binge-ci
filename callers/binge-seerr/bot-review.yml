@@ -68,6 +68,9 @@ jobs:
     with:
       dispatch_pr: ${{ inputs.pr }}
       auto_merge: true
+      # A PR CI never builds may merge once approved. Inert here until this repo sets
+      # `unbuilt_paths`: with no paths-ignore in ci.yml, every PR gets a build to vouch for it.
+      merge_unbuilt: true
       # STACKED PRs land here (#99 through #115), and squash rewrites the parent's commits into a
       # new SHA. The moment the parent merges, every child holds commits that are nowhere in main's
       # history, so the merge base falls back to before the parent's work and each child needs a

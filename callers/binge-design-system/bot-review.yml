@@ -83,6 +83,9 @@ jobs:
     with:
       dispatch_pr: ${{ inputs.pr }}
       auto_merge: true
+      # A PR CI never builds may merge once approved. Inert here until this repo sets
+      # `unbuilt_paths`: with no paths-ignore in ci.yml, every PR gets a build to vouch for it.
+      merge_unbuilt: true
       # The screenshot suite belongs in this list: ci.yml runs validateDebugScreenshotTest
       # beside `build`, so a baseline mismatch is already reported and is not the
       # reviewer's to raise.

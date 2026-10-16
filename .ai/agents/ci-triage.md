@@ -16,6 +16,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the references check | `tools/test-internal-refs.sh` - `check-internal-refs.sh` against fixture trees: `./` fails in a `workflow_call` file and an action, and passes in a workflow that runs only here |
 | Check the token mints | `tools/check-token-permissions.sh` - every `permission-*` a `create-github-app-token` step asks for is one its app's installation grants, as recorded in the script |
 | Test the token check | `tools/test-token-permissions.sh` - `check-token-permissions.sh` against fixture workflows: a granted mint passes; an ungranted permission, an unrecorded app, and a step that a `- uses:` line opens or a `with:` comes before, each fail with the line that names it |
+| Test the merge guards | `tools/test-merge-guards.sh` - `merge-guards.sh buildable` against fixed path lists in Binge's regex: which paths CI would build, both sides of a rename, anchored directories, and `method` |
 | Test the governed-paths script | `tools/test-governed-paths.sh` - `restore-agent-governed-paths.sh` against scratch repositories: what it restores, merges, discards and keeps, and the markers each case leaves |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
@@ -48,6 +49,7 @@ to improvise.
 | `check-token-permissions.sh`: `is not granted to the … installation` | A mint asks for a permission its app does not have, so it would fail at run time and the job would die before its agent ran | Drop that `permission-*` input, or ask for one the app has. Never add a permission to the script's grant to make it pass: it records the installation's settings, and only a human changing those moves it |
 | `check-token-permissions.sh`: `has no grant recorded` | A mint narrows its token for an app the script does not know | **Stop.** Recording an app's grant is a human's call, made from that installation's settings |
 | `test-token-permissions.sh`: a case FAILs | `check-token-permissions.sh` no longer reads a step's app and permissions the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen the line it expects |
+| `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
 | `test-governed-paths.sh`: a case FAILs | The governed-paths script no longer leaves the note, marker or file that case expects | Fix the script if this PR changed it. If the PR deliberately changed what a case expects, change that case and say so; never delete one or loosen what it asserts |
 | `check-internal-refs.sh`: `self-references disagree` or `moving alias` | One reference was bumped, or points at `v1` | **Stop** unless this PR is the release bump itself. A pin is bumped in a release commit that does nothing else; a repair must not do it |
 | `gradle-plugins`: Kotlin compile error | The PR changed a gate's code, or a test, and it no longer compiles | Fix the code this PR changed. A gate's plugin id, extension or task name is its public signature, so do not rename one to make a call site compile |
@@ -72,6 +74,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-internal-refs.sh
 ./tools/check-token-permissions.sh
 ./tools/test-token-permissions.sh
+./tools/test-merge-guards.sh
 ./tools/test-governed-paths.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
