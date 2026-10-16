@@ -193,8 +193,8 @@ on:
           `unbuilt_paths`, reviewed through the `labeled`/`synchronize` door. Without it such a PR
           is reviewed and then waits for a human, because no build vouched for it. Needs
           `auto_merge` and `unbuilt_paths`. Every other guard still applies, the diff is checked
-          again at merge time, a change to `.github/workflows/` is never merged, and the push must
-          be datable for the unaddressed-feedback guard.
+          again at merge time, a change to `.github/workflows/` or to a governed path is never
+          merged, and the push must be datable for the unaddressed-feedback guard.
         type: boolean
         default: false
       unbuilt_paths_regex:
@@ -992,9 +992,12 @@ jobs:
       # resets those to the base's copy only on an entity event (a comment, a review). On the
       # workflow_run and dispatch doors it does nothing, so without this the reviewer runs under the
       # PR head's own instructions. Nothing here is committed, so there is nothing to undo.
+      #
+      # Also on the merge-retry path, where the review is skipped: "Merge if the bar is met" reads
+      # the governed-paths list from it before merging a PR CI never builds.
       - name: Provide the governed-paths script
         id: governed
-        if: steps.pin.outputs.skip != 'true'
+        if: steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true'
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.30
         with:
           base-ref: origin/${{ inputs.default_branch }}
@@ -1451,6 +1454,7 @@ jobs:
           UNBUILT: ${{ needs.resolve.outputs.unbuilt }}
           MERGE_UNBUILT: ${{ inputs.merge_unbuilt }}
           UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
@@ -1511,12 +1515,14 @@ jobs:
           # only while the diff is still all unbuilt paths, which is checked again here against the
           # head about to merge rather than trusted from resolve, and only with a push time for the
           # feedback guard to compare against. A workflow file is refused outright: it changes what
-          # runs, whatever CI makes of its path, and the reviewer app cannot merge one anyway.
+          # runs, whatever CI makes of its path, and the reviewer app cannot merge one anyway. So is a
+          # path that governs the agents, CLAUDE.md and the rest of the governed list: before this
+          # input such a docs-only change could never merge without a human, and it still cannot.
           if [ "$VOUCHED" != "true" ]; then
             [ "$UNBUILT" = "true" ] && [ "$MERGE_UNBUILT" = "true" ] \
               || hold "no CI run vouched for this head - reviewing, but merging is yours to do." unvouched
             [ -n "$PUSHED_AT" ] \
-              || hold "CI does not build this PR, and I could not date its push, so I cannot tell which feedback is new - merging is yours to do." unbuilt-undated
+              || hold "CI does not build this PR, and I could not date its push, so I cannot tell which feedback is new - merging is yours to do." "unbuilt-undated-${REVIEWED_SHA}"
             changed=$("$GUARDS" files "$PR")
             [ -n "$changed" ] || hold "the PR's changed files could not be read." unbuilt-unreadable
             buildable=$("$GUARDS" buildable "$UNBUILT_REGEX" <<<"$changed")
@@ -1524,6 +1530,15 @@ jobs:
               || hold "it now changes files CI builds ($(head -3 <<<"$buildable" | tr '\n' ' ')), so it waits for CI." unbuilt-buildable
             ! grep -q '^\.github/workflows/' <<<"$changed" \
               || hold "it changes a workflow file - that is a human's merge." unbuilt-workflow
+            governed_list=""
+            if [ -n "$GOVERNED_SCRIPT" ]; then governed_list=$(bash "$GOVERNED_SCRIPT" --list); fi
+            [ -n "$governed_list" ] \
+              || hold "the list of paths that govern the agents could not be read." unbuilt-governed-unreadable
+            touched=$(awk 'NR == FNR { g[$0] = 1; next }
+                           { for (p in g) if ($0 == p || index($0, p "/") == 1) { print; break } }' \
+                        <(printf '%s\n' "$governed_list") - <<<"$changed")
+            [ -z "$touched" ] \
+              || hold "it changes a path that governs the agents ($(head -3 <<<"$touched" | tr '\n' ' ')) - that is a human's merge." unbuilt-governed
             echo "Every changed path is one CI ignores, and merge_unbuilt is on - the approving review is the bar."
           fi
 
