@@ -257,7 +257,14 @@ jobs:
           set -euo pipefail
           skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
 
-          num=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          # Same-repo PRs only: `--head` matches a fork's PR with the same branch name too, and a fork
+          # could then stand in for the PR whose CI run this is and have it skipped as "from a fork".
+          # The one whose head is this run's SHA first; failing that the first same-repo one, so the
+          # head check below can still say the PR moved on. `// empty`, because jq prints a missing
+          # number as the string "null".
+          num=$(gh pr list --head "$BRANCH" --state open --json number,isCrossRepository,headRefOid \
+            --jq '[.[] | select(.isCrossRepository | not)]
+                  | (map(select(.headRefOid == env.SHA)) + .) | .[0].number // empty')
           [ -n "$num" ] || skip "No open PR on $BRANCH - nothing to do."
 
           [ "$(gh pr view "$num" --json isCrossRepository --jq .isCrossRepository)" = "true" ] \
