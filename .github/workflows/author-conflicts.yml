@@ -478,7 +478,6 @@ jobs:
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: read
-          permission-issues: read
 
       - name: Resolve with Claude
         if: >

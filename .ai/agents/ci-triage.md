@@ -14,6 +14,8 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Check composite-action env references | `tools/check-action-env.sh` - every `${{ env.X }}` in an `action.yml` is set by an `env:` key or a `$GITHUB_ENV` write in that action |
 | Check this repo's references | `tools/check-internal-refs.sh` - no `uses: ./` in a reusable workflow or composite action, one immutable tag on every self-reference |
 | Test the references check | `tools/test-internal-refs.sh` - `check-internal-refs.sh` against fixture trees: `./` fails in a `workflow_call` file and an action, and passes in a workflow that runs only here |
+| Check the token mints | `tools/check-token-permissions.sh` - every `permission-*` a `create-github-app-token` step asks for is one its app's installation grants, as recorded in the script |
+| Test the token check | `tools/test-token-permissions.sh` - `check-token-permissions.sh` against fixture workflows: a granted mint passes; an ungranted permission, an unrecorded app, and a step that a `- uses:` line opens or a `with:` comes before, each fail with the line that names it |
 | Test the governed-paths script | `tools/test-governed-paths.sh` - `restore-agent-governed-paths.sh` against scratch repositories: what it restores, merges, discards and keeps, and the markers each case leaves |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
@@ -43,6 +45,9 @@ to improvise.
 | `check-action-env.sh` failure | A composite action reads `${{ env.X }}` that no `env:` key or `$GITHUB_ENV` write in it sets, so it expands to nothing on the runner | Set `X` in the step's `env:`, write it to `$GITHUB_ENV` in an earlier step (`echo "X=…" >> "$GITHUB_ENV"`, quoted or not, in a one-line `run:` or any block scalar, or the `X<<delim` heredoc form), or take it as an input; the runner's own environment is not in the `env` context. The check looks only for the name in the same action file, not for the write coming first or the `env:` key being on the reading step |
 | `check-internal-refs.sh`: `cannot reference a local action` | A `uses: ./` inside a reusable workflow (one that declares `workflow_call`) or a composite action | Replace it with the full `ScottCooper92/binge-ci/...@vX.Y.Z` reference at the tag every other self-reference uses |
 | `Workflows and callers are .yml`: `invisible to every check here` | A workflow, caller or action file under `.github/` or `callers/` was added as `.yaml` | Rename it to `.yml` with `git mv`, and change any reference to its path. Do not widen a glob to accept `.yaml` |
+| `check-token-permissions.sh`: `is not granted to the … installation` | A mint asks for a permission its app does not have, so it would fail at run time and the job would die before its agent ran | Drop that `permission-*` input, or ask for one the app has. Never add a permission to the script's grant to make it pass: it records the installation's settings, and only a human changing those moves it |
+| `check-token-permissions.sh`: `has no grant recorded` | A mint narrows its token for an app the script does not know | **Stop.** Recording an app's grant is a human's call, made from that installation's settings |
+| `test-token-permissions.sh`: a case FAILs | `check-token-permissions.sh` no longer reads a step's app and permissions the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen the line it expects |
 | `test-governed-paths.sh`: a case FAILs | The governed-paths script no longer leaves the note, marker or file that case expects | Fix the script if this PR changed it. If the PR deliberately changed what a case expects, change that case and say so; never delete one or loosen what it asserts |
 | `check-internal-refs.sh`: `self-references disagree` or `moving alias` | One reference was bumped, or points at `v1` | **Stop** unless this PR is the release bump itself. A pin is bumped in a release commit that does nothing else; a repair must not do it |
 | `gradle-plugins`: Kotlin compile error | The PR changed a gate's code, or a test, and it no longer compiles | Fix the code this PR changed. A gate's plugin id, extension or task name is its public signature, so do not rename one to make a call site compile |
@@ -65,6 +70,8 @@ shellcheck --severity=warning <the file you changed>
 ./tools/check-action-env.sh
 ./tools/check-internal-refs.sh
 ./tools/test-internal-refs.sh
+./tools/check-token-permissions.sh
+./tools/test-token-permissions.sh
 ./tools/test-governed-paths.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml

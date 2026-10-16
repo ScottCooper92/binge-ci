@@ -67,6 +67,14 @@ jobs:
       - name: Test the references check against its fixtures
         run: ./tools/test-internal-refs.sh
 
+      # A token mint that asks for a permission its app's installation lacks fails at run time, in
+      # every consumer at once, and nothing above can see an installation's grant.
+      - name: Check the token mints against the apps' grants
+        run: ./tools/check-token-permissions.sh
+
+      - name: Test the token check against its fixtures
+        run: ./tools/test-token-permissions.sh
+
       # The governed-paths script's notes and markers are read by other steps: the merge gate holds
       # on one, the author bots caveat their reply on another. Nothing else runs it outside a PR.
       - name: Test the governed-paths script against its fixtures
