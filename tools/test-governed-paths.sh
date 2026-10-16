@@ -92,6 +92,23 @@ if ! git diff --quiet origin/main -- CLAUDE.md; then fail "the working tree is n
 elif ! git diff --cached --quiet; then fail "the rewrite staged something"
 else ok; fi
 
+# #237: the agent's prompt names the paths the rewrite is about to replace, and only those.
+case='prompt-note-names-changes'
+repo 'lines > CLAUDE.md; lines > .mcp.json' 'sed -i "s/line 2/pr 2/" CLAUDE.md; mkdir -p .claude && echo "{}" > .claude/settings.json; rm .mcp.json'
+prompt=$(bash "$script" --prompt-note)
+if ! grep -qF '`CLAUDE.md`' <<<"$prompt"; then fail "a changed path is not named: $prompt"
+elif ! grep -qF '`.claude`' <<<"$prompt"; then fail "a path the PR added is not named: $prompt"
+elif ! grep -qF '`.mcp.json`' <<<"$prompt"; then fail "a path the PR deleted is not named: $prompt"
+elif grep -qF '`.husky`' <<<"$prompt"; then fail "a path neither side has is named: $prompt"
+elif ! grep -qF 'origin/main' <<<"$prompt"; then fail "the note does not name the base: $prompt"
+else ok; fi
+
+case='prompt-note-quiet'
+repo 'lines > CLAUDE.md' 'echo pr > README'
+prompt=$(bash "$script" --prompt-note)
+if [ -n "$prompt" ]; then fail "a PR that changes no governed path got a note: $prompt"
+else ok; fi
+
 case=extra-paths
 cd "$work"
 if ! GOVERNED_EXTRA_PATHS=$'  docs/agents  \n' bash "$script" --list | grep -qx 'docs/agents'; then

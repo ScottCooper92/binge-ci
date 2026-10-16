@@ -367,6 +367,21 @@ jobs:
           base-ref: origin/${{ steps.ctx.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
+      # claude-code-action rewrites the governed paths to the base's copy just before the agent
+      # starts. Named in the agent's prompt, so it does not report them as edits it did not make.
+      - name: Describe the governed-path rewrite for the agent
+        id: governed_note
+        if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          # A missing note costs a confused report, not the run, so it does not stop the job.
+          note=$(bash "$GOVERNED_SCRIPT" --prompt-note) \
+            || { echo "::warning::Could not describe the governed-path rewrite for the agent."; note=""; }
+          delim="EOF_$(date +%s%N)"
+          { echo "block<<${delim}"; printf '%s\n' "$note"; echo "$delim"; } >> "$GITHUB_OUTPUT"
+
       # An agent runner ships no toolchain, so every Gradle task an agent was asked to run
       # failed before it started - leaving work half-finished, e.g. code written for a new
       # preview whose baseline was never recorded.
@@ -485,6 +500,8 @@ jobs:
             ${{ inputs.gate_rules }}
 
             ${{ steps.suppression.outputs.block }}
+
+            ${{ steps.governed_note.outputs.block }}
 
             ${{ inputs.verify_guidance }}
 
