@@ -67,9 +67,6 @@ jobs:
       # on main is read and copied. A bot squash-merging on a green `buf` run is a
       # sharper tool here than on a private app repo.
       auto_merge: false
-      # A PR CI never builds may merge once approved. Inert here until this repo sets
-      # `unbuilt_paths`: with no paths-ignore in ci.yml, every PR gets a build to vouch for it.
-      merge_unbuilt: true
       # This repo's whole gate is `./gradlew build` plus buf lint/breaking. There is no
       # linter, no coverage floor and no screenshot suite - so naming one here would tell
       # the reviewer not to report what nothing actually catches.
