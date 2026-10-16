@@ -49,7 +49,7 @@ jobs:
     concurrency:
       group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
-    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.29
+    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.30
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
@@ -62,7 +62,8 @@ jobs:
         `shellcheck --severity=warning` on a changed script or `run:` block, and
         `./tools/check-callers.sh`, `./tools/check-action-shell.sh`,
         `./tools/check-action-env.sh`, `./tools/check-internal-refs.sh`,
-        `./tools/test-internal-refs.sh` or `./tools/test-governed-paths.sh` for the invariant
+        `./tools/test-internal-refs.sh`, `./tools/check-token-permissions.sh`,
+        `./tools/test-token-permissions.sh` or `./tools/test-governed-paths.sh` for the invariant
         you touched. actionlint is not preinstalled; fetch it the way
         .github/actions/actionlint/action.yml does if a workflow file changed. For a change
         under gradle-plugins/, run the affected test class or `./gradlew build` from

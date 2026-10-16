@@ -629,7 +629,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.30
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -699,7 +699,7 @@ jobs:
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.30
         with:
           base-ref: origin/${{ steps.pr.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -727,7 +727,7 @@ jobs:
           inputs.toolchain == 'android' &&
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.30
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           java-version: ${{ inputs.java_version }}
@@ -1342,7 +1342,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.30
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -1352,7 +1352,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.30
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -1367,7 +1367,7 @@ jobs:
         if: >
           inputs.toolchain == 'android' &&
           steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.29
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.30
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           java-version: ${{ inputs.java_version }}

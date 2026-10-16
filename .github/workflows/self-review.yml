@@ -59,7 +59,7 @@ jobs:
     if: >-
       (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
       (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
-    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.29
+    uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1.0.30
     with:
       dispatch_pr: ${{ inputs.pr }}
       # Everything in this repository governs the agents, so a merge here is a human's
@@ -72,7 +72,8 @@ jobs:
         actionlint (with shellcheck) over the workflows and callers, the .yml-only check,
         shellcheck over every script under .github/actions and tools, tools/check-callers.sh,
         tools/check-action-shell.sh, tools/check-action-env.sh, tools/check-internal-refs.sh,
-        tools/test-internal-refs.sh, tools/test-governed-paths.sh, or the gradle-plugins
+        tools/test-internal-refs.sh, tools/check-token-permissions.sh,
+        tools/test-token-permissions.sh, tools/test-governed-paths.sh, or the gradle-plugins
         build and its tests
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
