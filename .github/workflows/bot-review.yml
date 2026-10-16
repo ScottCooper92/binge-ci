@@ -118,6 +118,14 @@ on:
       review_guide_path:
         type: string
         default: .ai/agents/pr-review-guide.md
+      governed_extra_paths:
+        description: >
+          Repo-specific paths to add to the governed list, newline-separated, as the author
+          workflows take them. The reviewer's checkout has these reset to the default branch's
+          copy too, so a PR cannot add to the rules it is reviewed under through one of them.
+          Append-only; see the governed-paths action.
+        type: string
+        default: ''
       conventions_path:
         type: string
         default: CLAUDE.md
@@ -908,6 +916,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.28
         with:
           base-ref: origin/${{ inputs.default_branch }}
+          extra-paths: ${{ inputs.governed_extra_paths }}
 
       - name: Rewrite the governed paths to the default branch's copy
         if: steps.pin.outputs.skip != 'true'
