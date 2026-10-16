@@ -450,6 +450,23 @@ jobs:
             done
           fi
 
+      # Named in the agent's prompt, before the rewrite replaces them: otherwise the agent finds
+      # the governed paths modified, edits it did not make, and reports them as tampering.
+      - name: Describe the governed-path rewrite for the agent
+        id: governed_note
+        if: >
+          steps.branch.outputs.skip != 'true' &&
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          # A missing note costs a confused report, not the run, so it does not stop the job.
+          note=$(bash "$GOVERNED_SCRIPT" --prompt-note) \
+            || { echo "::warning::Could not describe the governed-path rewrite for the agent."; note=""; }
+          delim="EOF_$(date +%s%N)"
+          { echo "block<<${delim}"; printf '%s\n' "$note"; echo "$delim"; } >> "$GITHUB_OUTPUT"
+
       # claude-code-action rewrites the governed paths only on an entity event, and this job runs
       # on a schedule or by hand - so without this the agent sees the PR head's copy live, and
       # "Commit or bail out" restores a snapshot that already matched it. Past the refusal above
@@ -540,6 +557,8 @@ jobs:
             ${{ inputs.conflict_rules }}
 
             ${{ steps.suppression.outputs.block }}
+
+            ${{ steps.governed_note.outputs.block }}
 
             This run gets one turn and nothing will wake it. There is no next turn
             in which a delegated task reports back to you, and no scheduler behind
