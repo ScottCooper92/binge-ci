@@ -884,6 +884,26 @@ jobs:
           git show "origin/${DEFAULT_BRANCH}:${CONVENTIONS_PATH}" > "$RULES_DIR/conventions.md"
           echo "dir=$RULES_DIR" >> "$GITHUB_OUTPUT"
 
+      # The guide and conventions above are only the prompt's rules. Claude Code also loads the
+      # checkout's own CLAUDE.md, .claude/ and .mcp.json as project context, and claude-code-action
+      # resets those to the base's copy only on an entity event (a comment, a review). On the
+      # workflow_run and dispatch doors it does nothing, so without this the reviewer runs under the
+      # PR head's own instructions. Nothing here is committed, so there is nothing to undo.
+      - name: Provide the governed-paths script
+        id: governed
+        if: steps.pin.outputs.skip != 'true'
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.28
+        with:
+          base-ref: origin/${{ inputs.default_branch }}
+
+      - name: Rewrite the governed paths to the default branch's copy
+        if: steps.pin.outputs.skip != 'true'
+        env:
+          GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+        run: |
+          set -euo pipefail
+          bash "$GOVERNED_SCRIPT" --rewrite
+
       # The guide reads a PR body's checklist against this PR's earlier CI runs: a check the author
       # ticked that failed one of them is a finding. The agent cannot list those runs itself, since
       # the Actions API is outside the reviewer app's grant, so they are gathered here with the

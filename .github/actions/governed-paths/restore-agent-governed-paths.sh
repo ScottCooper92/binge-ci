@@ -39,7 +39,8 @@
 #   action only does this on an entity event (a comment, a review); on a workflow_run it does
 #   nothing, so author-ci-fix and author-conflicts call this before their agent step. Without
 #   it those two agents read the PR head's own copies live, and the undo above has nothing to
-#   undo - the guard the README describes is not in force.
+#   undo - the guard the README describes is not in force. bot-review calls it too, from the
+#   default branch, so a PR cannot add to the rules its own review runs under.
 #
 # $GOVERNED_BASE_REF (default origin/main) is the ref the rewrite is taken from, and for the
 # undo the ref it was taken from: on an entity event the action restores from the PR's BASE

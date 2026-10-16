@@ -186,8 +186,11 @@ here so a PR cannot reach the guard that is about to refuse it. The action only 
 an entity event (a comment, a review), and from the PR's base branch rather than the default
 one; so the two `workflow_run`-and-schedule bots, `author-ci-fix` and `author-conflicts`,
 perform the rewrite themselves with the script's `--rewrite` mode before their agent starts,
-and every bot undoes it against the PR's base. Without that, an agent run on those triggers
-reads the PR head's own `CLAUDE.md` live, and the guard is not in force.
+and every author bot undoes it against the PR's base. Without that, an agent run on those triggers
+reads the PR head's own `CLAUDE.md` live, and the guard is not in force. `bot-review` runs the
+same `--rewrite`, from the default branch, before its reviewer starts. It runs on `workflow_run`
+and dispatch too, and without the rewrite a PR's own `CLAUDE.md` would join the rules it is
+judged by. The reviewer commits nothing, so it needs no undo.
 
 **`suppression-files`** expands a caller's `suppression_files` globs against the checkout and
 the default branch, and outputs the prompt block that tells an agent not to edit what they
