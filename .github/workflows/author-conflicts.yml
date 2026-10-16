@@ -463,6 +463,23 @@ jobs:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: bash "$GOVERNED_SCRIPT" --rewrite
 
+      # The agent's own token, read-only. claude-code-action replaces the checkout's credential with
+      # the token it is given, so a write token here is one the agent's git can push with, and a
+      # `Bash(git push:*)` deny only blocks one spelling of that (`git -C . push`, `bash -c` ...). With
+      # read access alone it can still fetch and read the PR; the workflow pushes, with its own token.
+      - name: Mint a read-only token for the agent
+        id: agent_token
+        if: >
+          steps.branch.outputs.skip != 'true' &&
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-issues: read
+
       - name: Resolve with Claude
         if: >
           steps.branch.outputs.skip != 'true' &&
@@ -485,7 +502,7 @@ jobs:
           show_full_output: ${{ inputs.show_full_output }}
           # Without a token of its own the action mints one via GitHub OIDC, needing `id-token:
           # write` - a broader grant than anything else here, in a job that executes agent code.
-          github_token: ${{ steps.token.outputs.token }}
+          github_token: ${{ steps.agent_token.outputs.token }}
           allowed_bots: ${{ inputs.reviewer_bot }}
           # configureGitAuth rewrites these when the agent starts, defaulting to claude[bot]. Set
           # here rather than after, so it covers BOTH ways this merge can be committed - by the agent
@@ -497,7 +514,8 @@ jobs:
           # entry is inert and a missed one is the failure again.
           #
           # `git push` too: the workflow pushes after the governed-path undo, and an agent's own push
-          # would land the base's copy of those paths on the branch before the undo could run.
+          # would land the base's copy of those paths on the branch before the undo could run. The
+          # deny is only the obvious spelling; the read-only `agent_token` is what makes it hold.
           claude_args: >-
             --allowedTools "Bash,Read,Edit,Write,Grep,Glob"
             --disallowedTools "Task,Agent,Bash(git push:*)"
@@ -689,6 +707,8 @@ jobs:
           # The branch can have moved under us. Letting the rejection stand would throw the resolution
           # away and say NOTHING on the PR. Merging the new tip in is the retry; a rebase would replay
           # the merge commit this step exists to create.
+          # The agent ran with a read-only token, which claude-code-action wrote into origin's URL.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GH_REPO}.git"
           if ! git push; then
             git fetch origin "$BRANCH" || true
             if git merge "origin/$BRANCH" --no-edit && git push; then
