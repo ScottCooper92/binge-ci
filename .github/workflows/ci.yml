@@ -75,6 +75,11 @@ jobs:
       - name: Test the token check against its fixtures
         run: ./tools/test-token-permissions.sh
 
+      # `buildable` decides whether bot-review may treat a PR as one CI never builds, and with
+      # merge_unbuilt on, merge it with no build behind it.
+      - name: Test the merge guards against their fixtures
+        run: ./tools/test-merge-guards.sh
+
       # The governed-paths script's notes and markers are read by other steps: the merge gate holds
       # on one, the author bots caveat their reply on another. Nothing else runs it outside a PR.
       - name: Test the governed-paths script against its fixtures

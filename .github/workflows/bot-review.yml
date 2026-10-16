@@ -34,6 +34,8 @@ name: Bot review
 #    doing nothing while every visible signal reads as tended. That half is OFF unless the
 #    caller passes BOTH `unbuilt_paths` and `unbuilt_paths_regex`: a caller with no
 #    `paths-ignore` has no such PRs, and reviewing on it would be reviewing code mid-build.
+#    No build vouches for such a PR, so it is reviewed and then left for a human to merge,
+#    unless the caller also passes `merge_unbuilt` (see "Merge if the bar is met").
 #
 # `synchronize` is the SAME door, opened by a different event (#59). The `labeled` event
 # fires once, so a PR already labelled that stays entirely inside `paths-ignore` gets no
@@ -185,6 +187,16 @@ on:
           so drift closes the door loudly instead of narrowing it in silence.
         type: string
         default: ''
+      merge_unbuilt:
+        description: >
+          Lets a clean review merge a PR that CI never builds: one whose every changed path is in
+          `unbuilt_paths`, reviewed through the `labeled`/`synchronize` door. Without it such a PR
+          is reviewed and then waits for a human, because no build vouched for it. Needs
+          `auto_merge` and `unbuilt_paths`. Every other guard still applies, the diff is checked
+          again at merge time, a change to `.github/workflows/` is never merged, and the push must
+          be datable for the unaddressed-feedback guard.
+        type: boolean
+        default: false
       unbuilt_paths_regex:
         description: >
           The regex form of `unbuilt_paths`, for the changed-file test. A second
@@ -294,6 +306,7 @@ jobs:
       pushed_at: ${{ steps.pr.outputs.pushed_at }}
       base: ${{ steps.pr.outputs.base }}
       vouched: ${{ steps.pr.outputs.vouched }}
+      unbuilt: ${{ steps.pr.outputs.unbuilt }}
       # Read by "Skip a head already reviewed" in the review job: a rebuttal is new
       # information about a SHA that already has a verdict, not a new head, so that guard
       # lets this door through while the verdict is CHANGES_REQUESTED. See "THE FOURTH DOOR".
@@ -456,6 +469,7 @@ jobs:
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           UNBUILT_PATHS: ${{ inputs.unbuilt_paths }}
           UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
+          GUARDS: ${{ steps.guards.outputs.script }}
           GH_RETRY: ${{ steps.guards.outputs.retry }}
         run: |
           set -euo pipefail
@@ -530,6 +544,7 @@ jobs:
           # already there. "Merge if the bar is met" holds on the rest rather than merging on
           # nothing.
           vouched=true
+          unbuilt=false
           if [ -n "${DISPATCH_PR:-}" ]; then
             vouched=false
             echo "Manual dispatch - not requiring a CI run (conclusion: '${ci:-none}')."
@@ -579,30 +594,30 @@ jobs:
               skip "${CI_WORKFLOW}'s paths-ignore no longer matches the caller's unbuilt_paths (see above) - teach the caller the new entry before a docs-only PR can be reviewed through this door."
             fi
 
-            # Two jq calls, because the regex must arrive as a VALUE and not as source text.
-            # Interpolated into `--jq`, it lands inside a jq string literal, where `\.` is not a
-            # valid escape and the whole program fails to compile - `invalid escape sequence "\."
-            # in string literal`, at run time, in the consuming repo. A caller author writing a
-            # regex writes `\.md$`; asking them to write `\\.md$` because of where the value is
-            # spliced is a trap, and no static check can catch it: check-callers.sh validates that
-            # an input exists, not what a jq compiler will make of it.
+            # The regex reaches jq as a VALUE, not as source text: spliced into `--jq` it lands inside
+            # a jq string literal, where `\.` is not a valid escape and the program fails to compile,
+            # at run time, in the consuming repo. merge-guards.sh `buildable` hands it to `jq` proper,
+            # which uses Oniguruma where gh's gojq uses Go's regexp. That widens what compiles - every
+            # pattern gojq accepted still means what it did - and keeps a caller's `\d` a digit, which
+            # POSIX ERE would not. jq is a dependency of this step; hosted runners carry it.
             #
-            # `gh --jq` takes no --arg, so the array comes out of gh and the filter goes into
-            # `jq` proper. That DOES change the regex engine, and in the widening direction:
-            # gh embeds gojq, which uses Go's regexp package, while jq uses Oniguruma. A pattern
-            # gojq rejects can be accepted here - `(?<=a)x` is the short demonstration - but every
-            # pattern gojq accepted still means what it did, which is what makes the swap safe for
-            # a path filter. `grep -Ev` would have been one process fewer and a change in the
-            # other direction: POSIX ERE has neither engine's extensions, so a caller's `\d` would
-            # quietly stop being a digit.
-            #
-            # jq is a dependency of THIS step as a result, where `gh` alone sufficed before. Hosted
-            # runners carry it; the `runner` input's docs say so for a caller pointing this at its
-            # own machines.
-            unbuilt=$(gh pr view "$num" --json files --jq '[.files[].path]' \
-              | jq --arg re "$UNBUILT_REGEX" '[.[] | select(test($re) | not)] | length')
-            [ "$unbuilt" = "0" ] \
-              || skip "PR #$num has $unbuilt file(s) CI will build - waiting for its run."
+            # Every changed path, paginated and with both sides of a rename (`files`): `gh pr view
+            # --json files` stops at 100, so a large PR could pass on its first page alone, and
+            # moving a source file into docs/ is not a docs-only change.
+            changed=$("$GUARDS" files "$num")
+            [ -n "$changed" ] || skip "PR #$num changes no files - nothing to review."
+            buildable=$("$GUARDS" buildable "$UNBUILT_REGEX" <<<"$changed")
+            [ -z "$buildable" ] \
+              || skip "PR #$num has $(grep -c . <<<"$buildable") file(s) CI will build - waiting for its run."
+            unbuilt=true
+
+            # No CI run dates the push, so the activity log does: the earliest push of this sha to the
+            # PR's branch. Without it the merge gate's feedback guard has no watermark and a merge
+            # through `merge_unbuilt` holds. Best-effort: an unreadable log only costs that merge.
+            head_ref=$(gh pr view "$num" --json headRefName --jq .headRefName)
+            pushed_at=$(gh api "repos/${GH_REPO}/activity?ref=refs/heads/${head_ref}&per_page=100" \
+                          --jq "[.[] | select(.after == \"$sha\") | .timestamp] | sort | .[0] // empty" \
+                        2>/dev/null || true)
             echo "PR opted in, and CI will never run on this PR - reviewing without a build to vouch for it."
           elif [ -n "${COMMENT_PR:-}" ]; then
             # No unbuilt-paths half here (see "THE FOURTH DOOR" above): a PR CI never builds has
@@ -614,15 +629,18 @@ jobs:
             [ "$ci" = "success" ] || skip "No successful CI run on $sha (conclusion: '${ci:-none}')."
           fi
           echo "vouched=$vouched" >> "$GITHUB_OUTPUT"
+          # True only when this door proved every changed path is one CI ignores. "Merge if the bar
+          # is met" may then merge an unvouched head, if the caller opted in with `merge_unbuilt`.
+          echo "unbuilt=$unbuilt" >> "$GITHUB_OUTPUT"
           # Read by the review job's "Skip a head already reviewed" - this door's whole point is
           # to look again at a SHA that already has a verdict, so that guard does not apply to it.
           echo "rebuttal=$([ -n "${COMMENT_PR:-}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-          # `pushed_at` is left empty when there is no run to date the push by - reachable only on the
-          # two unvouched doors, which the merge gate stops at first. There is no honest fallback: the
-          # committer date is earlier than the push, the dispatch instant later than every comment
-          # already on the PR. An empty watermark holds on any human feedback rather than merging over
-          # it.
+          # `pushed_at` is left empty when there is no run to date the push by: on the dispatch door,
+          # and on the unbuilt door when the activity log could not say. There is no honest fallback:
+          # the committer date is earlier than the push, the dispatch instant later than every comment
+          # already on the PR. The merge gate stops at an unvouched head before it reads this, and lets
+          # an unbuilt one through only with a push time.
 
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "pushed_at=$pushed_at" >> "$GITHUB_OUTPUT"
@@ -1430,6 +1448,9 @@ jobs:
           RETRY: ${{ steps.pin.outputs.approved }}
           PUSHED_AT: ${{ needs.resolve.outputs.pushed_at }}
           VOUCHED: ${{ needs.resolve.outputs.vouched }}
+          UNBUILT: ${{ needs.resolve.outputs.unbuilt }}
+          MERGE_UNBUILT: ${{ inputs.merge_unbuilt }}
+          UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
@@ -1484,8 +1505,27 @@ jobs:
           # A review no CI run vouched for has no green build behind it and no reliable way to date
           # the push, so the unaddressed-feedback guard has nothing trustworthy to compare against.
           # Reviewing on that basis is worth doing; merging on it is not.
-          [ "$VOUCHED" = "true" ] \
-            || hold "no CI run vouched for this head - reviewing, but merging is yours to do." unvouched
+          #
+          # Except, when the caller opts in with `merge_unbuilt`, for a PR CI will never build: no
+          # build is coming to vouch for it, so the approving review is the whole bar. That holds
+          # only while the diff is still all unbuilt paths, which is checked again here against the
+          # head about to merge rather than trusted from resolve, and only with a push time for the
+          # feedback guard to compare against. A workflow file is refused outright: it changes what
+          # runs, whatever CI makes of its path, and the reviewer app cannot merge one anyway.
+          if [ "$VOUCHED" != "true" ]; then
+            [ "$UNBUILT" = "true" ] && [ "$MERGE_UNBUILT" = "true" ] \
+              || hold "no CI run vouched for this head - reviewing, but merging is yours to do." unvouched
+            [ -n "$PUSHED_AT" ] \
+              || hold "CI does not build this PR, and I could not date its push, so I cannot tell which feedback is new - merging is yours to do." unbuilt-undated
+            changed=$("$GUARDS" files "$PR")
+            [ -n "$changed" ] || hold "the PR's changed files could not be read." unbuilt-unreadable
+            buildable=$("$GUARDS" buildable "$UNBUILT_REGEX" <<<"$changed")
+            [ -z "$buildable" ] \
+              || hold "it now changes files CI builds ($(head -3 <<<"$buildable" | tr '\n' ' ')), so it waits for CI." unbuilt-buildable
+            ! grep -q '^\.github/workflows/' <<<"$changed" \
+              || hold "it changes a workflow file - that is a human's merge." unbuilt-workflow
+            echo "Every changed path is one CI ignores, and merge_unbuilt is on - the approving review is the bar."
+          fi
 
           # An explicit escape hatch that beats everything below.
           labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")')

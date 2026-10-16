@@ -15,6 +15,13 @@
 #   merge-guards.sh feedback <pr> <since>
 #       Prints `changes-requested` when a human's latest verdict requests changes, `newer` when a
 #       human left feedback after <since> (an ISO 8601 timestamp), else nothing.
+#   merge-guards.sh files <pr>
+#       Prints every path the PR changes, one per line, with both sides of a rename. Paginated
+#       REST, because `gh pr view --json files` stops at 100 files, and a rename's old path is a
+#       change CI sees too: moving a source file into docs/ is not a docs-only change.
+#   merge-guards.sh buildable <regex>
+#       Reads paths on stdin and prints those the regex does not match: the ones CI would build,
+#       given the regex form of the caller's paths-ignore. Nothing printed means none.
 #   merge-guards.sh merge <pr> <merge_method> <head_sha>
 #       Merges with the PR's title and body as the commit message, only if the head is still
 #       <head_sha>. gh's own output and exit status pass through.
@@ -147,6 +154,18 @@ feedback() {
   if [ "$newer" != "0" ]; then echo newer; fi
 }
 
+files() {
+  gh api "repos/${GH_REPO}/pulls/$1/files?per_page=100" --paginate \
+    --jq '.[] | .filename, (.previous_filename // empty)'
+}
+
+# The regex reaches jq as a value, not as source text: spliced into a program, a caller's `\.md$`
+# is an invalid escape inside a jq string literal. jq rather than grep -E, so `\d` and the other
+# extensions mean what they did under gh's own --jq.
+buildable() {
+  jq -R -r --arg re "$1" 'select(length > 0) | select(test($re) | not)'
+}
+
 merge() {
   local pr=$1 merge_method=$2 head=$3 view message=()
   method "$merge_method"
@@ -170,6 +189,8 @@ case "$cmd" in
   method) method "$@" ;;
   governed) [ "$#" -eq 1 ] || { echo "usage: $0 governed <pr>" >&2; exit 2; }; governed "$@" ;;
   feedback) [ "$#" -eq 2 ] || { echo "usage: $0 feedback <pr> <since>" >&2; exit 2; }; feedback "$@" ;;
+  files) [ "$#" -eq 1 ] || { echo "usage: $0 files <pr>" >&2; exit 2; }; files "$@" ;;
+  buildable) [ "$#" -eq 1 ] || { echo "usage: $0 buildable <regex>" >&2; exit 2; }; buildable "$@" ;;
   merge) [ "$#" -eq 3 ] || { echo "usage: $0 merge <pr> <merge_method> <head_sha>" >&2; exit 2; }; merge "$@" ;;
-  *) echo "usage: $0 {method|governed|feedback|merge} ..." >&2; exit 2 ;;
+  *) echo "usage: $0 {method|governed|feedback|files|buildable|merge} ..." >&2; exit 2 ;;
 esac
