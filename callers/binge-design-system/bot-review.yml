@@ -20,18 +20,20 @@ run-name: >-
 # PUBLIC repository, and one that two other builds include directly. `./gradlew build`
 # here cannot see every consumer, so a change that compiles fine in this repository can
 # still break a consuming app at its next sync. auto_merge was off until the review had a
-# track record here. It is on now: CI's `seerr` job builds binge-seerr against the change, and
-# a consumer break that gets through surfaces at that consumer's own submodule bump.
+# track record here. It is on now. The `Consumer check (binge-seerr)` workflow, kept apart from
+# `CI`, compiles binge-seerr against a change that touches what it compiles, and a red or pending
+# run there holds auto-merge at UNSTABLE. A consumer break that gets through surfaces at that
+# consumer's own submodule bump.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
   # The third door. `ci.yml` here declares no paths-ignore, so the "CI will never run on this
-  # PR" half of this door has nothing to open — see `unbuilt_paths` being left unset below.
+  # PR" half of this door has nothing to open - see `unbuilt_paths` being left unset below.
   # But the OTHER half is independent of that and does not need `unbuilt_paths` at all: a PR
   # labelled *after* its CI already reported. `workflow_run` above only fires when a matching
   # CI run completes, so a PR whose CI finished inside the minute between opening and labelling
-  # closed that door on "not opted in" and is never revisited without this — the called
+  # closed that door on "not opted in" and is never revisited without this - the called
   # workflow's `resolve` job re-checks CI on the labelled head and reviews it exactly as the
   # `workflow_run` trigger would have.
   #
@@ -87,7 +89,7 @@ jobs:
       gated_checks: ktlint, Android lint or the screenshot baselines
       # unbuilt_paths deliberately left unset: ci.yml here declares no paths-ignore, so there
       # are no CI-less PRs and that half of the labeled/synchronize door (see `on:` above) has
-      # nothing to open. The other half — a PR labelled after its CI already went green — needs
+      # nothing to open. The other half - a PR labelled after its CI already went green - needs
       # no `unbuilt_paths` at all, which is why that trigger is wired regardless.
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
