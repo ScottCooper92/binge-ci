@@ -191,6 +191,8 @@ jobs:
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           [ -n "${AUTHOR_BOT_ID:-}" ] \
@@ -213,9 +215,20 @@ jobs:
             git push || { echo "::error::Merged $DEFAULT_BRANCH cleanly but the push was rejected."; exit 1; }
             echo "Caught PR #$PR up to $DEFAULT_BRANCH; the push will trigger CI and, with it, review."
           else
-            # A real conflict is author-conflicts' job, on the next CI run.
+            # A real conflict is author-conflicts' job, but that only sweeps after CI on a push to
+            # the default branch. Off the squash-merged-parent path, where the parent's merge is that
+            # push, nothing may follow, so the PR is told rather than left conflicted in silence.
+            # Once per head.
             git merge --abort || true
-            echo "::warning::PR #$PR conflicts with $DEFAULT_BRANCH; left for author-conflicts."
+            echo "::warning::PR #$PR conflicts with $DEFAULT_BRANCH; left for author-conflicts' next sweep or a human."
+            sha=$(git rev-parse HEAD)
+            marker="<!-- retarget-conflict:${sha} -->"
+            comments=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
+              --paginate --jq '.[].body')
+            if ! grep -qF "$marker" <<<"$comments"; then
+              printf '%s\nThis PR needed catching up to `%s`, but merging it in conflicts, so I left the branch as it was. author-conflicts resolves conflicts after the next push to `%s`; to move sooner, merge `%s` in by hand.\n' \
+                "$marker" "$DEFAULT_BRANCH" "$DEFAULT_BRANCH" "$DEFAULT_BRANCH" | gh pr comment "$PR" --body-file -
+            fi
           fi
 
       # A failure here silently restores the exact condition this workflow removes: the PR

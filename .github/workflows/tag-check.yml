@@ -12,6 +12,8 @@ name: Tag check
 # merging the bump and never tagging at all, and no tag push follows that to fire on. Between
 # the bump merging and the tag being cut, main genuinely names a tag that does not exist, so
 # this is red for that window; that red is the report, and it clears when the tag is pushed.
+# On main it also requires the pinned tag's own tree to pin that same tag, which catches a bump
+# to a tag already cut at an older commit: no tag push follows that one either.
 #
 # It DETECTS rather than prevents. By the time a tag push fails here, `v1` has already moved
 # and consumers are already broken; it turns a silent breakage into a loud one and shortens
@@ -29,10 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The tags, so the pinned tag's own tree can be read. The script fetches the one it needs
+      # if this does not bring it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - name: Every self-referenced tag must exist, and name this release
         env:
-          # The ref and commit of this push. On main only existence is checked; on a
+          # The ref and commit of this push. On main the tag must exist and pin itself; on a
           # vX.Y.Z push the tag must be the one pinned; on a `v1` move the commit must be
           # the one the pinned tag names.
           PUSHED_REF: ${{ github.ref_name }}

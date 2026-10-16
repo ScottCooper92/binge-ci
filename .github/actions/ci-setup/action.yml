@@ -145,7 +145,8 @@ runs:
     # memory and self-tunes to whichever runner picks the job up.
     #
     # An undetectable runner falls through to the MIDDLE value, not the generous one: too many
-    # workers is the OOM kill, the opposite safe direction to the daemon heap above.
+    # workers is the OOM kill, the opposite safe direction to the daemon heap above. A runner
+    # detected below 28 GB gets the small value.
     - name: Size screenshot workers to runner RAM
       shell: bash
       run: |
@@ -156,6 +157,8 @@ runs:
           workers=6
         elif [ "$mem_gb" -ge 28 ]; then
           workers=4
+        elif [ "$mem_gb" -gt 0 ]; then
+          workers=2
         else
           workers=4
         fi

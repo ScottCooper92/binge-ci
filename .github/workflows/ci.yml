@@ -118,3 +118,18 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew build
+
+      # Gradle's console names a failed test's exception class but not its message; the reports
+      # carry it. The CI-fix bot reads this artifact by name (self-ci-fix.yml, reports_artifact),
+      # so a red TestKit test reaches it with the assertion that failed. Two paths, not one: the
+      # artifact is rooted at their common parent, and the bot looks for `reports/tests/` in it.
+      - name: Upload the test reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gradle-plugins-reports
+          path: |
+            gradle-plugins/build/reports
+            gradle-plugins/build/test-results
+          if-no-files-found: ignore
+          retention-days: 7
