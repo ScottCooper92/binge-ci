@@ -18,16 +18,31 @@ run-name: >-
 # Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
 #
 # PUBLIC repository, and one that two other builds include directly. `./gradlew build`
-# here cannot see the consumers, so a change that compiles fine in this repository can
-# still break Binge or a companion at their next sync - which is why auto_merge is off.
-# Turn it on when the carve has landed and the review has a track record here.
+# here cannot see every consumer, so a change that compiles fine in this repository can
+# still break a consuming app at its next sync. auto_merge was off until the review had a
+# track record here. It is on now: CI's `seerr` job builds binge-seerr against the change, and
+# a consumer break that gets through surfaces at that consumer's own submodule bump.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-  # The fourth door (#2663): a rebuttal to a CHANGES_REQUESTED verdict, when the reply is a
-  # disagreement rather than a fix and so pushes no commit for workflow_run to pick up. Opens
-  # only for a `<!-- author-response -->` comment from the author bot - see bot-review.yml.
+  # The third door. `ci.yml` here declares no paths-ignore, so the "CI will never run on this
+  # PR" half of this door has nothing to open — see `unbuilt_paths` being left unset below.
+  # But the OTHER half is independent of that and does not need `unbuilt_paths` at all: a PR
+  # labelled *after* its CI already reported. `workflow_run` above only fires when a matching
+  # CI run completes, so a PR whose CI finished inside the minute between opening and labelling
+  # closed that door on "not opted in" and is never revisited without this — the called
+  # workflow's `resolve` job re-checks CI on the labelled head and reviews it exactly as the
+  # `workflow_run` trigger would have.
+  #
+  # `synchronize` is the re-arm for a PR already labelled: a later push produces a new
+  # `workflow_run` of its own, so `synchronize` mostly matters for catching a push that lands
+  # while this door's own check is mid-flight. Declared here because a reusable workflow cannot
+  # declare its own triggers.
+  pull_request:
+    types: [labeled, synchronize]
+  # An author-bot reply that disagrees with a finding pushes no commit, so no CI run follows
+  # it. binge-ci's bot-review keys on the `author-response` marker to re-review it.
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -54,22 +69,26 @@ permissions:
 
 jobs:
   review:
+    # Skip the scheduled canary run of CI: it has no PR to review, fix or rebase.
+    #
     # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
     # here (binge-design-system#407). It checks the events that name a head repository and lets the others through.
     if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'schedule') &&
       (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
       (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
     uses: ScottCooper92/binge-ci/.github/workflows/bot-review.yml@v1
     with:
       dispatch_pr: ${{ inputs.pr }}
-      auto_merge: false
+      auto_merge: true
       # The screenshot suite belongs in this list: ci.yml runs validateDebugScreenshotTest
       # beside `build`, so a baseline mismatch is already reported and is not the
       # reviewer's to raise.
       gated_checks: ktlint, Android lint or the screenshot baselines
-      # ci.yml here declares no paths-ignore - deliberately, since bot-review needs a
-      # successful run against the head and a skipped run is a PR that is never
-      # reviewed. So there are no CI-less PRs and the `labeled` door stays shut.
+      # unbuilt_paths deliberately left unset: ci.yml here declares no paths-ignore, so there
+      # are no CI-less PRs and that half of the labeled/synchronize door (see `on:` above) has
+      # nothing to open. The other half — a PR labelled after its CI already went green — needs
+      # no `unbuilt_paths` at all, which is why that trigger is wired regardless.
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

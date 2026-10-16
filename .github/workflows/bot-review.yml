@@ -48,7 +48,7 @@ name: Bot review
 # THE FOURTH DOOR (`issue_comment: [created]`) answers a different gap: an author's REPLY to a
 # CHANGES_REQUESTED verdict, when the reply is a rebuttal rather than a fix - no commit, so
 # neither `workflow_run` nor labeled/synchronize has anything to open on, and the PR is stuck on
-# a verdict the author disputes with no automated way back to APPROVED (#2663). Every response
+# a verdict the author disputes with no automated way back to APPROVED (tracked privately). Every response
 # author-comments.yml posts is marked `<!-- author-response -->` unconditionally, pushed or not
 # (that workflow's "Push and reply"), so this door opens on exactly that marker from exactly
 # `author_bot` and closes for everything else - a maintainer's comment, a human's reply, the
@@ -437,7 +437,7 @@ jobs:
           # terms. The job-level `if` above is what tells them apart from workflow_run/dispatch;
           # nothing downstream needs to tell `labeled` from `synchronize` itself.
           PR_EVENT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
-          # The fourth door (#2663): a rebuttal comment names its PR by the issue number the
+          # The fourth door (tracked privately): a rebuttal comment names its PR by the issue number the
           # comment landed on, same as labeled/synchronize do via github.event.pull_request -
           # issue_comment carries no head sha and no repo full_name to check against a fork, so
           # both are read from `gh pr view` below like every other field this script trusts.

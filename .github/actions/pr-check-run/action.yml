@@ -31,10 +31,10 @@ description: >
 inputs:
   token:
     description: >
-      A token with `checks: write`. The reviewer app's, as minted by the calling job - the
-      workflow's own GITHUB_TOKEN would need `checks: write` added to the reusable workflow
-      AND to every caller's permissions block, and a caller that missed the bump would die as
-      startup_failure with no log.
+      A token with `checks: write`. Usually the reviewer app's, as minted by the calling job.
+      bot-review passes the workflow's own GITHUB_TOKEN for the one report the app cannot make,
+      a run that failed before the app's token existed, under a check name of its own; that is
+      why every bot-review caller declares `checks: write`.
     required: true
   repository:
     description: owner/name the check run is posted to.
