@@ -32,18 +32,28 @@ fail=0
 resolve=false
 [ "${1:-}" = "--resolve" ] && resolve=true
 
+shopt -s nullglob
 scan=(.github/workflows/*.yml .github/actions/*/action.yml)
+# Nothing to read is a failure, not a pass: a check that finds no files has checked nothing.
+if [ ${#scan[@]} -eq 0 ]; then
+  echo "FAIL  no workflows or composite actions under $(pwd) - nothing was checked."
+  exit 1
+fi
 
 # Rule 1's files: every composite action, and every workflow that names `workflow_call` as a
 # trigger. The match is loose on purpose: any uncommented mention of `workflow_call` counts, so the
 # mapping, inline, block-sequence and quoted forms all do. A file wrongly counted as reusable only
 # loses `./`, while one wrongly left out would ship a reference that breaks in every consumer.
 reusable=(.github/actions/*/action.yml)
+callable=0
 for wf in .github/workflows/*.yml; do
-  if grep -qE '^[^#]*workflow_call' "$wf"; then reusable+=("$wf"); fi
+  if grep -qE '^[^#]*workflow_call' "$wf"; then reusable+=("$wf"); callable=$((callable + 1)); fi
 done
 
-local_refs=$(grep -nE '^[[:space:]]*(- )?uses:[[:space:]]*\./' "${reusable[@]}" || true)
+local_refs=""
+if [ ${#reusable[@]} -gt 0 ]; then
+  local_refs=$(grep -nE '^[[:space:]]*(- )?uses:[[:space:]]*\./' "${reusable[@]}" || true)
+fi
 if [ -n "$local_refs" ]; then
   echo "FAIL  a reusable workflow or composite action cannot reference a local action - './' is the caller's workspace:"
   printf '%s\n' "$local_refs" | sed 's/^/      /'
@@ -54,7 +64,13 @@ refs=$(grep -hoE '^[[:space:]]*(- )?uses:[[:space:]]*ScottCooper92/binge-ci/[^[:
        | sed 's/.*@//' | sort -u)
 count=$(printf '%s\n' "$refs" | grep -c . || true)
 
-if [ "$count" -eq 0 ]; then
+if [ "$count" -eq 0 ] && [ "$callable" -gt 0 ]; then
+  # A tree that ships reusable workflows pins its own actions, so finding none means the pattern
+  # missed them (a quoted `uses:`, say) and every tag check below would pass on nothing.
+  echo "FAIL  $callable reusable workflow(s), but no self-reference in a form this check reads"
+  echo "      (uses: ScottCooper92/binge-ci/...@vX.Y.Z) - nothing was pinned or checked."
+  fail=1
+elif [ "$count" -eq 0 ]; then
   echo "ok    no self-references to pin"
 elif [ "$count" -gt 1 ]; then
   echo "FAIL  self-references disagree on their tag: $(printf '%s ' $refs)"
@@ -97,6 +113,29 @@ else
           echo "      Every @$pushed_ref consumer now runs these workflows with the actions from $refs,"
           echo "      which is a different commit. Tag the release first, then move $pushed_ref to it."
           fail=1
+        fi
+      else
+        # A branch push. Existing is not enough: a bump that pins a tag already cut at an older
+        # commit passes that test, no tag push follows to catch it, and the first red is the v1 move,
+        # after consumers already run these workflows with that older commit's actions. A release
+        # tag is cut at its own bump, so its tree pins itself; one that pins anything else is reused.
+        if ! git rev-parse -q --verify "$refs^{commit}" >/dev/null; then
+          git fetch -q --depth=1 origin "refs/tags/$refs:refs/tags/$refs" 2>/dev/null || true
+        fi
+        tag_pins=$(git grep -hoE '^[[:space:]]*(- )?uses:[[:space:]]*ScottCooper92/binge-ci/[^[:space:]]*' \
+                     "$refs" -- '.github/workflows/*.yml' '.github/actions/*/action.yml' 2>/dev/null \
+                   | sed 's/.*@//' | sort -u)
+        if [ -z "$tag_pins" ]; then
+          echo "FAIL  could not read the self-references in $refs's own tree, so whether it is this"
+          echo "      release's tag or a reused one is unknown."
+          fail=1
+        elif [ "$tag_pins" != "$refs" ]; then
+          echo "FAIL  the workflows pin $refs, but $refs is an older commit whose own tree pins"
+          echo "      $(printf '%s ' $tag_pins)- the tag was reused. Bump to a new tag, cut it at that"
+          echo "      bump, and only then move v1."
+          fail=1
+        else
+          echo "ok    $refs is the release that pins itself"
         fi
       fi
     fi

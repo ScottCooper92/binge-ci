@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Every `with:` key in a caller must be a declared input of the reusable workflow it
-# calls, and every required secret must reach it. Two trees of callers, checked against two
+# calls, every required secret must reach it, and every secret it passes must be declared
+# there - GitHub refuses a call that passes an undeclared secret, at startup. Two trees of callers, checked against two
 # different things. The worked ones under callers/ are checked against the WORKING TREE:
 # consumers follow `v1`, which moves to this commit at release, so a caller that no longer fits
 # is fixed in the same PR. This repository's own self-*.yml pin an immutable vX.Y.Z and run
@@ -128,7 +129,16 @@ for caller in "${callers[@]}"; do
       ;;
   esac
   inputs=$(keys  "$reusable" '^    inputs:'  '^    secrets:' '      ' '[a-z_]')
-  secrets=$(keys "$reusable" '^    secrets:' '^permissions:' '      ' '[A-Z_]')
+  # Secret names in any case: device-smoke's `local_properties` is lowercase, and an uppercase-only
+  # read made it invisible on both sides.
+  secrets=$(keys "$reusable" '^    secrets:' '^ ? ? ? ?[a-z]' '      ' '[A-Za-z_]')
+  # Only `required: true` secrets must be passed; an optional one may be left out.
+  required_secrets=$(awk '
+    /^    secrets:/ {f=1; next}
+    f && /^ ? ? ? ?[a-z]/ {f=0}
+    f && /^      [A-Za-z_]+:/ { name=$0; sub(/:.*/,"",name); gsub(/ /,"",name) }
+    f && /^        required: *true/ { if (name != "") print name }
+  ' "$reusable" | sort -u)
   # The `with:` block ends at the next key at its own depth or shallower, not only at
   # `secrets:`, so a second job in the caller (a scheduled report, say) is not read as inputs.
   used=$(keys    "$caller"   '^    with:'    '^ ? ? ? ?[a-z]' '      ' '[a-z_]')
@@ -141,10 +151,12 @@ for caller in "${callers[@]}"; do
     f && /^      [a-z_]+:/ { name=$0; sub(/:.*/,"",name); gsub(/ /,"",name); req=0 }
     f && /^        required: *true/ { if (name != "") print name }
   ' "$reusable" | sort -u)
+  inherit=false
   if grep -qE '^    secrets: *inherit *$' "$caller"; then
+    inherit=true
     passed="$secrets"
   else
-    passed=$(keys "$caller" '^    secrets:' '^[a-z]' '      ' '[A-Z_]')
+    passed=$(keys "$caller" '^    secrets:' '^ ? ? ? ?[a-z]' '      ' '[A-Za-z_]')
   fi
 
   # Permissions the called workflow declares, against what the caller grants itself. A
@@ -177,12 +189,17 @@ for caller in "${callers[@]}"; do
 
   bad=$(comm -23 <(printf '%s\n' "$used")     <(printf '%s\n' "$inputs")   | grep -v '^$')
   unset_req=$(comm -23 <(printf '%s\n' "$required") <(printf '%s\n' "$used")     | grep -v '^$')
-  missing=$(comm -23 <(printf '%s\n' "$secrets")  <(printf '%s\n' "$passed")   | grep -v '^$')
-  if [ -n "$bad" ] || [ -n "$missing" ] || [ -n "$unset_req" ] || [ -n "$missing_perms" ] || [ -n "$bad_types" ]; then
+  missing=$(comm -23 <(printf '%s\n' "$required_secrets")  <(printf '%s\n' "$passed")   | grep -v '^$')
+  undeclared_secrets=""
+  if [ "$inherit" = false ]; then
+    undeclared_secrets=$(comm -13 <(printf '%s\n' "$secrets") <(printf '%s\n' "$passed") | grep -v '^$')
+  fi
+  if [ -n "$bad" ] || [ -n "$missing" ] || [ -n "$undeclared_secrets" ] || [ -n "$unset_req" ] || [ -n "$missing_perms" ] || [ -n "$bad_types" ]; then
     fail=1; echo "FAIL $caller"
     [ -n "$bad" ]           && echo "     undeclared inputs:   $(echo "$bad")"
     [ -n "$unset_req" ]     && echo "     required not passed: $(echo "$unset_req")"
     [ -n "$missing" ]       && echo "     secrets not passed:  $(echo "$missing")"
+    [ -n "$undeclared_secrets" ] && echo "     undeclared secrets:  $(echo "$undeclared_secrets")"
     [ -n "$missing_perms" ] && echo "     permissions the caller must declare: ${missing_perms% }"
     [ -n "$bad_types" ]     && echo "     inputs of the wrong type: ${bad_types% }"
   else
