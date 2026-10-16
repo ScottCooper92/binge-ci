@@ -144,6 +144,9 @@ on:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
 
+# One sweep at a time. A group holds one pending run, and a new one cancels it, so a caller filters
+# out the CI runs that are not a sweep in its own job `if` (see callers/). Left to find-conflicted's
+# `if` below, a PR's CI run would join this group first and cancel a queued sweep.
 concurrency:
   group: author-conflicts-${{ github.repository }}
   cancel-in-progress: false

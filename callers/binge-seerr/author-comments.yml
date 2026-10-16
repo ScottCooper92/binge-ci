@@ -23,18 +23,6 @@ on:
   pull_request_review:
     types: [submitted]
 
-# WORKFLOW-level, and it lives here rather than in the called workflow because a run joins
-# the group when it is CREATED - before the job `if` below is consulted. Do NOT reach for
-# cancel-in-progress to collapse the duplicate events: every event the `if` filters out -
-# the reviewer bot's own "Not merging" note, the ci-fix bot's comment, a drive-by from a
-# non-collaborator - would cancel an in-flight agent and then skip its own job, leaving the
-# review unanswered with nothing left to re-trigger it. The reviewer bot posts exactly that
-# comment seconds after the review that starts this run, so it would fire on the ordinary
-# path, not an edge case.
-concurrency:
-  group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   respond:
     # Ignore the author bot's own noise, and ignore comments on plain issues. The reviewer
@@ -61,6 +49,18 @@ jobs:
                 github.event.review.author_association || github.event.comment.author_association)) &&
       (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
       (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository)
+    # On the JOB, not the workflow. A workflow-level group is joined when the run is created,
+    # before this `if` is read, and a group holds one pending run: a new one cancels it. So an
+    # event this `if` drops - the author bot's own reply, the reviewer bot's "Not merging" note,
+    # a drive-by - would cancel a queued run that had a maintainer's comment to answer. A job
+    # whose `if` is false never joins the group. When a later real run replaces a pending one,
+    # nothing is lost: each run reads the whole conversation.
+    #
+    # Do NOT reach for cancel-in-progress to collapse the duplicate events: an in-flight agent
+    # would be cancelled by the next comment and the review left half answered.
+    concurrency:
+      group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
