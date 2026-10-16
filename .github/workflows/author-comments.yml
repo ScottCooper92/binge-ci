@@ -212,7 +212,9 @@ jobs:
       # comment, review or inline note: counting every response ever posted would leave the
       # bot permanently and silently dead on the PR once the cap was hit, with no way to reset
       # short of editing comment bodies. A human joining in is the evidence that this is a
-      # conversation and not the runaway the cap exists to stop.
+      # conversation and not the runaway the cap exists to stop - a human with standing, the same
+      # OWNER, MEMBER or COLLABORATOR the caller's gate admits. On a public repository anyone can
+      # comment, and a stranger's comment every few rounds would otherwise keep the volley going.
       - name: Round cap
         id: rounds
         if: steps.ctx.outputs.skip != 'true'
@@ -224,13 +226,16 @@ jobs:
         run: |
           set -euo pipefail
           # Bot feedback does not reset the count - the reviewer bot is the other half of the
-          # volley. API timestamps are ISO-8601 UTC, so they order correctly as plain strings.
+          # volley - and nor does a comment from someone without standing. API timestamps are
+          # ISO-8601 UTC, so they order correctly as plain strings.
           last_human=""
           for endpoint in "issues/${PR}/comments" "pulls/${PR}/comments" "pulls/${PR}/reviews"; do
             # select(. != null) is load-bearing: jq prints a missing timestamp as the string "null",
             # which sorts ABOVE every real one, silently disabling the circuit breaker.
             newest=$(gh api "repos/${GH_REPO}/${endpoint}?per_page=100" --paginate \
               --jq '.[] | select(.user.type != "Bot")
+                        | select(.author_association == "OWNER" or .author_association == "MEMBER"
+                                 or .author_association == "COLLABORATOR")
                         | (.submitted_at // .created_at) | select(. != null)' \
               | sort | tail -n1)
             if [ "$newest" \> "$last_human" ]; then last_human="$newest"; fi
