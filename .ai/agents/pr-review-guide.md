@@ -14,7 +14,8 @@ workflows in the tree and the `self-*.yml` callers fit the workflows at the tag 
 (`tools/check-action-shell.sh`); every `${{ env.X }}` a composite action reads is set in that
 action (`tools/check-action-env.sh`); every self-reference pins one immutable tag, with no
 `uses: ./` in a reusable workflow or composite action (`tools/check-internal-refs.sh`, tested
-by `tools/test-internal-refs.sh`); the governed-paths script leaves the notes and markers it
+by `tools/test-internal-refs.sh`); every app-token mint asks only for what its app's installation
+grants (`tools/check-token-permissions.sh`); the governed-paths script leaves the notes and markers it
 should, case by case (`tools/test-governed-paths.sh`); and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
 

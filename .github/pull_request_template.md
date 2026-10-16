@@ -7,7 +7,7 @@
 <!-- Tick what you ran locally on the final head. If you couldn't run one (it runs out of memory, or needs the network), leave it unticked and say so. Don't tick a box you didn't run. -->
 - [ ] actionlint (with shellcheck at warning) over `.github/workflows` and `callers/`
 - [ ] `shellcheck --severity=warning .github/actions/*/*.sh tools/*.sh`
-- [ ] `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`, `tools/check-internal-refs.sh`
+- [ ] `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`, `tools/check-internal-refs.sh`, `tools/check-token-permissions.sh`
 - [ ] `tools/test-internal-refs.sh`, `tools/test-governed-paths.sh`
 - [ ] `./gradlew build` in `gradle-plugins/`, if the gates changed
 - [ ] The worked callers under `callers/` follow any signature change

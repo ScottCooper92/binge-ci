@@ -421,7 +421,6 @@ jobs:
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: read
-          permission-issues: read
 
       - name: Address it with Claude
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'

@@ -777,7 +777,6 @@ jobs:
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: read
-          permission-issues: read
 
       - name: Fix with Claude
         if: >
@@ -1410,7 +1409,6 @@ jobs:
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: read
-          permission-issues: read
 
       # The same agent, tools and bounds as the job above. Screenshot re-records are not offered:
       # that gate is opted into per caller for PR branches, and a default branch is no place to start.
