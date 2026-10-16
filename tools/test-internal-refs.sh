@@ -96,4 +96,29 @@ jobs:
     - uses: ./.github/actions/other"
 expect action-local fail
 
+# A reusable workflow pinning this repository's action at an immutable tag: the shape that holds.
+fixture reusable-pinned "on:
+  workflow_call:
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ScottCooper92/binge-ci/.github/actions/sample@v1.0.0" "$plain_action"
+expect reusable-pinned pass
+
+# The same reference quoted, which the check cannot read. Zero self-references in a tree that ships
+# a reusable workflow means the tag checks would pass on nothing.
+fixture reusable-unread-ref "on:
+  workflow_call:
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: \"ScottCooper92/binge-ci/.github/actions/sample@v1.0.0\"" "$plain_action"
+expect reusable-unread-ref fail
+
+# No workflows and no actions at all: nothing was checked, which is not a pass.
+mkdir -p "$work/empty"
+expect empty fail
+
 exit $failures

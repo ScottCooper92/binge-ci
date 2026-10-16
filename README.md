@@ -329,7 +329,8 @@ take the default-branch or base copy and are unaffected.
 be the one the workflows pin, so a release cannot ship the previous release's actions; on a
 `v1` move it requires the alias to land on the commit the pinned tag names; and on every
 push to `main` it requires the pinned tag to exist, because the slip that has actually
-happened is merging the bump and never tagging at all. `main` is therefore red between the
+happened is merging the bump and never tagging at all. On `main` it also requires that tag's
+own tree to pin the same tag, which catches a bump to a tag already cut at an older commit. `main` is therefore red between the
 bump merging and the tag being cut. That red is the report, not a fault, and it clears the
 moment the tag is pushed. It detects rather than prevents: by the time a tag push fails
 there, `v1` has moved and consumers are already broken, so it turns a silent breakage into a

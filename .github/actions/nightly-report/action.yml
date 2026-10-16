@@ -41,7 +41,10 @@ inputs:
     required: false
     default: ''
   github-token:
-    description: A token with `issues: write`.
+    description: >
+      A token with `issues: write`, belonging to a bot: the default `GITHUB_TOKEN` or an app's.
+      The open issue is matched only when a bot opened it, so a personal token's issue would
+      never be found again and each red run would open another.
     required: false
     default: ${{ github.token }}
 
@@ -64,10 +67,12 @@ runs:
           const assignees = list(ASSIGNEES);
           const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
           const { owner, repo } = context.repo;
+          // Opened by a bot too, not only titled the same: on a public repository anyone can open an
+          // issue with this title, and a red run would comment on it and a green one close it.
           const open = (await github.paginate(github.rest.issues.listForRepo, {
             owner, repo, state: 'open', per_page: 100,
             ...(labels.length ? { labels: labels.join(',') } : {}),
-          })).find((i) => !i.pull_request && i.title === TITLE);
+          })).find((i) => !i.pull_request && i.title === TITLE && i.user?.type === 'Bot');
 
           if (RESULT === 'success') {
             if (!open) return;
