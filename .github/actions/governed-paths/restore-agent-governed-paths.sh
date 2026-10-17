@@ -49,8 +49,10 @@
 #   agent finds those paths modified, edits it did not make, and reports them as tampering.
 #
 # $GOVERNED_BASE_REF (default origin/main) is the ref the rewrite is taken from, and for the
-# undo the ref it was taken from: on an entity event the action restores from the PR's BASE
-# branch, so a caller on a stacked PR passes that, not the default branch.
+# undo the ref it was taken from: the PR's BASE, so on a stacked PR not the default branch.
+# $GOVERNED_DEFAULT_REF, when set, is a second ref the undo reads as the rewrite. The action
+# falls back to the default branch when it is not told the base, and without this the undo
+# took that copy for the agent's edit and merged the default branch's version onto the stack.
 set -euo pipefail
 
 # Fixed by the pinned claude-code-action SHA in the author workflows, so it cannot drift
@@ -140,6 +142,16 @@ ref="${1:?usage: restore-agent-governed-paths.sh <ref>|--list|--rewrite|--prompt
 # "the worktree is byte-identical to the base" is the whole discriminator. Without the ref,
 # report every restore rather than assume the quiet case.
 base=$(git rev-parse -q --verify "${GOVERNED_BASE_REF:-origin/main}" || true)
+default=""
+if [ -n "${GOVERNED_DEFAULT_REF:-}" ]; then
+  default=$(git rev-parse -q --verify "$GOVERNED_DEFAULT_REF" || true)
+fi
+
+# Whether the working tree's copy of a tracked file is a trusted ref's, so the rewrite's.
+rewritten_copy() {
+  { [ -n "$base" ] && git diff --quiet "$base" -- "$1"; } ||
+    { [ -n "$default" ] && git diff --quiet "$default" -- "$1"; }
+}
 
 # Puts the PR's version of one file back, or removes it when the PR had none.
 restore_from_ref() {
@@ -190,9 +202,10 @@ merged=()
 discarded=()
 added=()
 
-# Whether the working tree's copy of an UNTRACKED file is byte-for-byte the base's.
+# Whether the working tree's copy of an UNTRACKED file is byte-for-byte a trusted ref's.
 same_as_base() {
-  git show "$base:$1" 2>/dev/null | cmp -s - "$1"
+  git show "$base:$1" 2>/dev/null | cmp -s - "$1" ||
+    { [ -n "$default" ] && git show "$default:$1" 2>/dev/null | cmp -s - "$1"; }
 }
 
 for path in "${governed[@]}"; do
@@ -208,7 +221,7 @@ for path in "${governed[@]}"; do
 
     # Byte-identical to the base means the action's rewrite and nothing else; anything
     # further is an edit the agent made on top of it.
-    if [ -n "$base" ] && git diff --quiet "$base" -- "$file"; then
+    if rewritten_copy "$file"; then
       restored+=("$file")
       restore_from_ref "$file"
       continue
@@ -231,7 +244,8 @@ for path in "${governed[@]}"; do
   # file was made to a file the PR deleted, so it goes the way of any other collision.
   while IFS= read -r -d '' file; do
     [ -n "$file" ] || continue
-    if [ -n "$base" ] && git cat-file -e "$base:$file" 2>/dev/null \
+    if { { [ -n "$base" ] && git cat-file -e "$base:$file" 2>/dev/null; } ||
+         { [ -n "$default" ] && git cat-file -e "$default:$file" 2>/dev/null; }; } \
        && ! git cat-file -e "$ref:$file" 2>/dev/null; then
       if same_as_base "$file"; then
         restored+=("$file")

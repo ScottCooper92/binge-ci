@@ -203,9 +203,9 @@ jobs:
             || { echo "::error::The author_bot_id input is empty - the caller's AUTHOR_BOT_ID variable is unset."; exit 1; }
 
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          # claude-code-action rewrites the governed paths from the PR's BASE, not the default
-          # branch, so the undo has to discriminate against the same ref - on a stacked PR the two
-          # differ, and diffing against the wrong one reports the lower PR's changes as the rewrite.
+          # The governed paths are rewritten from, and the undo discriminates against, the PR's
+          # BASE. On a stacked PR that is not the default branch, and diffing against the wrong
+          # one reports the lower PR's changes as the agent's edit and merges them back out.
           echo "base=$base" >> "$GITHUB_OUTPUT"
 
       # Circuit breaker on bot-to-bot volleys. The count restarts from the newest HUMAN
@@ -365,6 +365,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.31
         with:
           base-ref: origin/${{ steps.ctx.outputs.base }}
+          default-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
 
       # claude-code-action rewrites the governed paths to the base's copy just before the agent
@@ -466,6 +467,11 @@ jobs:
           # config lands too late to affect the commit that already exists.
           bot_name: ${{ inputs.author_bot }}
           bot_id: ${{ inputs.author_bot_id }}
+          # The ref the action rewrites the governed paths from. It reads the PR's base from the
+          # payload on a review event, but an issue_comment payload has none, and there it falls
+          # back to this input and then to the default branch. On a stacked PR that put the
+          # default branch's CLAUDE.md under the undo, which read it as the agent's edit.
+          base_branch: ${{ steps.ctx.outputs.base }}
           # The allowlist gates what may run UNPROMPTED, not what exists - omitting the subagent
           # tool from it does not stop an agent starting one. Both names it has shipped under,
           # since an unmatched entry is inert and a missed one is the failure again.
