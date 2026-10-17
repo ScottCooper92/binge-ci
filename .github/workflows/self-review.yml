@@ -73,7 +73,8 @@ jobs:
         shellcheck over every script under .github/actions and tools, tools/check-callers.sh,
         tools/check-action-shell.sh, tools/check-action-env.sh, tools/check-internal-refs.sh,
         tools/test-internal-refs.sh, tools/check-token-permissions.sh,
-        tools/test-token-permissions.sh, tools/test-governed-paths.sh, or the gradle-plugins
+        tools/test-token-permissions.sh, tools/test-merge-guards.sh,
+        tools/test-governed-paths.sh, or the gradle-plugins
         build and its tests
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
