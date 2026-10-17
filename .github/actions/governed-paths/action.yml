@@ -18,13 +18,22 @@ description: >
 inputs:
   base-ref:
     description: >
-      The ref the governed paths are rewritten FROM, e.g. origin/main. On an entity event
-      claude-code-action restores from the PR's BASE branch, so a caller on that path passes
-      the PR's base rather than the default branch; on a workflow_run the caller performs the
-      rewrite itself (`--rewrite`) from this ref. For the undo it only discriminates the
-      rewrite from an agent's own edit, so a wrong value over-reports rather than corrupts.
+      The ref the governed paths are rewritten FROM: the PR's base, e.g. origin/main. On an
+      entity event claude-code-action does the rewrite, from its `base_branch` input, so a
+      caller on that path passes it the same branch. On a workflow_run the caller performs the
+      rewrite itself (`--rewrite`) from this ref. The undo reads a copy identical to it as the
+      rewrite, and anything else as the agent's edit, which it merges onto the PR's copy.
     required: false
     default: origin/main
+  default-ref:
+    description: >
+      The default branch, e.g. origin/main, for a caller whose rewrite claude-code-action
+      performs. A copy identical to it is read as the rewrite too: the action falls back to the
+      default branch when it has no base, and on a stacked PR the undo would otherwise merge
+      that copy's difference from the base onto the branch. Empty for a caller that rewrites
+      itself.
+    required: false
+    default: ''
   extra-paths:
     description: >
       Repo-specific governed paths, newline-separated, APPENDED to the script's own list.
@@ -47,6 +56,7 @@ runs:
         # The only handle a composite action has on files shipped alongside it.
         ACTION_PATH: ${{ github.action_path }}
         BASE_REF: ${{ inputs.base-ref }}
+        DEFAULT_REF: ${{ inputs.default-ref }}
         EXTRA_PATHS: ${{ inputs.extra-paths }}
       run: |
         set -euo pipefail
@@ -57,6 +67,7 @@ runs:
         # GITHUB_ENV rather than a step output: the script reads these from the environment.
         {
           echo "GOVERNED_BASE_REF=$BASE_REF"
+          echo "GOVERNED_DEFAULT_REF=$DEFAULT_REF"
           if [ -n "$EXTRA_PATHS" ]; then
             # A bare `K=v` truncates at the first newline, dropping every path but the first.
             delim="EOF_$(date +%s%N)"

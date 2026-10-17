@@ -109,6 +109,43 @@ prompt=$(bash "$script" --prompt-note)
 if [ -n "$prompt" ]; then fail "a PR that changes no governed path got a note: $prompt"
 else ok; fi
 
+# #246: a stacked PR, whose base is another PR's branch. origin/main holds the default branch's
+# copy, origin/stack the lower PR's change to it, and HEAD this PR's change on top.
+stacked() {
+  repo 'lines > CLAUDE.md' 'sed -i "s/line 2/stack 2/" CLAUDE.md'
+  git update-ref refs/remotes/origin/stack HEAD
+  sed -i "s/line 8/pr 8/" CLAUDE.md && git commit -qam pr
+}
+
+# Neither side's change may be lost: the lower PR's line and this PR's line both survive.
+both_sides() { grep -qx 'stack 2' CLAUDE.md && grep -qx 'pr 8' CLAUDE.md; }
+
+case=stacked-rewrite-from-base
+stacked
+note=$(GOVERNED_BASE_REF=origin/stack bash -c '
+  bash "$1" --rewrite 2>/dev/null && bash "$1" HEAD 2>/dev/null' _ "$script")
+if [ -n "$note" ]; then fail "the rewrite alone produced a note: $note"
+elif ! git diff --quiet HEAD -- CLAUDE.md; then fail "the PR's copy was not restored: $(cat CLAUDE.md)"
+else ok; fi
+
+# The action falls back to the default branch when it is not told the base. Read against the
+# stack alone, that copy is an edit, and merging it would put main's lines back over the stack's.
+case=stacked-rewrite-from-default
+stacked
+GOVERNED_BASE_REF=origin/main bash "$script" --rewrite 2>/dev/null
+note=$(GOVERNED_BASE_REF=origin/stack GOVERNED_DEFAULT_REF=origin/main bash "$script" HEAD 2>/dev/null)
+if [ -n "$note" ]; then fail "the default branch's copy was read as an edit: $note"
+elif ! git diff --quiet HEAD -- CLAUDE.md; then fail "the PR's copy was not restored: $(cat CLAUDE.md)"
+else ok; fi
+
+case=stacked-merged-edit
+stacked
+note=$(GOVERNED_BASE_REF=origin/stack GOVERNED_DEFAULT_REF=origin/main bash -c '
+  bash "$1" --rewrite 2>/dev/null && sed -i "s/line 5/agent 5/" CLAUDE.md && bash "$1" HEAD 2>/dev/null' _ "$script")
+if ! grep -qxF "$merged_marker" <<<"$note"; then fail "no merged marker: $note"
+elif ! both_sides || ! grep -qx 'agent 5' CLAUDE.md; then fail "a side was lost: $(cat CLAUDE.md)"
+else ok; fi
+
 case=extra-paths
 cd "$work"
 if ! GOVERNED_EXTRA_PATHS=$'  docs/agents  \n' bash "$script" --list | grep -qx 'docs/agents'; then
