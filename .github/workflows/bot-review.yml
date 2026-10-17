@@ -441,7 +441,7 @@ jobs:
       # API call that dies before it reaches GitHub would otherwise end the run unreviewed.
       - name: Provide the gh retry
         id: guards
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.32
 
       # workflow_run gives no PR context, so resolve by head branch.
       - name: Resolve the PR
@@ -738,7 +738,7 @@ jobs:
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
 
       - name: Record that the run failed before the review
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -841,7 +841,7 @@ jobs:
       # condition, so a reporter that runs after any later failure still has the retry.
       - name: Provide the merge guards
         id: guards
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.32
 
       # Once per head, whichever door opened. A "Re-run all jobs" on a green CI run emits a second
       # workflow_run for the same head; a merge held by `hold`, a stack or auto_merge off sees one
@@ -922,7 +922,7 @@ jobs:
       # run's note can land after this step has already looked and found none.
       - name: Supersede a note about a run that failed before the review
         if: needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -946,7 +946,7 @@ jobs:
       # It never meets the merge gate: the verdict below replaces it before that step runs.
       - name: Show the review as running
         if: steps.pin.outputs.skip != 'true' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
@@ -999,7 +999,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.pin.outputs.skip != 'true' || steps.pin.outputs.approved == 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.32
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -1407,7 +1407,7 @@ jobs:
       # check is named for the review, and the review is what it now answers for.
       - name: Record the verdict on the PR
         if: always() && steps.submit.outputs.verdict != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
@@ -1426,7 +1426,7 @@ jobs:
       # true of a run that reached one - a review that itself died must leave the note standing.
       - name: Supersede a late note about a run that failed before the review
         if: always() && steps.submit.outputs.verdict != '' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -1856,7 +1856,7 @@ jobs:
         if: >
           always() && steps.pin.outputs.skip != 'true' &&
           steps.submit.outputs.verdict == '' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ steps.token.outputs.token }}
           repository: ${{ github.repository }}
@@ -1879,7 +1879,7 @@ jobs:
       # created it. The next run's "Supersede a note about a run that failed before the review" clears it.
       - name: Record that the review could not get a token
         if: always() && steps.token.outcome == 'failure' && needs.resolve.outputs.sha != ''
-        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/pr-check-run@v1.0.32
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -1928,7 +1928,7 @@ jobs:
 
       - name: Provide the merge guards
         id: guards
-        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.31
+        uses: ScottCooper92/binge-ci/.github/actions/merge-guards@v1.0.32
 
       - name: Release merges held for a red default branch
         env:
