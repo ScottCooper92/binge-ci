@@ -193,8 +193,9 @@ on:
           `unbuilt_paths`, reviewed through the `labeled`/`synchronize` door. Without it such a PR
           is reviewed and then waits for a human, because no build vouched for it. Needs
           `auto_merge` and `unbuilt_paths`. Every other guard still applies, the diff is checked
-          again at merge time, a change to `.github/workflows/` or to a governed path is never
-          merged, and the push must be datable for the unaddressed-feedback guard.
+          again at merge time, and a change to `.github/workflows/`, a governed path, the review
+          guide, its directory or the conventions file is never merged. The push must be datable
+          for the unaddressed-feedback guard.
         type: boolean
         default: false
       unbuilt_paths_regex:
@@ -1455,6 +1456,8 @@ jobs:
           MERGE_UNBUILT: ${{ inputs.merge_unbuilt }}
           UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
+          REVIEW_GUIDE: ${{ inputs.review_guide_path }}
+          CONVENTIONS: ${{ inputs.conventions_path }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
           MERGE_METHOD: ${{ inputs.merge_method }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
@@ -1516,8 +1519,8 @@ jobs:
           # head about to merge rather than trusted from resolve, and only with a push time for the
           # feedback guard to compare against. A workflow file is refused outright: it changes what
           # runs, whatever CI makes of its path, and the reviewer app cannot merge one anyway. So is a
-          # path that governs the agents, CLAUDE.md and the rest of the governed list: before this
-          # input such a docs-only change could never merge without a human, and it still cannot.
+          # path that governs the agents - the governed list, the review guide and the conventions:
+          # before this input such a docs-only change could never merge without a human, and still cannot.
           if [ "$VOUCHED" != "true" ]; then
             [ "$UNBUILT" = "true" ] && [ "$MERGE_UNBUILT" = "true" ] \
               || hold "no CI run vouched for this head - reviewing, but merging is yours to do." unvouched
@@ -1534,6 +1537,12 @@ jobs:
             if [ -n "$GOVERNED_SCRIPT" ]; then governed_list=$(bash "$GOVERNED_SCRIPT" --list); fi
             [ -n "$governed_list" ] \
               || hold "the list of paths that govern the agents could not be read." unbuilt-governed-unreadable
+            # The governed list is what claude-code-action rewrites, and it leaves out the documents
+            # the reviewer itself reads, `.ai/` among them. Those govern the agents too, so the review
+            # guide, its directory (the triage table and the rest live beside it) and the conventions
+            # are refused with it. A guide at the root names no directory: "." would match everything.
+            governed_list+=$'\n'"$REVIEW_GUIDE"$'\n'"$CONVENTIONS"
+            case "$REVIEW_GUIDE" in */*) governed_list+=$'\n'"${REVIEW_GUIDE%/*}" ;; esac
             touched=$(awk 'NR == FNR { g[$0] = 1; next }
                            { for (p in g) if ($0 == p || index($0, p "/") == 1) { print; break } }' \
                         <(printf '%s\n' "$governed_list") - <<<"$changed")
