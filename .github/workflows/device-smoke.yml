@@ -232,7 +232,7 @@ jobs:
 
       # A miss is not a failure: setup below falls back to the full download and boot.
       - name: Restore AVD cache
-        uses: ScottCooper92/binge-ci/.github/actions/restore-avd-cache@v1.0.32
+        uses: ScottCooper92/binge-ci/.github/actions/restore-avd-cache@v1.0.33
         with:
           device: ${{ inputs.device }}
           api-level: ${{ inputs.api_level }}
@@ -301,7 +301,7 @@ jobs:
         if: >-
           ${{ !cancelled() && steps.setup-device.outcome == 'success' &&
           github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.default_branch) }}
-        uses: ScottCooper92/binge-ci/.github/actions/save-avd-cache@v1.0.32
+        uses: ScottCooper92/binge-ci/.github/actions/save-avd-cache@v1.0.33
         with:
           device: ${{ inputs.device }}
           api-level: ${{ inputs.api_level }}
