@@ -53,8 +53,10 @@ on:
 permissions:
   contents: read
 
+# Keyed on the consumer as well, so a caller can check two consumers side by side. Without it the second call
+# cancels the first, and the caller has to run them in order.
 concurrency:
-  group: consumer-check-${{ github.repository }}-${{ github.ref }}
+  group: consumer-check-${{ github.repository }}-${{ inputs.consumer }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
