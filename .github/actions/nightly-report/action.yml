@@ -3,15 +3,15 @@ description: >
   Keeps one issue open while a run is red, comments on it each red run, and closes it on the next
   green one. The issue's text calls the run "scheduled" unless the caller names its kind.
 
-# A red scheduled run has no PR or push to carry it, so without this it is a red mark in the
+# A red scheduled run has no PR to carry it, so without this it is a red mark in the
 # Actions tab that nothing points at. One issue stays open while the run is red and closes itself
 # on the next green one, so an open issue means "still broken", not "old".
 #
-# The issue is found by its exact title, so each scheduled workflow passes a title of its own:
+# The issue is found by its exact title, so each reporting workflow passes a title of its own:
 # two sharing one would close each other's issue.
 #
-# Call it from a job that runs after the gate whatever happened (`if: always()` and the event is
-# `schedule`), passing that job's result. Anything but `success` reports: a job that hits its
+# Call it from a job that runs after the gate whatever happened (`if: always()`, and the event is
+# `schedule`, or a push when the workflow also reports on one), passing that job's result. Anything but `success` reports: a job that hits its
 # timeout is `cancelled`, not `failure`. The job needs `issues: write`.
 
 inputs:
@@ -25,7 +25,7 @@ inputs:
   run-kind:
     description: >
       What the issue's text calls the run: "The <run-kind> run failed". A caller whose job also runs
-      on a push passes `run` or `nightly`, since the next green push run closes the issue too.
+      on a push passes `run`, since the next green push run closes the issue too.
     required: false
     default: scheduled
   note:
@@ -68,7 +68,8 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const { RESULT, RUN_KIND, TITLE, NOTE, LABELS, ASSIGNEES } = process.env;
+          const { RESULT, TITLE, NOTE, LABELS, ASSIGNEES } = process.env;
+          const runKind = process.env.RUN_KIND.trim() || 'scheduled';
           const list = (value) => value.split(',').map((s) => s.trim()).filter(Boolean);
           const labels = list(LABELS);
           const assignees = list(ASSIGNEES);
@@ -85,7 +86,7 @@ runs:
             if (!open) return;
             await github.rest.issues.createComment({
               owner, repo, issue_number: open.number,
-              body: `The ${RUN_KIND} run is green again: ${runUrl}`,
+              body: `The ${runKind} run is green again: ${runUrl}`,
             });
             await github.rest.issues.update({
               owner, repo, issue_number: open.number, state: 'closed', state_reason: 'completed',
@@ -102,10 +103,10 @@ runs:
           await github.rest.issues.create({
             owner, repo, title: TITLE, labels, assignees,
             body: [
-              `The ${RUN_KIND} run failed (${RESULT}): ${runUrl}`,
+              `The ${runKind} run failed (${RESULT}): ${runUrl}`,
               '',
               NOTE,
               '',
-              `This issue closes itself on the next green ${RUN_KIND} run.`,
+              `This issue closes itself on the next green ${runKind} run.`,
             ].join('\n'),
           });
