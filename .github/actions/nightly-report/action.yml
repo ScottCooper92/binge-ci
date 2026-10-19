@@ -1,17 +1,17 @@
 name: Nightly report
 description: >
-  Keeps one issue open while a scheduled run is red, comments on it each red run, and closes it
-  on the next green one.
+  Keeps one issue open while a run is red, comments on it each red run, and closes it on the next
+  green one. The issue's text calls the run "scheduled" unless the caller names its kind.
 
-# A red scheduled run has no PR or push to carry it, so without this it is a red mark in the
+# A red scheduled run has no PR to carry it, so without this it is a red mark in the
 # Actions tab that nothing points at. One issue stays open while the run is red and closes itself
 # on the next green one, so an open issue means "still broken", not "old".
 #
-# The issue is found by its exact title, so each scheduled workflow passes a title of its own:
+# The issue is found by its exact title, so each reporting workflow passes a title of its own:
 # two sharing one would close each other's issue.
 #
-# Call it from a job that runs after the gate whatever happened (`if: always()` and the event is
-# `schedule`), passing that job's result. Anything but `success` reports: a job that hits its
+# Call it from a job that runs after the gate whatever happened (`if: always()`, and the event is
+# `schedule`, or a push when the workflow also reports on one), passing that job's result. Anything but `success` reports: a job that hits its
 # timeout is `cancelled`, not `failure`. The job needs `issues: write`.
 
 inputs:
@@ -22,11 +22,17 @@ inputs:
     description: The issue's title, and the identity it is found by.
     required: false
     default: Nightly CI is failing on main
+  run-kind:
+    description: >
+      What the issue's text calls the run: "The <run-kind> run failed". A caller whose job also runs
+      on a push passes `run`, since the next green push run closes the issue too.
+    required: false
+    default: scheduled
   note:
     description: >
       Markdown for a new issue, after the line naming the failed run: what to suspect, and which
       artifact holds the reports. Nothing was pushed to cause a scheduled failure, so this is
-      usually the environment.
+      usually the environment; a caller whose run can follow a push should say so instead.
     required: false
     default: Nothing was pushed to cause this, so suspect the environment first.
   labels:
@@ -54,6 +60,7 @@ runs:
     - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
         RESULT: ${{ inputs.result }}
+        RUN_KIND: ${{ inputs.run-kind }}
         TITLE: ${{ inputs.title }}
         NOTE: ${{ inputs.note }}
         LABELS: ${{ inputs.labels }}
@@ -62,6 +69,7 @@ runs:
         github-token: ${{ inputs.github-token }}
         script: |
           const { RESULT, TITLE, NOTE, LABELS, ASSIGNEES } = process.env;
+          const runKind = process.env.RUN_KIND.trim() || 'scheduled';
           const list = (value) => value.split(',').map((s) => s.trim()).filter(Boolean);
           const labels = list(LABELS);
           const assignees = list(ASSIGNEES);
@@ -78,7 +86,7 @@ runs:
             if (!open) return;
             await github.rest.issues.createComment({
               owner, repo, issue_number: open.number,
-              body: `The scheduled run is green again: ${runUrl}`,
+              body: `The ${runKind} run is green again: ${runUrl}`,
             });
             await github.rest.issues.update({
               owner, repo, issue_number: open.number, state: 'closed', state_reason: 'completed',
@@ -95,10 +103,10 @@ runs:
           await github.rest.issues.create({
             owner, repo, title: TITLE, labels, assignees,
             body: [
-              `The scheduled run failed (${RESULT}): ${runUrl}`,
+              `The ${runKind} run failed (${RESULT}): ${runUrl}`,
               '',
               NOTE,
               '',
-              'This issue closes itself on the next green scheduled run.',
+              `This issue closes itself on the next green ${runKind} run.`,
             ].join('\n'),
           });
