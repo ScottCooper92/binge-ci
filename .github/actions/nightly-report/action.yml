@@ -24,8 +24,9 @@ inputs:
     default: Nightly CI is failing on main
   run-kind:
     description: >
-      What the issue's text calls the run: "The <run-kind> run failed". A caller whose job also runs
-      on a push passes `run`, since the next green push run closes the issue too.
+      What the issue's text calls the run: "The <run-kind> run failed", "the next green <run-kind> run".
+      A caller whose job also runs on a push passes a name that fits both triggers, such as `main`,
+      since the next green push run closes the issue too.
     required: false
     default: scheduled
   note:
