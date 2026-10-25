@@ -74,6 +74,15 @@ on:
           because it arrives at a red build it did not cause.
         type: string
         default: ''
+      build_cache_url:
+        description: >
+          URL of a Gradle remote build cache the agent's Gradle runs READ from. Empty (the default)
+          leaves the build cache local. The URL is exported as `GRADLE_CACHE_URL` and no credentials
+          are, because the agent runs the PR's untrusted code and must not be able to write to a
+          cache other builds trust. Set it only for a cache that serves anonymous reads, and only on a
+          runner that can reach it: the step is skipped on a hosted runner.
+        type: string
+        default: ''
       verify_guidance:
         description: >
           How this repo expects a change to be verified before it is claimed verified. With
@@ -415,6 +424,18 @@ jobs:
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
+      # Read-only by construction: the URL alone, never credentials. A build whose settings push only
+      # when credentials are present then cannot write, and the node is expected to refuse it anyway.
+      - name: Use the build cache (read-only)
+        if: >
+          inputs.build_cache_url != '' && runner.environment == 'self-hosted' &&
+          inputs.toolchain != 'none' && steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
+        env:
+          CACHE_URL: ${{ inputs.build_cache_url }}
+        run: |
+          set -euo pipefail
+          echo "GRADLE_CACHE_URL=$CACHE_URL" >> "$GITHUB_ENV"
+
       # Pinned: this job hands an agent Bash, Edit, Write and a contents:write token.
       - name: Set up buf
         if: >
@@ -510,6 +531,11 @@ jobs:
             ${{ steps.governed_note.outputs.block }}
 
             ${{ inputs.verify_guidance }}
+
+            Prefer the narrowest Gradle task that proves the change: one test class, or one module's
+            unit tests or screenshot validation, never the whole tree. Leave a screenshot re-record
+            that spans several modules to the CI-fix bot or the PR's own worker; a comment response
+            does not have the time for it.
 
             Then write ${{ runner.temp }}/reply.md: a short markdown reply saying
             what you changed and, for anything you deliberately didn't change, why.

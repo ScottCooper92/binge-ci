@@ -69,6 +69,15 @@ on:
           CI green on whatever rendered, and a regression inside a changed component rides along.
         type: boolean
         default: false
+      build_cache_url:
+        description: >
+          URL of a Gradle remote build cache the agent's Gradle runs READ from. Empty (the default)
+          leaves the build cache local. The URL is exported as `GRADLE_CACHE_URL` and no credentials
+          are, because the agent runs the PR's untrusted code and must not be able to write to a
+          cache other builds trust. Set it only for a cache that serves anonymous reads, and only on a
+          runner that can reach it: the step is skipped on a hosted runner.
+        type: string
+        default: ''
       verify_guidance:
         description: >
           How this repo expects a change to be verified before it is claimed verified -
@@ -770,6 +779,19 @@ jobs:
           steps.log.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
+      # Read-only by construction: the URL alone, never credentials. A build whose settings push only
+      # when credentials are present then cannot write, and the node is expected to refuse it anyway.
+      - name: Use the build cache (read-only)
+        if: >
+          inputs.build_cache_url != '' && runner.environment == 'self-hosted' &&
+          inputs.toolchain != 'none' && steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
+          steps.log.outputs.skip != 'true'
+        env:
+          CACHE_URL: ${{ inputs.build_cache_url }}
+        run: |
+          set -euo pipefail
+          echo "GRADLE_CACHE_URL=$CACHE_URL" >> "$GITHUB_ENV"
+
       # Pinned: this job hands an agent Bash, Edit, Write and a contents:write token.
       - name: Set up buf
         if: >
@@ -1422,6 +1444,18 @@ jobs:
           inputs.toolchain == 'jvm' &&
           steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      # Read-only by construction: the URL alone, never credentials. A build whose settings push only
+      # when credentials are present then cannot write, and the node is expected to refuse it anyway.
+      - name: Use the build cache (read-only)
+        if: >
+          inputs.build_cache_url != '' && runner.environment == 'self-hosted' &&
+          inputs.toolchain != 'none' && steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
+        env:
+          CACHE_URL: ${{ inputs.build_cache_url }}
+        run: |
+          set -euo pipefail
+          echo "GRADLE_CACHE_URL=$CACHE_URL" >> "$GITHUB_ENV"
 
       - name: Set up buf
         if: >
