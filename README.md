@@ -103,6 +103,12 @@ silent" step each one ends with.
 screenshot gate; binge-companions names buf and proto field numbers. A rule that fits
 both is usually too vague to bind either.
 
+`author-comments` and `author-ci-fix` take an optional `build_cache_url`: a Gradle remote cache the
+agent's builds read from. It is exported as the URL alone, with no credentials, so the build is
+given no way to write to the cache. The consumer's Gradle settings must read `GRADLE_CACHE_URL` and
+enable the remote cache from it. It needs a cache that serves anonymous reads and refuses anonymous writes, and a self-hosted
+runner that can reach it.
+
 The one exception is the list of suppression files. The three author workflows that take
 `gate_rules` or `conflict_rules` also take `suppression_files`: newline-separated globs, by
 default `*-allowlist.txt` and `detekt-baseline.xml`. A caller cannot compute an input, so the
