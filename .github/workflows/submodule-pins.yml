@@ -28,7 +28,7 @@ on:
         type: string
         default: '["ubuntu-latest"]'
       hold_label:
-        description: The label that lets an unmerged pin through, with a warning.
+        description: The label that lets an unmerged or rolled-back pin through, with a warning.
         type: string
         default: hold
       timeout_minutes:
