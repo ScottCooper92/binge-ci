@@ -79,7 +79,7 @@ on:
           URL of a Gradle remote build cache the agent's Gradle runs READ from. Empty (the default)
           leaves the build cache local. The URL is exported as `GRADLE_CACHE_URL` and no credentials
           are, because the agent runs the PR's untrusted code and must not be able to write to a
-          cache other builds trust. Set it only for a cache that serves anonymous reads, and only on a
+          cache other builds trust. Set it only for a cache that serves anonymous reads and refuses anonymous writes, and only on a
           runner that can reach it: the step is skipped on a hosted runner.
         type: string
         default: ''

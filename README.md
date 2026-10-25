@@ -105,8 +105,8 @@ both is usually too vague to bind either.
 
 `author-comments` and `author-ci-fix` take an optional `build_cache_url`: a Gradle remote cache the
 agent's builds read from. It is exported as the URL alone, with no credentials, so the agent
-cannot write to the cache. The consumer's Gradle settings must read `GRADLE_CACHE_URL` and
-enable the remote cache from it. It needs a cache that serves anonymous reads and a self-hosted
+does not hand it a way to write to the cache. The consumer's Gradle settings must read `GRADLE_CACHE_URL` and
+enable the remote cache from it. It needs a cache that serves anonymous reads and refuses anonymous writes, and a self-hosted
 runner that can reach it.
 
 The one exception is the list of suppression files. The three author workflows that take
