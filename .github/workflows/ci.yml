@@ -85,6 +85,10 @@ jobs:
       - name: Test the governed-paths script against its fixtures
         run: ./tools/test-governed-paths.sh
 
+      # The pin check is inline in a reusable workflow, so only a consumer's PR would run it.
+      - name: Test the submodule-pin check against scratch repositories
+        run: ./tools/test-submodule-pins.sh
+
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.
       - name: shellcheck the action scripts and the tools

@@ -1,7 +1,7 @@
 name: Submodule pins
 
-# Fails a PR whose submodule pins a commit its own repository has not merged, unless the PR
-# carries the hold label.
+# Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin
+# backwards from the base branch's, unless the PR carries the hold label.
 #
 # A pin can be a commit that only exists on an unmerged branch of its own repository. That is a
 # deliberate case while `hold` gates the merge on it, and one nobody remembers is unmerged once
@@ -9,6 +9,10 @@ name: Submodule pins
 # or the PR still needs `hold`. Nothing here reads `.gitmodules` for which pins are "supposed" to
 # be held, only whether each one actually merged. Each submodule's own remote names its repository,
 # so the caller passes no list of paths and a submodule added later is checked with no edit.
+#
+# A pin that changed must also descend from the base branch's pin. Both pins can be merged
+# upstream while the PR's is the older one: a stale submodule checkout swept into a commit rolls
+# the pin back with nothing in the diff to say so. A deliberate rollback takes hold.
 #
 # Call it as a job of the workflow branch protection requires, and make the required job need it.
 # A separate workflow would report beside the gate rather than in it. It does nothing outside a
@@ -24,7 +28,7 @@ on:
         type: string
         default: '["ubuntu-latest"]'
       hold_label:
-        description: The label that lets an unmerged pin through, with a warning.
+        description: The label that lets an unmerged or rolled-back pin through, with a warning.
         type: string
         default: hold
       timeout_minutes:
@@ -45,10 +49,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Check submodule pins are merged upstream
+      - name: Check submodule pins are merged upstream and not rolled back
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HOLD_LABEL: ${{ inputs.hold_label }}
         run: |
           set -euo pipefail
@@ -56,7 +61,11 @@ jobs:
           # replays the original payload, so the payload still says the label is absent.
           held=$(gh pr view "$PR_NUMBER" --json labels | jq --arg l "$HOLD_LABEL" 'any(.labels[]; .name == $l)')
           unmerged_file=$(mktemp)
-          export unmerged_file
+          rolled_back_file=$(mktemp)
+          export unmerged_file rolled_back_file
+          # The checkout holds only the merge commit. The base's pins are read from the base commit
+          # the merge was made against, which the payload names.
+          git fetch --quiet --no-tags --no-recurse-submodules --depth=1 origin "$BASE_SHA"
           git submodule foreach --quiet '
             url=$(git config --get remote.origin.url)
             default_branch=$(git ls-remote --symref "$url" HEAD | awk "NR==1{print \$2}" | sed "s#^refs/heads/##")
@@ -71,12 +80,34 @@ jobs:
               echo "$name: $sha1 is NOT an ancestor of $default_branch" >&2
               echo "$name" >> "$unmerged_file"
             fi
+            base_pin=$(git -C "$toplevel" ls-tree "$BASE_SHA" -- "$sm_path" | awk "\$2 == \"commit\" {print \$3}")
+            if [ -n "$base_pin" ] && [ "$base_pin" != "$sha1" ]; then
+              # Either pin can sit off the default branch (a held pin), so fetch both with their
+              # history rather than trust what the default branch fetch brought.
+              git fetch --quiet --depth=2147483647 origin "$base_pin" "$sha1" || true
+              if git merge-base --is-ancestor "$base_pin" "$sha1" 2>/dev/null; then
+                echo "$name: $sha1 descends from the base pin $base_pin"
+              else
+                echo "$name: $sha1 does NOT descend from the base pin $base_pin" >&2
+                echo "$name" >> "$rolled_back_file"
+              fi
+            fi
           '
+          failed=false
           if [ -s "$unmerged_file" ]; then
             unmerged=$(paste -sd, "$unmerged_file")
             echo "::warning::Submodule pin(s) not merged upstream: $unmerged"
             if [ "$held" != "true" ]; then
               echo "::error::Unmerged submodule pin(s) without the '$HOLD_LABEL' label: $unmerged"
-              exit 1
+              failed=true
             fi
           fi
+          if [ -s "$rolled_back_file" ]; then
+            rolled_back=$(paste -sd, "$rolled_back_file")
+            echo "::warning::Submodule pin(s) that do not descend from the base branch's pin: $rolled_back"
+            if [ "$held" != "true" ]; then
+              echo "::error::Submodule pin(s) rolled back from the base branch's pin without the '$HOLD_LABEL' label: $rolled_back"
+              failed=true
+            fi
+          fi
+          [ "$failed" = false ]
