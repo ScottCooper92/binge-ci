@@ -408,6 +408,7 @@ jobs:
           java-version: ${{ inputs.java_version }}
           # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle.
           persistent-gradle-home: 'false'
+          gradle-cache-read-only: 'true'
 
       - name: Set up the build toolchain (JVM)
         if: >
@@ -424,6 +425,7 @@ jobs:
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
         with:
+          cache-read-only: true
           cache-cleanup: on-success
 
       # Read-only by construction: the URL alone, never credentials. A build whose settings push only

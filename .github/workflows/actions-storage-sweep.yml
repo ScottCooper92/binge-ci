@@ -6,7 +6,8 @@ name: Actions storage sweep
 # for a while, on a schedule the caller owns.
 #
 # An artifact is deleted by age too, not wholesale: a run that is still going has one a bot is
-# about to download by name.
+# about to download by name. It goes whatever retention its uploader asked for, so a repository that
+# keeps a long-lived artifact on purpose should not run this against it.
 
 on:
   workflow_call:
@@ -22,6 +23,10 @@ on:
 
 permissions:
   actions: write
+
+concurrency:
+  group: actions-storage-sweep-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   sweep:
@@ -47,7 +52,8 @@ jobs:
             if [ "$DRY_RUN" = "true" ]; then
               echo "Would delete cache ${id} (${size} bytes): ${key}"
             else
-              gh api -X DELETE "repos/${REPO}/actions/caches/${id}" > /dev/null
+              # Gone already: evicted since the list was read, or deleted by an overlapping run.
+              out=$(gh api -X DELETE "repos/${REPO}/actions/caches/${id}" 2>&1) || grep -q "HTTP 404" <<<"$out" || { echo "$out" >&2; exit 1; }
               echo "Deleted cache ${id} (${size} bytes): ${key}"
             fi
             count=$((count + 1))
@@ -58,6 +64,7 @@ jobs:
           echo "${verb} ${count} caches, $((bytes / 1048576)) MiB, last accessed before ${cutoff}Z." | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Delete stale artifacts
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -75,7 +82,8 @@ jobs:
             if [ "$DRY_RUN" = "true" ]; then
               echo "Would delete artifact ${id} (${size} bytes): ${name}"
             else
-              gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" > /dev/null
+              # Gone already: evicted since the list was read, or deleted by an overlapping run.
+              out=$(gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" 2>&1) || grep -q "HTTP 404" <<<"$out" || { echo "$out" >&2; exit 1; }
               echo "Deleted artifact ${id} (${size} bytes): ${name}"
             fi
             count=$((count + 1))
