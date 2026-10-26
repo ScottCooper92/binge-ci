@@ -20,6 +20,13 @@ on:
         description: Log what would be deleted and delete nothing.
         type: boolean
         default: false
+      keep_cache_key_prefixes:
+        description: >
+          Space-separated cache key prefixes the sweep leaves alone. The default keeps the emulator image
+          cache: a weekly lane restores it, never saves it, and a sweep a day before the run would
+          otherwise delete it every week.
+        type: string
+        default: 'gmd-avd-'
 
 permissions:
   actions: write
@@ -39,12 +46,18 @@ jobs:
           REPO: ${{ github.repository }}
           MAX_AGE_DAYS: ${{ inputs.max_age_days }}
           DRY_RUN: ${{ inputs.dry_run }}
+          KEEP_PREFIXES: ${{ inputs.keep_cache_key_prefixes }}
         run: |
           set -euo pipefail
           cutoff=$(date -u -d "${MAX_AGE_DAYS} days ago" +%Y-%m-%dT%H:%M:%S)
+          keep=""
+          for prefix in $KEEP_PREFIXES; do keep="${keep:+${keep}|}${prefix}"; done
+          # A key matching no prefix is the only one swept. An empty list matches nothing.
+          not_kept='true'
+          [ -z "$keep" ] || not_kept="(.key | test(\"^(${keep})\") | not)"
           # Timestamps are cut to the second so the comparison is a plain string one.
           rows=$(gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
-            --jq ".actions_caches[] | select(.last_accessed_at[0:19] < \"${cutoff}\") | [.id, .size_in_bytes, .key] | @tsv")
+            --jq ".actions_caches[] | select(.last_accessed_at[0:19] < \"${cutoff}\" and ${not_kept}) | [.id, .size_in_bytes, .key] | @tsv")
           count=0
           bytes=0
           while IFS=$'\t' read -r id size key; do
