@@ -776,7 +776,7 @@ jobs:
           name: agent-diagnostics-conflict-${{ matrix.pr }}
           path: ${{ runner.temp }}/agent-diagnostics
           # Diagnostic only - it has no value once the PR has moved on, and these run often.
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: ignore
 
       # Every other outcome reports itself on the PR; a failure before "Commit or bail out"

@@ -1,0 +1,24 @@
+name: Actions storage sweep
+
+# Deletes this repository's Actions caches and artifacts that nobody has touched for three days, so
+# the quota does not fill and GitHub does not evict the entries a build wanted. Dry-run from the
+# Actions tab first: it logs what it would delete.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log what would be deleted and delete nothing
+        type: boolean
+        default: true
+  schedule:
+    - cron: '52 3 * * 0'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  sweep:
+    uses: ScottCooper92/binge-ci/.github/workflows/actions-storage-sweep.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run == true }}

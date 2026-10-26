@@ -778,6 +778,8 @@ jobs:
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-cleanup: on-success
 
       # Read-only by construction: the URL alone, never credentials. A build whose settings push only
       # when credentials are present then cannot write, and the node is expected to refuse it anyway.
@@ -1035,7 +1037,7 @@ jobs:
           # into what this run reports as its own.
           commit_stat=""
           if [ -n "$checked_out" ]; then
-            commit_stat=$(git diff --stat "$checked_out" HEAD | head -40)
+            commit_stat=$(git diff --stat "$checked_out" HEAD | sed -n '1,40p')
           fi
           # A push rejected under set -e would kill the step with the repair still only in the runner
           # workspace, and say nothing on the PR about it.
@@ -1137,7 +1139,7 @@ jobs:
           name: agent-diagnostics-ci-fix-${{ steps.pr.outputs.number }}
           path: ${{ runner.temp }}/agent-diagnostics
           # Diagnostic only - it has no value once the PR has moved on, and these run often.
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: ignore
 
       # The marker rides on "Commit and push"'s outcome comments, so a failure anywhere before
@@ -1444,6 +1446,8 @@ jobs:
           inputs.toolchain == 'jvm' &&
           steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-cleanup: on-success
 
       # Read-only by construction: the URL alone, never credentials. A build whose settings push only
       # when credentials are present then cannot write, and the node is expected to refuse it anyway.
@@ -1593,7 +1597,7 @@ jobs:
             git add -A
             git commit -m "fix: repair ${DEFAULT_BRANCH} after CI went red on ${SHA:0:7}"
           fi
-          commit_stat=$(git diff --stat "$SHA" HEAD | head -40)
+          commit_stat=$(git diff --stat "$SHA" HEAD | sed -n '1,40p')
           # The agent ran with a read-only token, which claude-code-action wrote into origin's URL.
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GH_REPO}.git"
           git push origin "HEAD:refs/heads/${BRANCH}"
@@ -1674,7 +1678,7 @@ jobs:
         with:
           name: agent-diagnostics-ci-fix-default-${{ github.event.workflow_run.head_sha }}
           path: ${{ runner.temp }}/agent-diagnostics
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: ignore
 
       # A run that dies before the push leaves no branch and no marker, so re-running CI on the commit

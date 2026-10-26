@@ -17,6 +17,13 @@ inputs:
       false for the agent runners (no mounts at all), so it cannot be inferred from "self-hosted".
     required: false
     default: 'true'
+  gradle-cache-read-only:
+    description: >
+      Restore the Gradle cache without saving one. Default false, so a caller that wants the cache
+      written keeps getting it. A repository's parallel jobs should leave exactly one writer and set
+      this true on the rest: each writer stores its own copy of the Gradle home, 1 to 3.5 GB.
+    required: false
+    default: 'false'
   java-version:
     description: >
       The JDK the build runs on. 21 by default; the bytecode target is the consumer's own build
@@ -76,6 +83,8 @@ runs:
         # it. With a persistent ~/.gradle the cache service is a redundant round-trip; without
         # one it is the difference between resolving the dependency graph once and every run.
         cache-disabled: ${{ steps.runner.outputs.hosted == 'false' && inputs.persistent-gradle-home == 'true' }}
+        cache-read-only: ${{ inputs.gradle-cache-read-only }}
+        cache-cleanup: on-success
 
     # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
     #
