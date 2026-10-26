@@ -1,0 +1,23 @@
+name: Actions storage sweep (this repo)
+
+# This repository's own caller - see self-review.yml for why it pins the release tag rather than `./`.
+# Weekly, and by hand with `dry_run` on. The scheduled run deletes.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log what would be deleted and delete nothing
+        type: boolean
+        default: true
+  schedule:
+    - cron: '47 3 * * 0'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  sweep:
+    uses: ScottCooper92/binge-ci/.github/workflows/actions-storage-sweep.yml@v1.0.37
+    with:
+      dry_run: ${{ inputs.dry_run == true }}
