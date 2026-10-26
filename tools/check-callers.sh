@@ -88,11 +88,11 @@ pinned=$(mktemp)
 trap 'rm -f "$pinned"' EXIT
 # Read once for the self-caller branch below, which has to tell an uncut tag from a tagless
 # checkout and has only a failed `git show` to go on.
-have_tags=$(git tag -l | head -1)
+have_tags=$(git tag -l | sed -n 1p)
 for caller in "${callers[@]}"; do
   # The target comes from the `uses:` line, not the caller's filename: a self caller is
   # named for its role here (self-review.yml), not for the workflow it calls.
-  uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml@[^[:space:]]+' "$caller" | head -1)
+  uses=$(grep -oE 'ScottCooper92/binge-ci/\.github/workflows/[a-z-]+\.yml@[^[:space:]]+' "$caller" | sed -n 1p)
   target=".github/workflows/$(basename "${uses%@*}")"
   ref="${uses##*@}"
   if [ -z "$uses" ]; then

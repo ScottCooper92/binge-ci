@@ -408,6 +408,7 @@ jobs:
           java-version: ${{ inputs.java_version }}
           # Neither a hosted runner nor an agent container mounts a persistent ~/.gradle.
           persistent-gradle-home: 'false'
+          gradle-cache-read-only: 'true'
 
       - name: Set up the build toolchain (JVM)
         if: >
@@ -423,6 +424,9 @@ jobs:
           inputs.toolchain == 'jvm' &&
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
 
       # Read-only by construction: the URL alone, never credentials. A build whose settings push only
       # when credentials are present then cannot write, and the node is expected to refuse it anyway.
@@ -621,7 +625,7 @@ jobs:
             # Read before the push, so a rebase onto a moved branch cannot fold someone else's
             # commits into what this run reports as its own.
             if [ -n "$checked_out" ]; then
-              commit_stat=$(git diff --stat "$checked_out" HEAD | head -40)
+              commit_stat=$(git diff --stat "$checked_out" HEAD | sed -n '1,40p')
             fi
             # The branch can have moved under us. Letting set -e kill the step here would strand the
             # work AND skip the reply, so the round cap would never advance.
@@ -685,7 +689,7 @@ jobs:
           name: agent-diagnostics-response-${{ steps.ctx.outputs.number }}
           path: ${{ runner.temp }}/agent-diagnostics
           # Diagnostic only - it has no value once the PR has moved on, and these run often.
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: ignore
 
       # A response that dies pushes nothing and posts no reply, and because the head has not

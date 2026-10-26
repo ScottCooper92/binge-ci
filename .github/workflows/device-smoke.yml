@@ -113,7 +113,16 @@ on:
           app/build/outputs/androidTest-results/**
       retention_days:
         type: number
-        default: 7
+        default: 3
+      gradle_cache_read_only:
+        description: >
+          Restore the Gradle cache without saving one. When false, setup-gradle's own default applies (save
+          on the default branch, restore only on the rest). Default true: this lane is never the one job per
+          repository that writes it, and a second copy of the Gradle home costs 1 to 3.5 GB of the
+          repository's cache quota on every push to the default branch. Set false only in a repository
+          where this is its only Gradle job.
+        type: boolean
+        default: true
     secrets:
       local_properties:
         description: >
@@ -175,6 +184,9 @@ jobs:
           java-version: ${{ inputs.java_version }}
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-read-only: ${{ inputs.gradle_cache_read_only || (github.event.repository != null && github.ref_name != github.event.repository.default_branch) }}
+          cache-cleanup: on-success
 
       # A hosted runner has far less RAM than a consumer's own gradle.properties usually sizes the daemon for,
       # and this job runs a full R8 pass with the daemon resident beside the emulator. These are ci-setup's

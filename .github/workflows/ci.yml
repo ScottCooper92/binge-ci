@@ -130,6 +130,8 @@ jobs:
       # Also validates the wrapper jar's checksum, which matters for a jar copied in by hand.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-cleanup: on-success
 
       - name: Build the Gradle gates
         run: |
@@ -149,4 +151,4 @@ jobs:
             gradle-plugins/build/reports
             gradle-plugins/build/test-results
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
