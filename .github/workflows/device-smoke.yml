@@ -324,10 +324,21 @@ jobs:
       # On success too: a managed-device run that installs nothing and runs no tests still exits
       # 0, and the report is the only place that shows.
       - name: Upload test results
+        id: upload
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.artifact_name }}
           path: ${{ inputs.artifact_paths }}
           if-no-files-found: ignore
           retention-days: ${{ inputs.retention_days }}
+
+      # The lane's verdict is the test steps above. An upload that fails on the repository's artifact
+      # storage quota says nothing about the device, so it must not turn a green run red: it warns
+      # instead, and the report is what is lost.
+      - name: Say that the results were not uploaded
+        if: ${{ always() && steps.upload.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          echo "::warning::The test results could not be uploaded (artifact storage, or the upload itself). The tests' own result stands."
