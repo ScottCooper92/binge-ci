@@ -324,7 +324,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.37
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.38
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -335,7 +335,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.37
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.38
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
