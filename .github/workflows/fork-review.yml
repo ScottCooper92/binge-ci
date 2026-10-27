@@ -363,7 +363,7 @@ jobs:
           mkdir -p "$untrusted"
 
           # The zip comes through the API rather than an action: only this script touches it, and
-          # it is read as four regular files of known names or not at all. A symlink or a path
+          # it is read as five regular files of known names or not at all. A symlink or a path
           # in the archive is not a file, so `unzip -j` plus the checks below drop or reject it.
           art=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
             --jq '[.artifacts[] | select(.name == "fork-review-data" and (.expired | not))] | first | select(. != null) | [.id, .size_in_bytes] | @tsv')
@@ -628,11 +628,11 @@ jobs:
             collect-failed) kind=$state
               note="The review did not run: the step that collects the diff from this fork's pull request run did not succeed." ;;
             artifact-invalid) kind=$state
-              note="The review did not run: what the collection step uploaded was not the four files it should have been." ;;
+              note="The review did not run: what the collection step uploaded was not the five files it should have been." ;;
             artifact-mismatch) kind=$state
-              note="The review did not run: the collected diff does not match the pull request as GitHub reports it now. Re-run the collection after the pull request settles." ;;
+              note="The review did not run: the collected diff does not match the pull request as GitHub reports it now. The pull request may still be changing." ;;
             label-stale) kind=$state
-              note="The review did not run: the \`${LABEL}\` label is older than this commit's checks, so it cannot be taken to cover this commit. Remove it and apply it again." ;;
+              note="The review did not run: the \`${LABEL}\` label is older than this commit's checks, so it cannot be taken to cover this commit." ;;
             label-not-maintainer) kind=$state
               note="The review did not run: the \`${LABEL}\` label was applied by someone without write access to this repository." ;;
             label-unverified) kind=$state
@@ -679,6 +679,8 @@ jobs:
             fi
           else
             printf '%s\n' "$note" >> "$body"
+            # The label is removed below after every comment, so the way to retry is the same for each.
+            printf '\nThe `%s` label has been removed. To try again, apply it, then re-run the "Fork review collect" run for this commit.\n' "$LABEL" >> "$body"
             printf '\nThe run: %s\n' "$THIS_RUN_URL" >> "$body"
           fi
           printf '\n\n---\n<sub>Posted by the fork-review workflow after a maintainer applied the `%s` label. An advisory read of the diff, not a substitute for a maintainer reading it.</sub>\n' "$LABEL" >> "$body"

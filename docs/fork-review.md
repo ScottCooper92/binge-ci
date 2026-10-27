@@ -65,7 +65,7 @@ It is the only event here with that property, and everything with a secret hangs
 2. It checks that the PR is open, that its head is still the commit the run was for, and that the
    head is in a different repository from the base.
 3. It checks the opt-in (below). Without one it stops and says nothing.
-4. Only then does it open the artifact, as four regular files of known names and bounded size, or
+4. Only then does it open the artifact, as five regular files of known names and bounded size, or
    not at all.
 5. It derives the same inputs from the API and requires the artifact's `diff.patch`,
    `files.json` and `bound.json` to be byte-identical, and the artifact's PR number and head SHA to
@@ -121,8 +121,11 @@ The gate does not trust that it was applied. It reads the PR's timeline and chec
 - **Who.** The person who applied it has `write`, `maintain` or `admin` on the repository.
 - **When.** The label postdates the head's collector run, which GitHub creates when the head is
   pushed. A label applied to an earlier commit does not carry over to the next push.
-- **Once.** The label is removed when the review is posted. Each head needs its own decision,
-  and so does a second review of the same head.
+- **Once.** The label is removed when the review, or a note that it did not run, is posted. Each
+  head needs its own decision, and so does a second review of the same head. Until that first
+  post, another collect run on the opted-in head (a close and reopen, say) would also pass the gate.
+  "Require approval for all outside collaborators", below, is what stops a fork author making those
+  runs unattended, so that setting is part of this guarantee.
 
 If the collector run has already finished when the label goes on, re-run it. It keeps its creation
 time, so the label stays later than it, and its completion starts the trusted stage again.
