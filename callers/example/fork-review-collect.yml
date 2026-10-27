@@ -1,0 +1,28 @@
+name: Fork review collect
+
+# Stage one of fork-review.yml, and the half that is safe to run on a fork's code: a fork's
+# `pull_request` run gets a read-only token and no secrets, and this checks nothing out. It reads
+# the PR through the API and uploads the diff for the stage that follows. See docs/fork-review.md.
+#
+# The NAME above is load-bearing: fork-review.yml's `workflow_run` trigger matches it, and the
+# called workflow leaves a workflow of this name out of the CI result it shows the reviewer.
+#
+# A fork can edit this file in its own PR, and the run then uses the fork's copy. That costs
+# nothing: this run has no secrets, and the stage that has them believes nothing it uploads.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+# GitHub makes every write read-only on a fork's `pull_request` run whatever is declared here.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  collect:
+    # Fork PRs only; the called workflow checks this too. A same-repository PR is the bots' business.
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    uses: ScottCooper92/binge-ci/.github/workflows/fork-review.yml@v1
+    # No secrets: a fork's run is handed none, and this stage has no use for one.
