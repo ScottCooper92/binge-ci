@@ -7,7 +7,7 @@ name: Actions storage sweep
 #
 # An artifact is deleted by age too, not wholesale: a run that is still going has one a bot is
 # about to download by name. It goes whatever retention its uploader asked for, so a repository that
-# keeps a long-lived artifact on purpose should not run this against it.
+# keeps an artifact on purpose sets `max_age_days` to the longest retention it keeps.
 
 on:
   workflow_call:
@@ -15,11 +15,14 @@ on:
       runner:
         description: >
           runs-on, as a JSON array string. Defaults to a GitHub-hosted runner. The job is a few `gh api`
-          calls, so a repository that keeps its jobs off hosted runners points this at a light one.
+          calls, so a repository that keeps its jobs off hosted runners points this at a light one. The
+          runner needs bash, the `gh` CLI and GNU `date`.
         type: string
         default: '["ubuntu-latest"]'
       max_age_days:
-        description: Delete caches not accessed, and artifacts not created, in this many days.
+        description: >
+          Delete artifacts created, and caches not accessed unless `cache_max_age_days` is set, more than
+          this many days ago.
         type: number
         default: 3
       cache_max_age_days:
