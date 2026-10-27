@@ -18,6 +18,6 @@ permissions:
 
 jobs:
   sweep:
-    uses: ScottCooper92/binge-ci/.github/workflows/actions-storage-sweep.yml@v1.0.37
+    uses: ScottCooper92/binge-ci/.github/workflows/actions-storage-sweep.yml@v1.0.38
     with:
       dry_run: ${{ inputs.dry_run == true }}
