@@ -12,10 +12,23 @@ name: Actions storage sweep
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >
+          runs-on, as a JSON array string. Defaults to a GitHub-hosted runner. The job is a few `gh api`
+          calls, so a repository that keeps its jobs off hosted runners points this at a light one.
+        type: string
+        default: '["ubuntu-latest"]'
       max_age_days:
         description: Delete caches not accessed, and artifacts not created, in this many days.
         type: number
         default: 3
+      cache_max_age_days:
+        description: >
+          Delete caches not accessed in this many days, when it should differ from `max_age_days`. A
+          repository that keeps artifacts a week on purpose sets `max_age_days: 7` and a shorter value
+          here. 0 uses `max_age_days`.
+        type: number
+        default: 0
       dry_run:
         description: Log what would be deleted and delete nothing.
         type: boolean
@@ -37,14 +50,14 @@ concurrency:
 
 jobs:
   sweep:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 15
     steps:
       - name: Delete stale caches
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          MAX_AGE_DAYS: ${{ inputs.max_age_days }}
+          MAX_AGE_DAYS: ${{ inputs.cache_max_age_days > 0 && inputs.cache_max_age_days || inputs.max_age_days }}
           DRY_RUN: ${{ inputs.dry_run }}
           KEEP_PREFIXES: ${{ inputs.keep_cache_key_prefixes }}
         run: |
