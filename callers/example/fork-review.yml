@@ -1,0 +1,35 @@
+name: Fork review
+
+# Stage two of fork-review.yml, the one that holds a secret. `workflow_run` always runs THIS file
+# as it is on the default branch, so a fork cannot change it, and it opens only when the collect
+# workflow has finished on a fork's PR. Nothing happens until a maintainer applies the `fork-review`
+# label to the PR and then re-runs the collect workflow, or labels it while that run is still going.
+# See docs/fork-review.md for the whole design and the repository settings it depends on.
+#
+# Never add a `pull_request_target` or an `issue_comment` trigger here.
+on:
+  workflow_run:
+    workflows: ["Fork review collect"]
+    types: [completed]
+
+# run-name from the SHA, which GitHub chose: the branch name is the fork's to choose.
+run-name: ${{ format('fork review · {0}', github.event.workflow_run.head_sha) }}
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+# `pull-requests: write` is for the one comment the called workflow posts, and nothing else here
+# can write: no contents, no checks, no approval, no merge.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    uses: ScottCooper92/binge-ci/.github/workflows/fork-review.yml@v1
+    with:
+      label: fork-review
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

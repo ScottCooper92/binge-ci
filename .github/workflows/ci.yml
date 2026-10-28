@@ -24,9 +24,9 @@ jobs:
           fetch-tags: true
 
       # For the plain-file shellcheck steps below. The actionlint action installs it too when it is
-      # missing, so this also saves it the apt round-trip.
+      # missing, so this also saves it the apt round-trip. python3-yaml is for the fork-review test.
       - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck python3-yaml
 
       # The same pinned, checksum-verified actionlint the consumers run, with shellcheck at
       # --severity=warning. Two calls because a caller's `uses:` is a remote ref actionlint cannot
@@ -88,6 +88,12 @@ jobs:
       # The pin check is inline in a reusable workflow, so only a consumer's PR would run it.
       - name: Test the submodule-pin check against scratch repositories
         run: ./tools/test-submodule-pins.sh
+
+      # fork-review.yml runs a fork's PR through a job that holds a secret, so what keeps the two
+      # apart is tested rather than read: no checkout, no interpolation in a `run:`, a read-only
+      # agent, and the one function both of its stages run.
+      - name: Test the fork-review workflow's safety properties and its shared function
+        run: ./tools/test-fork-review.sh
 
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.

@@ -8,7 +8,7 @@
 - [ ] actionlint (with shellcheck at warning) over `.github/workflows` and `callers/`
 - [ ] `shellcheck --severity=warning .github/actions/*/*.sh tools/*.sh`
 - [ ] `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`, `tools/check-internal-refs.sh`, `tools/check-token-permissions.sh`
-- [ ] `tools/test-internal-refs.sh`, `tools/test-governed-paths.sh`, `tools/test-token-permissions.sh`, `tools/test-merge-guards.sh`, `tools/test-submodule-pins.sh`
+- [ ] `tools/test-internal-refs.sh`, `tools/test-governed-paths.sh`, `tools/test-token-permissions.sh`, `tools/test-merge-guards.sh`, `tools/test-submodule-pins.sh`, `tools/test-fork-review.sh`
 - [ ] `./gradlew build` in `gradle-plugins/`, if the gates changed
 - [ ] The worked callers under `callers/` follow any signature change
 - [ ] Left to CI, and why: <!-- e.g. `./gradlew build` needs the network and I have none -->

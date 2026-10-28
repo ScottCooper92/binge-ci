@@ -117,6 +117,14 @@ it finds to the agent's prompt as files it may not edit. Adding an allowlist tha
 needs no caller change. The rules inputs still apply alongside it. Pass an empty string to turn
 the derived list off.
 
+## Fork PRs
+
+The bots refuse them, and that guard is deliberate. `fork-review.yml` is a separate, far more
+restricted path: a read-only agent reads a fork's diff and posts one advisory comment, after a
+maintainer has labelled that commit. It never approves or merges. The design, the threat model,
+what an injected agent could and could not do, and the repository settings it needs are in
+[docs/fork-review.md](docs/fork-review.md). The callers are the two files in `callers/example/`.
+
 ## Seeing what the bots did
 
 A `workflow_run` run is not associated with the pull request that caused it. It is attributed
@@ -180,14 +188,16 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 ## Layout
 
 ```
-.github/workflows/    The five reusable workflows, the three shared CI ones
-                      (submodule-pins, consumer-check, device-smoke), and this
+.github/workflows/    The five reusable workflows, the shared CI ones
+                      (submodule-pins, consumer-check, device-smoke), fork-review, and this
                       repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report
                       and actionlint (all below)
 callers/              Worked callers for the public repos
+                      and a generic pair for fork-review in example/
+docs/                 fork-review.md
 gradle-plugins/       The shared Gradle gates, as an included build (below)
 tools/                The checks actionlint cannot do
 ```
@@ -238,6 +248,7 @@ drifted a word at a time, so they live here too:
 
 | Piece | Kind | What it does |
 | --- | --- | --- |
+| `fork-review.yml` | reusable workflow | An advisory, read-only review of a fork PR, after a maintainer labels it. Two callers, one for the untrusted `pull_request` stage and one for the trusted `workflow_run` stage, both in `callers/example/`; each needs `contents: read`, `actions: read` and `pull-requests: write`. See [docs/fork-review.md](docs/fork-review.md). |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
