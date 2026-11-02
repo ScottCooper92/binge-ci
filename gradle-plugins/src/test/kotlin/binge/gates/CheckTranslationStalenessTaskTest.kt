@@ -201,6 +201,16 @@ class CheckTranslationStalenessTaskTest {
         assertEquals(setOf("app:greeting"), hashes.keys)
     }
 
+    @Test
+    fun `an array item resolves entities and keeps whitespace exactly as a string does`() {
+        val escaped = hashesWithArray("Tom &amp; Jerry", "Line one\n  line two")
+        val numeric = hashesWithArray("Tom &#38; Jerry", "Line one\n  line two")
+        val reflowed = hashesWithArray("Tom &amp; Jerry", "Line one line two")
+
+        assertEquals(escaped.getValue("app:ratings"), numeric.getValue("app:ratings"))
+        assertTrue(escaped.getValue("app:ratings") != reflowed.getValue("app:ratings"))
+    }
+
     private fun hashesWithArray(vararg items: String): Map<String, String> {
         withArray("values", *items)
         withArray("values-es", *items.map { "es $it" }.toTypedArray())
