@@ -220,9 +220,10 @@ private fun valuesDirectoryOf(relativePath: String): String? {
 }
 
 /**
- * Every `<string>` and `<plurals>` keyed by name, skipping `translatable="false"`. DOM rather than
- * a regex because the value is what is hashed: entity escapes and multi-line text must resolve the
- * same way here as for the reader. A plurals entry hashes its quantities and their text.
+ * Every `<string>`, `<plurals>` and `<string-array>` keyed by name, skipping `translatable="false"`. DOM
+ * rather than a regex because the value is what is hashed: entity escapes and multi-line text must
+ * resolve the same way here as for the reader. A plurals entry hashes its quantities and their text,
+ * and an array its items in order, each with its position.
  */
 private fun readEntries(file: File): Map<String, String> {
     val document =
@@ -240,6 +241,7 @@ private fun readEntries(file: File): Map<String, String> {
         when (element.tagName) {
             "string" -> entries[name] = element.textContent
             "plurals" -> entries[name] = quantitiesOf(element)
+            "string-array" -> entries[name] = itemsOf(element)
         }
     }
     return entries
@@ -250,6 +252,15 @@ private fun quantitiesOf(plurals: Element): String {
     return (0 until items.length)
         .mapNotNull { items.item(it) as? Element }
         .joinToString(" ") { "${it.getAttribute("quantity")}=${it.textContent}" }
+}
+
+private fun itemsOf(array: Element): String {
+    val children = array.childNodes
+    return (0 until children.length)
+        .mapNotNull { children.item(it) as? Element }
+        .filter { it.tagName == "item" }
+        .withIndex()
+        .joinToString(" ") { (position, item) -> "$position=${item.textContent}" }
 }
 
 private fun sha256(value: String): String =

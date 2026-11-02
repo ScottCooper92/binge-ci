@@ -140,6 +140,83 @@ class CheckTranslationStalenessTaskTest {
         )
     }
 
+    @Test
+    fun `a translated string array is hashed, and rewording one item fails the check`() {
+        withArray("values", "Rating 0 to 2", "Rating 3 to 4")
+        withArray("values-es", "Valoración de 0 a 2", "Valoración de 3 a 4")
+        task("stampArrays", rewrite = true).check()
+        task("checkArrays", rewrite = false).check()
+
+        withArray("values", "0 to 2 stars", "Rating 3 to 4")
+
+        val failure =
+            assertThrows(GradleException::class.java) {
+                task("checkReworded", rewrite = false).check()
+            }
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("app:ratings"), message)
+        assertFalse(message.contains("app:greeting"), message)
+    }
+
+    @Test
+    fun `an unstamped translated string array is reported as newly translated`() {
+        withArray("values", "Rating 0 to 2")
+        withArray("values-es", "Valoración de 0 a 2")
+
+        val failure =
+            assertThrows(GradleException::class.java) {
+                task("checkUnstamped", rewrite = false).check()
+            }
+
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("Newly translated, not yet stamped"), message)
+        assertTrue(message.contains("app:ratings"), message)
+    }
+
+    @Test
+    fun `item boundaries are part of the hash, so splitting an item changes it`() {
+        val joined = hashesWithArray("a b")
+        val split = hashesWithArray("a", "b")
+
+        assertTrue(joined.getValue("app:ratings") != split.getValue("app:ratings"))
+    }
+
+    @Test
+    fun `an untranslated or untranslatable string array is not hashed`() {
+        File(root, "app/src/main/res/values/strings.xml").writeText(
+            """
+            <resources>
+                <string name="greeting">Hello</string>
+                <string-array name="english_only"><item>One</item></string-array>
+                <string-array name="brands" translatable="false"><item>Brand</item></string-array>
+            </resources>
+            """.trimIndent(),
+        )
+        File(root, "app/src/main/res/values-es/strings.xml").writeText(
+            """<resources><string name="greeting">Hola</string><string-array name="brands"><item>Marca</item></string-array></resources>""",
+        )
+
+        val hashes = computeHashes(root, project.fileTree(root) { include("**/strings.xml") }.files)
+
+        assertEquals(setOf("app:greeting"), hashes.keys)
+    }
+
+    private fun hashesWithArray(vararg items: String): Map<String, String> {
+        withArray("values", *items)
+        withArray("values-es", *items.map { "es $it" }.toTypedArray())
+        return computeHashes(root, project.fileTree(root) { include("**/strings.xml") }.files)
+    }
+
+    private fun withArray(
+        directory: String,
+        vararg items: String,
+    ): File {
+        val file = File(root, "app/src/main/res/$directory/strings.xml")
+        val array = items.joinToString("\n", "    <string-array name=\"ratings\">\n", "\n    </string-array>") { """        <item>$it</item>""" }
+        val strings = file.readText().substringBefore("</resources>")
+        return file.apply { writeText("$strings$array\n</resources>\n") }
+    }
+
     private fun task(
         name: String,
         rewrite: Boolean,
