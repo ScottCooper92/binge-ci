@@ -132,6 +132,11 @@ class GatesFunctionalTest {
         build(compilerErrorBuild("allowedCompilerErrors.set(${count + 3})"))
         val lowering = runner("detekt", withKotlin = true).build().output
         assertTrue(lowering.contains("Lower detektGate.allowedCompilerErrors to $count"), lowering)
+
+        // Fixed: detekt prints nothing at zero, and the limit still set has to ask to be lowered to 0.
+        write("detekt-src/Unresolved.kt", "const val VALUE = 1\n")
+        val fixed = runner("detekt", withKotlin = true).build().output
+        assertTrue(fixed.contains("Lower detektGate.allowedCompilerErrors to 0"), fixed)
     }
 
     private fun compilerErrorBuild(setting: String) =

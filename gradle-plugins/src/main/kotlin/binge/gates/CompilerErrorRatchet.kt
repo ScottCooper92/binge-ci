@@ -36,8 +36,9 @@ internal object CompilerErrorRatchet {
             }
             doLast {
                 val found = count.get()
-                if (found == 0) return@doLast
                 val limit = allowed.orNull
+                // detekt prints nothing at zero, so a limit that is still set is the only thing that can ask to lower it.
+                if (found == 0 && limit == null) return@doLast
                 val where = "$projectPath:$taskName"
                 when {
                     limit == null ->

@@ -52,6 +52,11 @@ bare detekt setup does not.
   that need types load and never fire. `UnsafeCallOnNullableType`, the `!!` ban, is one. The plugin
   wires the compile classpath of one Kotlin compilation onto every detekt task: `main` on a JVM
   project, `debug` on an Android one.
+- **Compiler errors.** detekt prints `There were N compiler errors found during analysis` and
+  still passes. A type-resolved rule is blind to code that did not resolve, so the `!!` ban goes
+  quiet there with a green build. The gate reads that line. With `allowedCompilerErrors` unset it
+  only warns, and names the number to set. With it set, a higher count fails the build, and a
+  lower one says to lower the limit, down to 0, so the number can only go down.
 - **An optional baseline**, so the gate can be zero new findings rather than zero total.
 
 ```kotlin
@@ -63,7 +68,7 @@ detektGate {
 
 `configFile` defaults to `detekt.yml` in the settings directory. `sourceDirectory`, `excludes`,
 `jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (true) and
-`typeResolutionCompilation` cover the rest. The custom rules stay in the consumer; only the wiring
+`typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
 
 ### Baseline staleness
