@@ -60,6 +60,7 @@ perm_block() {
     ind == 0 && /^permissions:/ { scalar($0); f = 1; next }
     ind == 4 && job == want && /^    permissions:/ { scalar($0); f = 1; next }
     f && /^ *$/ { next }
+    f && /^ *#/ { next }
     f && indent($0) <= ind { f = 0 }
     f && /^ *[a-z-]+: *[a-z]+/ { line = $0; sub(/[[:space:]]+#.*/, "", line); sub(/^ +/, "", line); gsub(/ /, "", line); print line }
     function scalar(l) {

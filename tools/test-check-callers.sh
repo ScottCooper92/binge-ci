@@ -120,6 +120,12 @@ expect comment-flow-grants pass
 fixture comment-narrows "$TOP_WRITE" $'    permissions:\n      contents: read   # actions is not needed here'
 expect comment-narrows fail "permissions the caller must declare: actions: write"
 
+fixture comment-line-top $'permissions:\n  contents: read\n# device-smoke cancels runs\n  actions: write' ""
+expect comment-line-top pass
+
+fixture comment-line-job "$TOP_READ" $'    permissions:\n      contents: read\n    # device-smoke cancels runs\n      actions: write'
+expect comment-line-job pass
+
 fixture comment-names-scalar "" $'    permissions:  # not write-all, only what is listed\n      contents: read'
 expect comment-names-scalar fail "permissions the caller must declare: actions: write"
 
