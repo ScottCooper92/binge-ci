@@ -34,7 +34,8 @@
 #
 # Permissions are compared as `name: level` pairs, not names: `actions: write` in the workflow
 # is not met by `actions: read` in the caller, and `contents: write` is not met by the default.
-# `write` satisfies `read`. Input TYPES are checked too - a caller passing `'50'` to a
+# `write` satisfies `read`. The grant is the calling job's own `permissions:` block when it has one, which REPLACES
+# the workflow's rather than adding to it, and the top-level block otherwise (#285). Input TYPES are checked too - a caller passing `'50'` to a
 # `type: number` input, or `'false'` to a boolean, is the same startup_failure with no log.
 set -uo pipefail
 
@@ -49,14 +50,59 @@ keys() { # $1=file  $2=start regex  $3=stop regex  $4=key indent  $5=key charcla
   ' "$1" | sort -u
 }
 
-# The top-level permissions block as `name:level` lines.
-perm_pairs() {
-  awk '
-    /^permissions:/ {f=1; next}
-    f && /^[a-z]/ {f=0}
-    f && /^  [a-z-]+: *[a-z]+/ { line=$0; sub(/^ +/,"",line); gsub(/ /,"",line); print line }
+# A `permissions:` block as `name:level` lines. $1=file, $2=indent of the `permissions:` key (0 for
+# the workflow, 4 for a job), $3=the job to read (empty for the workflow's own block). A scalar form
+# (`write-all`, `read-all`) prints `*:write` or `*:read`, which stands for every name at that level.
+perm_block() {
+  awk -v want="$3" -v ind="$2" '
+    function indent(l) { match(l, /^ */); return RLENGTH }
+    ind == 4 && /^  [A-Za-z_-]+:/ { job = $0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    ind == 0 && /^permissions:/ { scalar($0); f = 1; next }
+    ind == 4 && job == want && /^    permissions:/ { scalar($0); f = 1; next }
+    f && /^ *$/ { next }
+    f && indent($0) <= ind { f = 0 }
+    f && /^ *[a-z-]+: *[a-z]+/ { line = $0; sub(/^ +/, "", line); gsub(/ /, "", line); print line }
+    function scalar(l) {
+      if (l ~ /write-all/) print "*:write"
+      else if (l ~ /read-all/) print "*:read"
+    }
   ' "$1" | sort -u
 }
+
+# The job a caller puts its binge-ci `uses:` line in. A caller has one such job; a scheduled report
+# or a second job beside it is not the one GitHub checks the grant of.
+calling_job() {
+  awk '
+    /^jobs:/ {j=1; next}
+    j && /^  [A-Za-z_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    j && /^    uses: *ScottCooper92\/binge-ci\// { print job; exit }
+  ' "$1"
+}
+
+# Whether a job states its own `permissions:` at all. A job's block REPLACES the workflow's rather
+# than adding to it, so one present with nothing in it (`permissions: {}`) grants nothing.
+job_has_permissions() { # $1=file $2=job
+  awk -v want="$2" '
+    /^  [A-Za-z_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    job == want && /^    permissions:/ { found=1 }
+    END { exit !found }
+  ' "$1"
+}
+
+# What the caller actually grants the reusable workflow: its calling job's own block when it has one,
+# else the workflow's top-level block.
+perm_pairs() {
+  local job
+  job=$(calling_job "$1")
+  if [ -n "$job" ] && job_has_permissions "$1" "$job"; then
+    perm_block "$1" 4 "$job"
+  else
+    perm_block "$1" 0 ""
+  fi
+}
+
+# What the reusable workflow declares: its top-level block, as before.
+needed_pairs() { perm_block "$1" 0 ""; }
 
 # Each declared input's `type`, as `name:type` lines.
 input_types() {
@@ -162,12 +208,13 @@ for caller in "${callers[@]}"; do
   # Permissions the called workflow declares, against what the caller grants itself. A
   # caller with no block holds the repository default, which is `contents: read` and nothing
   # else, so that is the one pair a caller need not restate.
-  needs_perms=$(perm_pairs "$reusable")
+  needs_perms=$(needed_pairs "$reusable")
   has_perms=$(perm_pairs "$caller")
   missing_perms=""
   while IFS=: read -r name level; do
     [ -n "$name" ] || continue
     got=$(printf '%s\n' "$has_perms" | awk -F: -v n="$name" '$1 == n { print $2 }')
+    [ -z "$got" ] && got=$(printf '%s\n' "$has_perms" | awk -F: '$1 == "*" { print $2 }')
     [ -z "$got" ] && [ "$name" = contents ] && got="read"
     case "$got" in
       "$level"|write) ;;
