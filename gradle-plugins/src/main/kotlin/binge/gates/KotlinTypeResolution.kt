@@ -3,6 +3,7 @@ package binge.gates
 import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.DetektCreateBaselineTask
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
@@ -30,7 +31,23 @@ internal object KotlinTypeResolution {
         }
         val (target, compilationName) = production
 
+        // Every compilation seen, so a detekt task can say which exist when the requested one never did.
+        val compilationsSeen = mutableSetOf<String>()
+        // A plain string, not the project: the action is stored with the configuration cache, which refuses a Project.
+        val projectPath = project.path
+        val failWithoutTheCompilation: (Task) -> Unit = { task ->
+            check(compilationName in compilationsSeen) {
+                "binge.gates.detekt: $projectPath has no Kotlin compilation named '$compilationName', so ${task.name} would run " +
+                    "without type resolution and every rule that needs it would silently never fire. The compilations " +
+                    "here are ${compilationsSeen.sorted().joinToString { "'$it'" }}. Set detektGate { typeResolutionCompilation } " +
+                    "to one of them."
+            }
+        }
+        project.tasks.withType(Detekt::class.java).configureEach { doFirst(failWithoutTheCompilation) }
+        project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach { doFirst(failWithoutTheCompilation) }
+
         target.compilations.configureEach {
+            compilationsSeen += name
             if (name != compilationName) return@configureEach
             // `libraries` is the compile task's classpath, already resolved for the variant. Resolving
             // the compilation's dependency files directly trips AGP's variant ambiguity.
