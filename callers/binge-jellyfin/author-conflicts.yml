@@ -1,0 +1,60 @@
+name: Author - resolve merge conflicts
+
+# What set this run off. This one sweeps every conflicted PR rather than acting on one, so it is
+# named for the branch whose CI finished - a PR number here would name whichever PR happened to be
+# first in the matrix. Without it, a workflow_run run reads as the default branch every time.
+run-name: >-
+  ${{ github.event.workflow_run.head_branch
+        && format('sweep after {0}', github.event.workflow_run.head_branch)
+      || 'sweep · dispatched' }}
+
+# Thin caller. The workflow itself lives in ScottCooper92/binge-ci.
+#
+# PUBLIC repository: the fork filter inside the scan is the control here, not a
+# formality. The `agent` label stays maintainers-only.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  resolve:
+    # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
+    # here. It checks the events that name a head repository and lets the others through.
+    #
+    # Only a dispatch or CI on a push to the default branch is a sweep, which also leaves out the
+    # scheduled canary run of CI. binge-ci checks the same, but its group is joined first, and a
+    # group holds one pending run: a PR's CI run finishing would cancel a queued sweep and then
+    # skip. Filtered here, it never starts.
+    if: >-
+      (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (!github.event.workflow_run || github.event.workflow_run.head_repository.full_name == github.repository) &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == github.event.repository.default_branch))
+    uses: ScottCooper92/binge-ci/.github/workflows/author-conflicts.yml@v1
+    with:
+      dispatched: ${{ github.event_name == 'workflow_dispatch' }}
+      author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
+      conflict_rules: |
+        Two things are never yours to arbitrate.
+
+        A conflict in a screenshot baseline PNG under
+        app/src/screenshotTestDebug/reference/ cannot be merged at all:
+        picking a side means choosing which rendering is correct, which is a
+        human's call. Leave it unresolved and say so in note.md rather than
+        guessing.
+
+        A conflict in the exported Service's caller policy, or in where the
+        access token is sent, is a security decision. Never resolve it by
+        keeping both sides. Leave it unresolved and say so in note.md.
+
+        Beyond those, a conflict resolved into something that merely compiles
+        is a worse outcome than one handed back. If the two sides disagree
+        about behaviour, that is a human's call. Leave it unresolved and say
+        so in note.md.
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

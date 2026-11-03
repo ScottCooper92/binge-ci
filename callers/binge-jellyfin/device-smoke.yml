@@ -1,0 +1,98 @@
+name: Device smoke (minified)
+
+# The one emulator lane. It asserts something ci.yml cannot: that the release keep rules hold
+# across a real Binder, on the minified build, for the exported Service, the generated stubs and the
+# protobuf runtime and the user-message trailer. The emulator has no Jellyfin server and no session,
+# so the calls answer UNAUTHENTICATED with the sign-in sentence, which is the contract's answer with
+# nothing connected; a red run names a keep rule, the transport or the caller policy, never a network.
+# That answer is a pure function of the committed tree plus the toolchain, so it is triggered by the
+# paths that can change it, with a weekly run behind that for the inputs that vary with time rather
+# than with a diff: the hosted runner image and the system image.
+#
+# The lane itself is binge-ci's shared device-smoke workflow (hosted runner, KVM, freed disk, the AVD
+# cache, the zero-tests guard, a non-fatal upload). This file owns only the triggers, the
+# concurrency group and the weekly report.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or SHA to run against
+        required: false
+        default: main
+  push:
+    branches: [main]
+    paths:
+      - 'app/build.gradle.kts'
+      - 'app/src/main/AndroidManifest.xml'
+      - 'app/src/main/kotlin/com/cooper/binge/companion/jellyfin/AppGraph.kt'
+      - 'app/src/main/kotlin/com/cooper/binge/companion/jellyfin/JellyfinApp.kt'
+      - 'app/src/main/kotlin/com/cooper/binge/companion/jellyfin/auth/**'
+      - 'app/src/androidTest/**'
+      - 'app/src/main/keepRules/**'
+      - 'app/src/main/kotlin/com/cooper/binge/companion/jellyfin/service/**'
+      - 'app/src/main/kotlin/com/cooper/binge/companion/jellyfin/server/**'
+      - 'app/src/debug/keepRules/**'
+      - 'binge-companions'
+      - 'libs.versions.toml'
+      - '.github/workflows/device-smoke.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+
+# The weekly run has its own group. Sharing main's with a push would let a push cancel it mid-run,
+# and a cancelled scheduled run is reported (a job that hits its timeout is `cancelled`, not
+# `failure`), so that would raise a false alarm.
+concurrency:
+  group: device-smoke-${{ github.event_name == 'schedule' && 'weekly' || github.event.inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+# The live workflow grants `actions: write` on the job alone. It is declared here too, as the other worked
+# device-smoke caller does, because `tools/check-callers.sh` reads only the top-level block.
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  companion-smoke:
+    name: Handshake and availability over Binder on a minified build
+    # The shared lane's `save-avd-cache` runs `gh cache delete` before it saves. Without
+    # `actions: write` the delete gets a 403 that `|| true` hides, and the cache freezes at its
+    # first content.
+    permissions:
+      contents: read
+      actions: write
+    uses: ScottCooper92/binge-ci/.github/workflows/device-smoke.yml@v1
+    with:
+      ref: ${{ github.event.inputs.ref }}
+      submodules: recursive
+      device: smokeAtdApi34
+      api_level: '34'
+      system_image_source: aosp-atd
+      default_branch: main
+      tasks: ':app:smokeAtdApi34DebugAndroidTest -PminifyDebug'
+      expected_tests: handshakeAndAvailabilityCrossTheBinderOnTheMinifiedBuild
+      retention_days: 7
+
+  # The weekly run is the backstop for what changes with time rather than with a diff (the runner
+  # image, the system image), and it has no PR or push to carry a failure, so without this a red
+  # one is a mark in the Actions tab that nothing points at. One issue stays open while the
+  # scheduled run is red and closes itself on the next green one. Scheduled runs only: a push or a
+  # manual dispatch already has someone watching it. The same report as ci.yml's nightly-report,
+  # with its own issue.
+  scheduled-report:
+    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: companion-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: ScottCooper92/binge-ci/.github/actions/nightly-report@v1
+        with:
+          result: ${{ needs.companion-smoke.result }}
+          title: Weekly device smoke is failing on main
+          note: >-
+            Nothing was pushed to cause this, so suspect the environment first: a runner image or
+            Android SDK update, the aosp-atd system image, or /dev/kvm on the hosted runner. The smoke
+            reaches no Jellyfin server, so the network is not a suspect. The device-smoke-results
+            artifact is kept for seven days.
