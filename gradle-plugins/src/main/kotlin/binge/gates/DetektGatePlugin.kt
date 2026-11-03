@@ -107,7 +107,8 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(Detekt::class.java).configureEach {
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
-            // After the consumer's own file, so what it says wins; the task refuses a clash rather than lose to it.
+            // After the consumer's own file: detekt reads a later config file over an earlier one, so the layer's `excludes`
+            // would replace a rule set's own. The task refuses that clash rather than let it through.
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
             parallel.set(gate.parallel)

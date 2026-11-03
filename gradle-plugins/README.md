@@ -82,8 +82,9 @@ detektGate {
 
 The gate writes a config layer with `excludes` on each built-in rule set and each one named in
 `suppressedRuleSets`, after the consumer's `detekt.yml`. A rule set not named there reports on the
-suppressed paths. A rule set that already carries its own `excludes` in `detekt.yml` would have the
-layer lose to it, so the task fails and names the set instead; a rule's own `excludes` is fine.
+suppressed paths. detekt reads a later config file over an earlier one, so a rule set that already
+carries its own `excludes` in `detekt.yml` would have them replaced by the layer, and the files it left
+out would start reporting. The task fails and names the set instead; a rule's own `excludes` is fine.
 
 ### Baseline staleness
 

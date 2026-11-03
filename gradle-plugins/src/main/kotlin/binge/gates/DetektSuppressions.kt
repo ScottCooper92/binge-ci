@@ -13,7 +13,6 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import java.io.File
 
 /** detekt's own rule sets, which [DetektGateExtension.suppressedPaths] always covers. */
 internal val BUILT_IN_RULE_SETS =
@@ -29,27 +28,33 @@ internal fun suppressionsYaml(
 }
 
 /**
- * The rule sets in [consumerConfig] that carry their own `excludes`, as the rule set's key (two spaces in) and not a rule's
- * (four). Read as text because the config is detekt's YAML and the gate carries no parser; the shape is fixed.
+ * The rule sets in [consumerConfig] that carry their own `excludes`: a key directly under a top-level rule set, as opposed
+ * to one under a rule inside it. Read as text because the config is detekt's YAML and the gate carries no parser; the shape
+ * is fixed, and the indent a file uses is whatever its first line under each rule set uses.
  */
 internal fun ruleSetsWithOwnExcludes(consumerConfig: String): List<String> {
     var ruleSet: String? = null
+    var childIndent: Int? = null
     val found = mutableListOf<String>()
     for (line in consumerConfig.lines()) {
         if (line.isBlank() || line.trimStart().startsWith("#")) continue
-        if (!line.startsWith(" ")) {
+        val indent = line.length - line.trimStart().length
+        if (indent == 0) {
             ruleSet = line.substringBefore(':').trim().takeIf { line.contains(':') }
-        } else if (line.startsWith("  excludes:") && ruleSet != null) {
-            found += ruleSet
+            childIndent = null
+            continue
         }
+        if (childIndent == null) childIndent = indent
+        if (ruleSet != null && indent == childIndent && line.trimStart().startsWith("excludes:")) found += ruleSet
     }
     return found
 }
 
 /**
- * Writes the rule sets' `excludes` that silence findings in the suppressed paths while the files stay analysed. A rule set
- * of the consumer's own that already carries `excludes` would have the layer lose to it, silently un-suppressing the path for
- * that set, so it fails here and names the set.
+ * Writes the rule sets' `excludes` that silence findings in the suppressed paths while the files stay analysed. detekt reads
+ * a later config file over an earlier one, and the layer is the later, so a rule set of the consumer's own that already
+ * carries `excludes` would have them replaced: the files it excluded from that set would start reporting. It fails here
+ * instead and names the set.
  */
 @CacheableTask
 abstract class GenerateDetektSuppressionsTask : DefaultTask() {
@@ -67,12 +72,14 @@ abstract class GenerateDetektSuppressionsTask : DefaultTask() {
     fun generate() {
         val ruleSets = (BUILT_IN_RULE_SETS + extraRuleSets.get()).distinct()
         val config = consumerConfig.asFile.get()
-        val clashing = ruleSetsWithOwnExcludes(config.takeIf(File::exists)?.readText().orEmpty()).filter { it in ruleSets }
+        val clashing = ruleSetsWithOwnExcludes(config.readText()).filter { it in ruleSets }
         if (clashing.isNotEmpty()) {
             throw GradleException(
                 "binge.gates.detekt: ${config.name} sets `excludes` on the rule set(s) ${clashing.joinToString()} and " +
-                    "detektGate.suppressedPaths is set too, so the suppressed paths would stop applying to them. Move the " +
-                    "globs into detektGate.suppressedPaths, or put them on the individual rules instead.",
+                    "detektGate.suppressedPaths is set too. detekt lets the later config file win and the generated layer is " +
+                    "later, so it would replace those `excludes`, and the files they leave out would start reporting. Put them on " +
+                    "the individual rules instead (a rule's own `excludes` is not replaced), or add the globs to " +
+                    "detektGate.suppressedPaths, which silences every rule set for those paths.",
             )
         }
         output.asFile.get().apply {

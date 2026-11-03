@@ -42,4 +42,11 @@ class DetektSuppressionsTest {
     fun `a config with no excludes finds none`() {
         assertEquals(emptyList<String>(), ruleSetsWithOwnExcludes("style:\n  MagicNumber:\n    active: true\n"))
     }
+
+    @Test
+    fun `a config indented with four spaces is read the same`() {
+        val config = "style:\n    excludes: ['**/Other.kt']\n    MagicNumber:\n        excludes: ['**/Fake.kt']\n"
+
+        assertEquals(listOf("style"), ruleSetsWithOwnExcludes(config))
+    }
 }
