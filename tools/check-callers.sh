@@ -61,8 +61,9 @@ perm_block() {
     ind == 4 && job == want && /^    permissions:/ { scalar($0); f = 1; next }
     f && /^ *$/ { next }
     f && indent($0) <= ind { f = 0 }
-    f && /^ *[a-z-]+: *[a-z]+/ { line = $0; sub(/^ +/, "", line); gsub(/ /, "", line); print line }
+    f && /^ *[a-z-]+: *[a-z]+/ { line = $0; sub(/[[:space:]]+#.*/, "", line); sub(/^ +/, "", line); gsub(/ /, "", line); print line }
     function scalar(l) {
+      sub(/[[:space:]]+#.*/, "", l)
       if (l ~ /write-all/) print "*:write"
       else if (l ~ /read-all/) print "*:read"
       else if (l ~ /\{ *[a-z]/) {

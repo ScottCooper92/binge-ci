@@ -108,4 +108,19 @@ expect job-omits-contents fail "permissions the caller must declare: contents: r
 fixture top-omits-contents $'permissions:\n  actions: write' ""
 expect top-omits-contents fail "permissions the caller must declare: contents: read"
 
+fixture comment-job-grants "$TOP_READ" $'    permissions:\n      contents: read   # the reusable workflow reads the repo\n      actions: write  # device-smoke cancels runs'
+expect comment-job-grants pass
+
+fixture comment-top-grants $'permissions:\n  contents: read # needed\n  actions: write # needed' ""
+expect comment-top-grants pass
+
+fixture comment-flow-grants "$TOP_READ" $'    permissions: { contents: read, actions: write }  # both'
+expect comment-flow-grants pass
+
+fixture comment-narrows "$TOP_WRITE" $'    permissions:\n      contents: read   # actions is not needed here'
+expect comment-narrows fail "permissions the caller must declare: actions: write"
+
+fixture comment-names-scalar "" $'    permissions:  # not write-all, only what is listed\n      contents: read'
+expect comment-names-scalar fail "permissions the caller must declare: actions: write"
+
 exit $failures
