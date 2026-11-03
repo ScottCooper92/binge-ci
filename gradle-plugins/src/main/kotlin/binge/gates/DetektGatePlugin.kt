@@ -32,6 +32,21 @@ abstract class DetektGateExtension {
     /** Globs left out of [sourceDirectory]. Defaults to every file named `…PreviewData.kt`, preview tooling rather than logic. */
     abstract val excludes: ListProperty<String>
 
+    /**
+     * Globs analysed but never reported on. An excluded file is not analysed, so an `internal` declaration in it is
+     * invisible to detekt (its compiled class is a binary dependency, and `internal` stops at the module boundary) and every
+     * reference to it counts as a compiler error, which blinds the type-resolved rules for the code that calls it. A glob
+     * listed here is analysed, so it resolves, and findings reported in it are dropped through the rule sets' `excludes`.
+     * It wins over [excludes]: a glob in both is analysed. Empty by default, which changes nothing.
+     */
+    abstract val suppressedPaths: ListProperty<String>
+
+    /**
+     * Rule set ids beyond detekt's own that [suppressedPaths] also silences, such as a custom ruleset or the community
+     * Compose rules. A rule set not named here reports on a suppressed path.
+     */
+    abstract val suppressedRuleSets: ListProperty<String>
+
     /** Defaults to `17`. */
     abstract val jvmTarget: Property<String>
 
@@ -74,6 +89,8 @@ class DetektGatePlugin : Plugin<Project> {
         gate.configFile.convention(project.layout.settingsDirectory.file("detekt.yml"))
         gate.sourceDirectory.convention("src/main")
         gate.excludes.convention(listOf("**/*PreviewData.kt"))
+        gate.suppressedPaths.convention(emptyList())
+        gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
         gate.buildUponDefaultConfig.convention(true)
         gate.parallel.convention(true)
@@ -85,9 +102,13 @@ class DetektGatePlugin : Plugin<Project> {
         // The extension's values are read when a task is configured, which is after the build script
         // has set them. The tasks are configured rather than detekt's extension, so that a task registered
         // outside it, such as the baseline-staleness run, gets the same settings.
+        val suppressions = DetektSuppressions.register(project, gate)
+
         project.tasks.withType(Detekt::class.java).configureEach {
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
+            // After the consumer's own file, so what it says wins; the task refuses a clash rather than lose to it.
+            if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
             parallel.set(gate.parallel)
             jvmTarget.set(gate.jvmTarget)
@@ -103,6 +124,7 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
+            if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
             parallel.set(gate.parallel)
             jvmTarget.set(gate.jvmTarget)
@@ -122,7 +144,7 @@ class DetektGatePlugin : Plugin<Project> {
 private fun Project.productionSource(gate: DetektGateExtension): FileTree =
     fileTree(gate.sourceDirectory.get()) {
         include("**/*.kt")
-        exclude(gate.excludes.get())
+        exclude(gate.excludes.get() - gate.suppressedPaths.get().toSet())
     }
 
 private fun Project.existingFile(file: RegularFileProperty): Provider<RegularFile> =

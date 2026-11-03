@@ -260,6 +260,61 @@ class GatesFunctionalTest {
         assertFalse(result.output.contains("compiler errors"), result.output)
     }
 
+    // An `internal` declaration in an excluded file is invisible to detekt: its compiled class is a binary dependency,
+    // and `internal` stops at the module boundary. Every reference to it is a compiler error that blinds the type-resolved
+    // rules for the caller, with a green build. Analysing the file and silencing its findings fixes both.
+    @Test
+    fun `suppressedPaths analyses a preview-data file so its internal symbols resolve, and reports nothing in it`() {
+        previewDataProject()
+
+        val before = runner("detekt", withKotlin = true).buildAndFail()
+        assertTrue(Regex("""There (?:was|were) \d+ compiler errors? found""").containsMatchIn(before.output), before.output)
+
+        previewDataProject(suppressed = true)
+
+        val after = runner("detekt", withKotlin = true).buildAndFail()
+        assertFalse(after.output.contains("compiler error"), after.output)
+        assertTrue(after.output.contains("Use.kt") && after.output.contains("UnsafeCallOnNullableType"), after.output)
+        assertFalse(after.output.contains("SamplePreviewData.kt"), after.output)
+    }
+
+    @Test
+    fun `suppressedPaths refuses a rule set of the consumer's that carries its own excludes`() {
+        previewDataProject(suppressed = true)
+        write(
+            "detekt.yml",
+            "potential-bugs:\n  excludes: ['**/Other.kt']\n  UnsafeCallOnNullableType:\n    active: true\n",
+        )
+
+        val result = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(result.output.contains("sets `excludes` on the rule set(s) potential-bugs"), result.output)
+    }
+
+    /** Three `internal` fixtures in a preview-data file, a caller that reads each, and a `!!` on each side of the boundary. */
+    private fun previewDataProject(suppressed: Boolean = false) {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            ${if (suppressed) """detektGate { suppressedPaths.set(listOf("**/*PreviewData.kt")) }""" else ""}
+            """.trimIndent(),
+        )
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write(
+            "src/main/kotlin/sample/SamplePreviewData.kt",
+            "package sample\n\ninternal val previewA: String? = \"a\"\n\ninternal val previewB: String? = \"b\"\n\n" +
+                "internal fun previewC(): String? = \"c\"\n\ninternal fun risky(text: String?): Int = text!!.length\n",
+        )
+        write(
+            "src/main/kotlin/sample/Use.kt",
+            "package sample\n\nfun use(): Int = previewA!!.length + previewB.orEmpty().length + (previewC() ?: \"\").length\n",
+        )
+    }
+
     /** A `!!` fails [task] naming the rule, and the same file without it passes. */
     private fun assertTheBanFires(
         task: String,
