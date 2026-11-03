@@ -212,15 +212,22 @@ for caller in "${callers[@]}"; do
 
   # Permissions the called workflow declares, against what the caller grants itself. A
   # caller with no block holds the repository default, which is `contents: read` and nothing
-  # else, so that is the one pair a caller need not restate.
+  # else, so that is the one pair a caller with no block need not state.
   needs_perms=$(needed_pairs "$reusable")
   has_perms=$(perm_pairs "$caller")
+  # The `contents: read` default is the repository's, which a caller gets only with NO block at all: a
+  # block on the job or at the top level makes every permission it leaves out `none`, `contents` included.
+  has_block=false
+  caller_job=$(calling_job "$caller")
+  if grep -q '^permissions:' "$caller" || { [ -n "$caller_job" ] && job_has_permissions "$caller" "$caller_job"; }; then
+    has_block=true
+  fi
   missing_perms=""
   while IFS=: read -r name level; do
     [ -n "$name" ] || continue
     got=$(printf '%s\n' "$has_perms" | awk -F: -v n="$name" '$1 == n { print $2 }')
     [ -z "$got" ] && got=$(printf '%s\n' "$has_perms" | awk -F: '$1 == "*" { print $2 }')
-    [ -z "$got" ] && [ "$name" = contents ] && got="read"
+    [ -z "$got" ] && [ "$name" = contents ] && [ "$has_block" = false ] && got="read"
     case "$got" in
       "$level"|write) ;;
       *) missing_perms+="$name: $level " ;;

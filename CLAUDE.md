@@ -63,7 +63,7 @@ CI runs actionlint (with shellcheck) over the workflows and callers, shellcheck 
 scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`
 and `tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing the last against
 fixtures, `tools/check-token-permissions.sh`, which holds each app-token mint to its app's grant
-(tested by `tools/test-token-permissions.sh`), `tools/test-merge-guards.sh`, which runs the
+(tested by `tools/test-token-permissions.sh`), `tools/test-check-callers.sh`, which runs the caller check against fixture callers for each shape of `permissions:` grant, `tools/test-merge-guards.sh`, which runs the
 merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh`, which runs the governed-paths script against scratch
 repositories, and `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way. It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do

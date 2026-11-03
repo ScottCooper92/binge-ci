@@ -102,4 +102,10 @@ expect flow-job-grants pass
 fixture flow-job-narrows "$TOP_WRITE" $'    permissions: { contents: read }'
 expect flow-job-narrows fail "permissions the caller must declare: actions: write"
 
+fixture job-omits-contents "" $'    permissions:\n      actions: write'
+expect job-omits-contents fail "permissions the caller must declare: contents: read"
+
+fixture top-omits-contents $'permissions:\n  actions: write' ""
+expect top-omits-contents fail "permissions the caller must declare: contents: read"
+
 exit $failures
