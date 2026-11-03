@@ -44,25 +44,36 @@ git init -q "$work/super"
   done
 )
 
+# A base commit pinning an object the upstream never had, as when the base pin was force-pushed away.
+(
+  cd "$work/super"
+  git reset -q --hard base && git submodule --quiet update
+  git update-index --cacheinfo 160000,"$(printf '%040d' 1)",sub
+  git commit -q -m "base pinning a missing object" && git tag base-missing
+  git reset -q --hard base && git submodule --quiet update
+)
+
 mkdir "$work/bin"
 printf '#!/bin/sh\necho "{\\"labels\\":[$LABELS]}"\n' > "$work/bin/gh"
 chmod +x "$work/bin/gh"
 
-# $1 the case, $2 the commit to check out as the PR, $3 its labels as JSON objects, $4 pass|fail.
+# $1 the case, $2 the commit to check out as the PR, $3 its labels as JSON objects, $4 pass|fail,
+# $5 the base commit (default `base`), $6 text the output must contain (default none).
 check() {
-  local case=$1 dir="$work/checkout-$1" out rc
+  local case=$1 dir="$work/checkout-$1" out rc base=${5:-base} want=${6:-}
   git clone -q "$work/super" "$dir"
   git -C "$dir" checkout -q "$2"
   git -C "$dir" submodule --quiet update --init
   set +e
   out=$(cd "$dir" && PATH="$work/bin:$PATH" LABELS=$3 PR_NUMBER=1 HOLD_LABEL=hold \
-    BASE_SHA=$(git rev-parse base) bash "$work/step.sh" 2>&1)
+    BASE_SHA=$(git rev-parse "$base") bash "$work/step.sh" 2>&1)
   rc=$?
   set -e
-  if { [ "$4" = pass ] && [ "$rc" -eq 0 ]; } || { [ "$4" = fail ] && [ "$rc" -ne 0 ]; }; then
+  if { { [ "$4" = pass ] && [ "$rc" -eq 0 ]; } || { [ "$4" = fail ] && [ "$rc" -ne 0 ]; }; } &&
+    { [ -z "$want" ] || grep -qF -- "$want" <<<"$out"; }; then
     echo "ok    $case"
   else
-    echo "FAIL  $case: expected $4, exit $rc"
+    echo "FAIL  $case: expected $4${want:+ with \"$want\"}, exit $rc"
     sed 's/^/      /' <<<"$out"
     failures=1
   fi
@@ -78,5 +89,9 @@ check forward-unmerged pin-D '' fail
 check forward-unmerged-held pin-D "$held" pass
 check unmerged-off-the-base pin-E '' fail
 check unmerged-off-the-base-held pin-E "$held" pass
+check rolled-back-says-so pin-A '' fail base "does NOT descend"
+check base-pin-missing pin-C '' fail base-missing "could not compare"
+check base-pin-missing-is-not-a-rollback pin-C '' fail base-missing "not known to be a rollback"
+check base-pin-missing-held pin-C "$held" pass base-missing
 
 exit "$failures"
