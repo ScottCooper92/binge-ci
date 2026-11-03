@@ -103,6 +103,55 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    // detekt prints the count and passes; the gate has to read that line, so a detekt that rewords it fails here
+    // rather than silently turning the ratchet off in every consumer.
+    @Test
+    fun `detekt gate reports the compiler errors detekt prints, and holds them to allowedCompilerErrors`() {
+        build(compilerErrorBuild(""))
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        // Outside the compiler's source set, so only detekt reads it: the build compiles, and detekt cannot resolve the symbol.
+        write("detekt-src/Unresolved.kt", "val value = unresolvedSymbol()\n")
+
+        val reported = runner("detekt", withKotlin = true).build().output
+
+        val printed = Regex("""There (?:was|were) (\d+) compiler errors? found during analysis""").find(reported)
+        assertTrue(printed != null, "detekt no longer prints its compiler-error line:\n$reported")
+        val count = printed!!.groupValues[1].toInt()
+        assertTrue(count > 0, reported)
+        assertTrue(reported.contains("reported $count compiler error(s)"), reported)
+        assertTrue(reported.contains("allowedCompilerErrors = $count"), reported)
+
+        build(compilerErrorBuild("allowedCompilerErrors.set($count)"))
+        val held = runner("detekt", withKotlin = true).build().output
+        assertFalse(held.contains("reported $count compiler error(s)"), held)
+
+        build(compilerErrorBuild("allowedCompilerErrors.set(${count - 1})"))
+        val failing = runner("detekt", withKotlin = true).buildAndFail().output
+        assertTrue(failing.contains("reported $count compiler error(s) but detektGate.allowedCompilerErrors is ${count - 1}"), failing)
+
+        build(compilerErrorBuild("allowedCompilerErrors.set(${count + 3})"))
+        val lowering = runner("detekt", withKotlin = true).build().output
+        assertTrue(lowering.contains("Lower detektGate.allowedCompilerErrors to $count"), lowering)
+
+        // Fixed: detekt prints nothing at zero, and the limit still set has to ask to be lowered to 0.
+        write("detekt-src/Unresolved.kt", "const val VALUE = 1\n")
+        val fixed = runner("detekt", withKotlin = true).build().output
+        assertTrue(fixed.contains("Lower detektGate.allowedCompilerErrors to 0"), fixed)
+    }
+
+    private fun compilerErrorBuild(setting: String) =
+        """
+        plugins {
+            id("org.jetbrains.kotlin.jvm")
+            id("binge.gates.detekt")
+        }
+        $REPOSITORIES
+        detektGate {
+            sourceDirectory.set("detekt-src")
+            $setting
+        }
+        """.trimIndent()
+
     // Without the compilation nothing is wired and the detekt task runs with an empty classpath: green, and the !! ban never fires.
     @Test
     fun `detekt gate fails loudly when the requested compilation does not exist, and names the ones that do`() {

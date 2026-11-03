@@ -48,6 +48,14 @@ abstract class DetektGateExtension {
      * without type resolution and stay green.
      */
     abstract val typeResolutionCompilation: Property<String>
+
+    /**
+     * How many "compiler errors found during analysis" detekt may report in this project. Unset means report only: a
+     * warning naming the count. Once set, a higher count fails the detekt task and a lower one says to lower it, so the
+     * number can only go down. A compiler error is a symbol detekt could not resolve, and the type-resolved rules (the
+     * `!!` ban) are blind to the code that depends on it.
+     */
+    abstract val allowedCompilerErrors: Property<Int>
 }
 
 /**
@@ -115,6 +123,7 @@ class DetektGatePlugin : Plugin<Project> {
         project.afterEvaluate {
             KotlinTypeResolution.wire(project, gate.typeResolutionCompilation.orNull)
         }
+        CompilerErrorRatchet.wire(project, gate.allowedCompilerErrors)
     }
 }
 
