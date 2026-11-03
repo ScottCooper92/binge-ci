@@ -18,6 +18,8 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the token check | `tools/test-token-permissions.sh` - `check-token-permissions.sh` against fixture workflows: a granted mint passes; an ungranted permission, an unrecorded app, and a step that a `- uses:` line opens or a `with:` comes before, each fail with the line that names it |
 | Test the merge guards | `tools/test-merge-guards.sh` - `merge-guards.sh buildable` against fixed path lists in Binge's regex: which paths CI would build, both sides of a rename, anchored directories, and `method` |
 | Test the governed-paths script | `tools/test-governed-paths.sh` - `restore-agent-governed-paths.sh` against scratch repositories: what it restores, merges, discards and keeps, the markers each case leaves, and the paths its prompt note names |
+| Test the submodule-pin check | `tools/test-submodule-pins.sh` - the pin check's step in `submodule-pins.yml` against scratch repositories, one case per outcome: unchanged, same pin, forward and merged, rolled back, forward and unmerged, off the base, and a base pin missing upstream, and the failing ones again with the hold label |
+| Test the fork-review workflow | `tools/test-fork-review.sh` - the tripwires `fork-review.yml`'s safety rests on (no checkout and no `pull_request_target`, no `${{ }}` inside a `run:` block, no skip-permissions flag, no shell or write tool for the agent, each job holding only the permissions and secret it was given) and its shared `collect_pr` function, whose two copies must be identical |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
 
@@ -51,6 +53,8 @@ to improvise.
 | `test-token-permissions.sh`: a case FAILs | `check-token-permissions.sh` no longer reads a step's app and permissions the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen the line it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
 | `test-governed-paths.sh`: a case FAILs | The governed-paths script no longer leaves the note, marker or file that case expects | Fix the script if this PR changed it. If the PR deliberately changed what a case expects, change that case and say so; never delete one or loosen what it asserts |
+| `test-submodule-pins.sh`: a case FAILs | The pin check no longer reaches the outcome that case expects for that pin | Fix the `run:` block in `submodule-pins.yml` if this PR changed it. A pin wrongly passed lets a consumer merge a submodule commit its upstream does not have. Never delete a case or loosen what it expects |
+| `test-fork-review.sh`: a `FAIL` line | `fork-review.yml` lost a property its safety rests on, or its two `collect_pr` copies differ | Restore the property in the workflow if this PR changed it, and keep the two copies identical. **Stop** if the only fix would add a checkout, `pull_request_target`, a skip-permissions flag, a shell or write tool for the agent, or a `${{ }}` inside a `run:` block: those are the properties the test exists to hold. Never delete a check or loosen what it expects |
 | `check-internal-refs.sh`: `self-references disagree` or `moving alias` | One reference was bumped, or points at `v1` | **Stop** unless this PR is the release bump itself. A pin is bumped in a release commit that does nothing else; a repair must not do it |
 | `gradle-plugins`: Kotlin compile error | The PR changed a gate's code, or a test, and it no longer compiles | Fix the code this PR changed. A gate's plugin id, extension or task name is its public signature, so do not rename one to make a call site compile |
 | `gradle-plugins`: `validatePlugins` failure | A task property is missing its input or output annotation, or a plugin's metadata is wrong | Add the annotation the message names (`@Input`, `@InputFiles` with a `@PathSensitive`, `@OutputFile`, `@Internal` for what is not an input), or fix the `gradlePlugin {}` entry. Never turn off `enableStricterValidation` or `failOnWarning` |
@@ -76,6 +80,8 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-token-permissions.sh
 ./tools/test-merge-guards.sh
 ./tools/test-governed-paths.sh
+./tools/test-submodule-pins.sh
+./tools/test-fork-review.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
 (cd gradle-plugins && ./gradlew test --tests '<the failing test class>')
@@ -94,6 +100,6 @@ Do not run the full gate. CI does that on push.
 
 ## When in doubt
 
-A workflow's signature is an interface four repositories build against. A red gate is not
+A workflow's signature is an interface six repositories build against. A red gate is not
 permission to redesign it. Leaving the working tree clean and saying why is a valid and
 preferred outcome; a wrong guess costs more than stopping.

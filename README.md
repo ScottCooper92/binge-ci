@@ -4,8 +4,10 @@ Shared CI and agent workflows for the Binge repositories.
 
 Five GitHub Actions workflows run a review bot and four author bots across
 [Binge](https://github.com/ScottCooper92), [binge-companions](https://github.com/ScottCooper92/binge-companions),
-[binge-seerr](https://github.com/ScottCooper92/binge-seerr) and
-[binge-design-system](https://github.com/ScottCooper92/binge-design-system). They live here
+[binge-seerr](https://github.com/ScottCooper92/binge-seerr),
+[binge-design-system](https://github.com/ScottCooper92/binge-design-system),
+[binge-archive](https://github.com/ScottCooper92/binge-archive) and
+[binge-jellyfin](https://github.com/ScottCooper92/binge-jellyfin). They live here
 once, and each repo calls them with a ~30-line caller.
 
 They used to be copied. That went the way copies go: by the time there were three, all
@@ -13,7 +15,7 @@ three were missing the same 23 fixes, and the original had grown 43% past the ve
 shared. The comments in these files record what each fix was for, which is most of why
 they are worth keeping in one place.
 
-> **Status: Binge, binge-seerr, binge-companions and binge-design-system call these.**
+> **Status: Binge, binge-seerr, binge-companions, binge-design-system, binge-archive and binge-jellyfin call these.**
 > What is not yet proven is every bot — see [MIGRATION.md](MIGRATION.md) for which have had a real run and which have only
 > ever been skipped by a guard.
 
@@ -168,7 +170,7 @@ at the same commit. Posting a completed check at the start clears the predecesso
 
 ## Defaults are public-safe
 
-Three of the four consumers are public, so the defaults are the strict setting and a caller
+Five of the six consumers are public, so the defaults are the strict setting and a caller
 opts *out*. A repo that forgets to configure something gets the safe behaviour.
 
 | Input | Default | Why |
@@ -188,9 +190,9 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 ## Layout
 
 ```
-.github/workflows/    The five reusable workflows, the shared CI ones
-                      (submodule-pins, consumer-check, device-smoke), fork-review, and this
-                      repo's own CI
+.github/workflows/    The five bot workflows, the shared CI ones (submodule-pins,
+                      consumer-check, device-smoke, actions-storage-sweep), fork-review,
+                      and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report
@@ -305,7 +307,8 @@ The tools are shellchecked too, and each fails on finding nothing to check rathe
 passing on an empty glob.
 
 The five bots run on this repository's own PRs too, through the `self-*.yml` callers in
-`.github/workflows/`. They pin the same release tag as the actions rather than `./`, so a PR
+`.github/workflows/`, and the weekly storage sweep has one of its own,
+`self-actions-storage-sweep.yml`. They pin the same release tag as the actions rather than `./`, so a PR
 here is reviewed by the reviewer the consumers run and never by the one it is changing, and
 a fix reaches this repo's own PRs the way it reaches everyone's — at the next release.
 `auto_merge` is off: everything here governs the agents, so merging stays a human's. The
@@ -353,7 +356,7 @@ tag that does not exist yet.
 One door closes on the release PR itself. A `pull_request` event runs the workflow file
 from the merge ref, so `self-review.yml` on that PR pins the tag the PR is about to create,
 and its `labeled` door dies as `startup_failure` until the tag exists. The `workflow_run`
-door still reviews it, from `main`'s copy at the previous tag. The other four self callers
+door still reviews it, from `main`'s copy at the previous tag. The other self callers
 take the default-branch or base copy and are unaffected.
 
 `tag-check.yml` enforces the part a PR cannot. On a `vX.Y.Z` push it requires that tag to

@@ -17,7 +17,10 @@ action (`tools/check-action-env.sh`); every self-reference pins one immutable ta
 by `tools/test-internal-refs.sh`); every app-token mint asks only for what its app's installation
 grants (`tools/check-token-permissions.sh`, tested by `tools/test-token-permissions.sh`); the merge
 guards tell the paths CI builds from the ones it ignores (`tools/test-merge-guards.sh`); the governed-paths script leaves the notes and markers it
-should, case by case (`tools/test-governed-paths.sh`); and `./gradlew build` in `gradle-plugins/`
+should, case by case (`tools/test-governed-paths.sh`); the pin check's step reaches the outcome each scratch-repository case expects
+(`tools/test-submodule-pins.sh`); `fork-review.yml` keeps the properties its safety rests on, namely no checkout, no `${{ }}` inside a `run:`
+block, the agent's allowlist and each job's permissions, and its two copies of `collect_pr` are identical (`tools/test-fork-review.sh`);
+and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
 
 Do not re-report anything in that set. Green is necessary and not sufficient: everything
@@ -63,7 +66,7 @@ finalised after; `mergeable` is null while GitHub computes it; `opened` fires be
 lands; a queued run's payload is a snapshot from before an earlier run acted. A step that
 reads the payload where it should read the API is a bug waiting for the second event.
 
-**Public-safe defaults.** Three of the four consumers are public. A default that would print
+**Public-safe defaults.** Five of the six consumers are public. A default that would print
 what an agent read and ran into a world-readable log, admit a commenter by anything other
 than author association, or run on a fork PR is a finding whatever the input is called.
 
