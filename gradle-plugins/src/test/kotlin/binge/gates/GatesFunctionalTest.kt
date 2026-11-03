@@ -103,6 +103,29 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    // Without the compilation nothing is wired and the detekt task runs with an empty classpath: green, and the !! ban never fires.
+    @Test
+    fun `detekt gate fails loudly when the requested compilation does not exist, and names the ones that do`() {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            detektGate { typeResolutionCompilation.set("paidDebug") }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        write("src/main/kotlin/sample/Length.kt", "package sample\n\nfun length(text: String?): Int = text!!.length\n")
+
+        val result = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(result.output.contains("no Kotlin compilation named 'paidDebug'"), result.output)
+        assertTrue(result.output.contains("'main'"), result.output)
+        assertTrue(result.output.contains("typeResolutionCompilation"), result.output)
+    }
+
     // The same proof on an Android library, where the gate resolves types against a variant's
     // compilation rather than `main`: AGP's compilations exist only after evaluation, and the
     // classpath comes from the variant's compile task. The SDK is the runner's own.
