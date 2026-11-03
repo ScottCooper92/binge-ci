@@ -1,7 +1,8 @@
-name: Consumer check (binge-seerr)
+name: Consumer check
 
-# Compiles binge-seerr against this PR's head. Informational: a workflow of its own, deliberately
-# not named `CI`, and not a required check. See consumer-check.yml in binge-ci for why.
+# Compiles binge-seerr, binge-archive and binge-jellyfin against this PR's head, one job each, side by side.
+# Informational: a workflow of its own, deliberately not named `CI`, and not a required check. See
+# consumer-check.yml in binge-ci for why.
 #
 # The caller owns the triggers, so the paths are the ones that can change what the consumer
 # compiles. Push to main is there for the Gradle cache, which setup-gradle saves only there.
@@ -42,4 +43,16 @@ jobs:
     uses: ScottCooper92/binge-ci/.github/workflows/consumer-check.yml@v1
     with:
       consumer: ScottCooper92/binge-seerr
+      tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
+
+  archive:
+    uses: ScottCooper92/binge-ci/.github/workflows/consumer-check.yml@v1
+    with:
+      consumer: ScottCooper92/binge-archive
+      tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
+
+  jellyfin:
+    uses: ScottCooper92/binge-ci/.github/workflows/consumer-check.yml@v1
+    with:
+      consumer: ScottCooper92/binge-jellyfin
       tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
