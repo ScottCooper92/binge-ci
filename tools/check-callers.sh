@@ -56,7 +56,7 @@ keys() { # $1=file  $2=start regex  $3=stop regex  $4=key indent  $5=key charcla
 perm_block() {
   awk -v want="$3" -v ind="$2" '
     function indent(l) { match(l, /^ */); return RLENGTH }
-    ind == 4 && /^  [A-Za-z_-]+:/ { job = $0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    ind == 4 && /^  [A-Za-z0-9_-]+:/ { job = $0; sub(/:.*/, "", job); gsub(/ /, "", job) }
     ind == 0 && /^permissions:/ { scalar($0); f = 1; next }
     ind == 4 && job == want && /^    permissions:/ { scalar($0); f = 1; next }
     f && /^ *$/ { next }
@@ -65,6 +65,11 @@ perm_block() {
     function scalar(l) {
       if (l ~ /write-all/) print "*:write"
       else if (l ~ /read-all/) print "*:read"
+      else if (l ~ /\{ *[a-z]/) {
+        sub(/^[^{]*\{/, "", l); sub(/\}.*/, "", l); gsub(/ /, "", l)
+        n = split(l, pairs, ",")
+        for (i = 1; i <= n; i++) if (pairs[i] ~ /^[a-z-]+:[a-z]+$/) print pairs[i]
+      }
     }
   ' "$1" | sort -u
 }
@@ -74,7 +79,7 @@ perm_block() {
 calling_job() {
   awk '
     /^jobs:/ {j=1; next}
-    j && /^  [A-Za-z_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    j && /^  [A-Za-z0-9_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
     j && /^    uses: *ScottCooper92\/binge-ci\// { print job; exit }
   ' "$1"
 }
@@ -83,7 +88,7 @@ calling_job() {
 # than adding to it, so one present with nothing in it (`permissions: {}`) grants nothing.
 job_has_permissions() { # $1=file $2=job
   awk -v want="$2" '
-    /^  [A-Za-z_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
+    /^  [A-Za-z0-9_-]+:/ { job=$0; sub(/:.*/, "", job); gsub(/ /, "", job) }
     job == want && /^    permissions:/ { found=1 }
     END { exit !found }
   ' "$1"

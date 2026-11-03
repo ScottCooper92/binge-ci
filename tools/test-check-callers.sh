@@ -12,8 +12,8 @@ failures=0
 
 # A tree holding the check, a reusable workflow declaring `actions: write`, and one caller whose
 # permissions-bearing lines are the argument.
-fixture() { # $1=name  $2=top-level lines  $3=the calling job's extra lines  $4=an extra job
-  local name=$1 top=$2 jobperms=$3 extra=${4:-}
+fixture() { # $1=name  $2=top-level lines  $3=the calling job's extra lines  $4=an extra job  $5=the calling job id
+  local name=$1 top=$2 jobperms=$3 extra=${4:-} job=${5:-smoke}
   mkdir -p "$work/$name/tools" "$work/$name/.github/workflows" "$work/$name/callers/c"
   cp "$root/tools/check-callers.sh" "$work/$name/tools/"
   cat > "$work/$name/.github/workflows/device-smoke.yml" <<'W'
@@ -40,7 +40,7 @@ W
     [ -z "$top" ] || printf '%s\n' "$top"
     printf '\njobs:\n'
     [ -z "$extra" ] || printf '%s\n' "$extra"
-    printf '  smoke:\n'
+    printf '  %s:\n' "$job"
     [ -z "$jobperms" ] || printf '%s\n' "$jobperms"
     printf '    uses: ScottCooper92/binge-ci/.github/workflows/device-smoke.yml@v1\n'
   } > "$work/$name/callers/c/device-smoke.yml"
@@ -89,5 +89,17 @@ expect other-job-grant fail "permissions the caller must declare: actions: write
 
 fixture other-job-ignored "$TOP_WRITE" "" "$OTHER_JOB"
 expect other-job-ignored pass
+
+fixture digit-job-narrows "$TOP_WRITE" "$JOB_READ" "" e2e
+expect digit-job-narrows fail "permissions the caller must declare: actions: write"
+
+fixture digit-job-grants "$TOP_READ" "$JOB_WRITE" "" smoke-34
+expect digit-job-grants pass
+
+fixture flow-job-grants "$TOP_READ" $'    permissions: { contents: read, actions: write }'
+expect flow-job-grants pass
+
+fixture flow-job-narrows "$TOP_WRITE" $'    permissions: { contents: read }'
+expect flow-job-narrows fail "permissions the caller must declare: actions: write"
 
 exit $failures
