@@ -189,12 +189,20 @@ class GatesFunctionalTest {
     fun `aggregate baseline staleness reads every project's findings against one root baseline`() {
         val module =
             """
+            import org.gradle.api.file.RegularFileProperty
+
             plugins {
                 id("org.jetbrains.kotlin.jvm")
                 id("binge.gates.baseline-staleness")
             }
             $REPOSITORIES
-            detektGate { baselineFile.set(layout.settingsDirectory.file("detekt-baseline.xml")) }
+            // Through the extension by name, not the type-safe `detektGate { }` accessor. Under Isolated Projects `first` and
+            // `second` configure in parallel, and `second` has twice failed to see a class the plugin registers: once
+            // `dev.detekt`, once the extension's type, which left `detektGate`'s lambda without `baselineFile`. This build does
+            // not need the accessor. See #182, which stays open until about 50 clean runs show whether this was the cause.
+            extensions.getByName("detektGate").withGroovyBuilder {
+                (getProperty("baselineFile") as RegularFileProperty).set(layout.settingsDirectory.file("detekt-baseline.xml"))
+            }
             """.trimIndent()
         build("plugins {\n    id(\"binge.gates.baseline-staleness-aggregate\")\n}\n", settings = "include(\"first\", \"second\", \"docs\")")
         // Under Isolated Projects, as a large consumer builds: the root must not reach into a subproject's model.
