@@ -17,7 +17,10 @@ action (`tools/check-action-env.sh`); every self-reference pins one immutable ta
 by `tools/test-internal-refs.sh`); every app-token mint asks only for what its app's installation
 grants (`tools/check-token-permissions.sh`, tested by `tools/test-token-permissions.sh`); the merge
 guards tell the paths CI builds from the ones it ignores (`tools/test-merge-guards.sh`); the governed-paths script leaves the notes and markers it
-should, case by case (`tools/test-governed-paths.sh`); and `./gradlew build` in `gradle-plugins/`
+should, case by case (`tools/test-governed-paths.sh`); the pin check's step reaches the outcome each scratch-repository case expects
+(`tools/test-submodule-pins.sh`); `fork-review.yml` keeps the properties its safety rests on, namely no checkout, no `${{ }}` inside a `run:`
+block, the agent's allowlist and each job's permissions, and its two copies of `collect_pr` are identical (`tools/test-fork-review.sh`);
+and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
 
 Do not re-report anything in that set. Green is necessary and not sufficient: everything

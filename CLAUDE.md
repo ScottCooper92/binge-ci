@@ -5,11 +5,12 @@ it as the source of truth; so should you.
 
 ## What this repository is
 
-The shared CI for Binge and its companions: eight reusable workflows, the composite actions
+The shared CI for Binge and its companions: ten reusable workflows, the composite actions
 they and the consumers need, the checks actionlint cannot do, and worked callers for the public
-consumers. Five of the workflows are the bots, a review bot and four author bots. The other three
-are shared steps a consumer would otherwise copy: the submodule-pin check, the consumer check and
-the emulator lane. Read `README.md` for the shape of it and
+consumers. Five of the workflows are the bots, a review bot and four author bots. Three more are
+shared steps a consumer would otherwise copy: the submodule-pin check, the consumer check and
+the emulator lane. The last two are the weekly storage sweep and `fork-review.yml`, an advisory,
+read-only review of a fork PR. Read `README.md` for the shape of it and
 `MIGRATION.md` for how the consumers got here.
 
 Most of it is shell and YAML, and it runs inside every repository that calls it. The one thing that builds is
@@ -65,7 +66,9 @@ and `tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing t
 fixtures, `tools/check-token-permissions.sh`, which holds each app-token mint to its app's grant
 (tested by `tools/test-token-permissions.sh`), `tools/test-merge-guards.sh`, which runs the
 merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh`, which runs the governed-paths script against scratch
-repositories, and `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way. It also runs `./gradlew build` in `gradle-plugins/`, which
+repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way, and
+`tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its
+shared `collect_pr` function against a stubbed `gh`. It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
 
@@ -96,8 +99,9 @@ repository already has.
 ## Agent workflows
 
 The five bots run on this repository's own PRs too, through the `self-*.yml` callers in
-`.github/workflows/`, pinned to the same release tag as the actions. A PR here is reviewed
-by the reviewer the consumers run, never by the one it is changing. They act only on PRs
+`.github/workflows/`, and the weekly storage sweep has its own, `self-actions-storage-sweep.yml`.
+All of them are pinned to the same release tag as the actions. A PR here is reviewed
+by the reviewer the consumers run, never by the one it is changing. The bots act only on PRs
 carrying the `agent` label, and `auto_merge` is off: everything here governs the agents, so
 a merge is a human's decision.
 
