@@ -75,7 +75,7 @@ a green build. `suppressedPaths` lists globs that are analysed so they resolve, 
 
 ```kotlin
 detektGate {
-    suppressedPaths = listOf("**/*PreviewData.kt") // wins over `excludes`; empty by default, which changes nothing
+    suppressedPaths = listOf("**/*PreviewData.kt") // the same glob in `excludes` is dropped; empty by default, which changes nothing
     suppressedRuleSets = listOf("binge", "Compose") // custom rule sets beyond detekt's own
 }
 ```
