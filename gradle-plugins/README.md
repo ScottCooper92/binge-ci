@@ -71,6 +71,26 @@ detektGate {
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
 
+### Preview data that stays analysed
+
+An excluded file is not analysed, and an `internal` declaration in it is invisible to detekt: the
+module's compiled classes are a binary dependency, and `internal` stops at the module boundary. Every
+reference to it counts as a compiler error, and the rules that need types go quiet for the caller with
+a green build. `suppressedPaths` lists globs that are analysed so they resolve, and never reported on:
+
+```kotlin
+detektGate {
+    suppressedPaths = listOf("**/*PreviewData.kt") // the same glob in `excludes` is dropped; empty by default, which changes nothing
+    suppressedRuleSets = listOf("binge", "Compose") // custom rule sets beyond detekt's own
+}
+```
+
+The gate writes a config layer with `excludes` on each built-in rule set and each one named in
+`suppressedRuleSets`, after the consumer's `detekt.yml`. A rule set not named there reports on the
+suppressed paths. detekt reads a later config file over an earlier one, so a rule set that already
+carries its own `excludes` in `detekt.yml` would have them replaced by the layer, and the files it left
+out would start reporting. The task fails and names the set instead; a rule's own `excludes` is fine.
+
 ### Baseline staleness
 
 detekt passes on a baseline entry that matches nothing. An orphaned entry reads as debt still owed,
