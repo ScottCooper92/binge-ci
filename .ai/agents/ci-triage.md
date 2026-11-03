@@ -16,6 +16,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the references check | `tools/test-internal-refs.sh` - `check-internal-refs.sh` against fixture trees: `./` fails in a `workflow_call` file and an action, and passes in a workflow that runs only here |
 | Check the token mints | `tools/check-token-permissions.sh` - every `permission-*` a `create-github-app-token` step asks for is one its app's installation grants, as recorded in the script |
 | Test the token check | `tools/test-token-permissions.sh` - `check-token-permissions.sh` against fixture workflows: a granted mint passes; an ungranted permission, an unrecorded app, and a step that a `- uses:` line opens or a `with:` comes before, each fail with the line that names it |
+| Test the caller check | `tools/test-check-callers.sh` - `check-callers.sh` against fixture callers: a grant at the top level or on the calling job passes; a job block that narrows or omits what the workflow declares, an empty block, and a grant on some other job each fail with the permission named |
 | Test the merge guards | `tools/test-merge-guards.sh` - `merge-guards.sh buildable` against fixed path lists in Binge's regex: which paths CI would build, both sides of a rename, anchored directories, and `method` |
 | Test the governed-paths script | `tools/test-governed-paths.sh` - `restore-agent-governed-paths.sh` against scratch repositories: what it restores, merges, discards and keeps, the markers each case leaves, and the paths its prompt note names |
 | Test the submodule-pin check | `tools/test-submodule-pins.sh` - the pin check's step in `submodule-pins.yml` against scratch repositories, one case per outcome: unchanged, same pin, forward and merged, rolled back, forward and unmerged, off the base, and a base pin missing upstream, and the failing ones again with the hold label |
@@ -51,6 +52,7 @@ to improvise.
 | `check-token-permissions.sh`: `is not granted to the … installation` | A mint asks for a permission its app does not have, so it would fail at run time and the job would die before its agent ran | Drop that `permission-*` input, or ask for one the app has. Never add a permission to the script's grant to make it pass: it records the installation's settings, and only a human changing those moves it |
 | `check-token-permissions.sh`: `has no grant recorded` | A mint narrows its token for an app the script does not know | **Stop.** Recording an app's grant is a human's call, made from that installation's settings |
 | `test-token-permissions.sh`: a case FAILs | `check-token-permissions.sh` no longer reads a step's app and permissions the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen the line it expects |
+| `test-check-callers.sh`: a case FAILs | `check-callers.sh` no longer reads a caller's permissions grant the way that case expects | Fix `check-callers.sh` if this PR changed it. Never delete a case or loosen the text it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
 | `test-governed-paths.sh`: a case FAILs | The governed-paths script no longer leaves the note, marker or file that case expects | Fix the script if this PR changed it. If the PR deliberately changed what a case expects, change that case and say so; never delete one or loosen what it asserts |
 | `test-submodule-pins.sh`: a case FAILs | The pin check no longer reaches the outcome that case expects for that pin | Fix the `run:` block in `submodule-pins.yml` if this PR changed it. A pin wrongly passed lets a consumer merge a submodule commit its upstream does not have. Never delete a case or loosen what it expects |
@@ -78,6 +80,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-internal-refs.sh
 ./tools/check-token-permissions.sh
 ./tools/test-token-permissions.sh
+./tools/test-check-callers.sh
 ./tools/test-merge-guards.sh
 ./tools/test-governed-paths.sh
 ./tools/test-submodule-pins.sh

@@ -75,6 +75,9 @@ jobs:
       - name: Test the token check against its fixtures
         run: ./tools/test-token-permissions.sh
 
+      - name: Test the caller check against its fixtures
+        run: ./tools/test-check-callers.sh
+
       # `buildable` decides whether bot-review may treat a PR as one CI never builds, and with
       # merge_unbuilt on, merge it with no build behind it.
       - name: Test the merge guards against their fixtures
