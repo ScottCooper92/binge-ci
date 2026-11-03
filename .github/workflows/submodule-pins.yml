@@ -62,7 +62,8 @@ jobs:
           held=$(gh pr view "$PR_NUMBER" --json labels | jq --arg l "$HOLD_LABEL" 'any(.labels[]; .name == $l)')
           unmerged_file=$(mktemp)
           rolled_back_file=$(mktemp)
-          export unmerged_file rolled_back_file
+          uncompared_file=$(mktemp)
+          export unmerged_file rolled_back_file uncompared_file
           # The checkout holds only the merge commit. The base's pins are read from the base commit
           # the merge was made against, which the payload names.
           git fetch --quiet --no-tags --no-recurse-submodules --depth=1 origin "$BASE_SHA"
@@ -85,11 +86,19 @@ jobs:
               # Either pin can sit off the default branch (a held pin), so fetch both with their
               # history rather than trust what the default branch fetch brought.
               git fetch --quiet --depth=2147483647 origin "$base_pin" "$sha1" || true
-              if git merge-base --is-ancestor "$base_pin" "$sha1" 2>/dev/null; then
+              # 1 is "not an ancestor", the rollback. Anything else (128, a missing object) means the
+              # comparison could not be made, and calling that a rollback sends a maintainer looking
+              # for one that is not there.
+              status=0
+              git merge-base --is-ancestor "$base_pin" "$sha1" 2>/dev/null || status=$?
+              if [ "$status" -eq 0 ]; then
                 echo "$name: $sha1 descends from the base pin $base_pin"
-              else
+              elif [ "$status" -eq 1 ]; then
                 echo "$name: $sha1 does NOT descend from the base pin $base_pin" >&2
                 echo "$name" >> "$rolled_back_file"
+              else
+                echo "$name: could not compare $sha1 with the base pin $base_pin (git exited $status): the fetch failed or the base pin is gone upstream" >&2
+                echo "$name" >> "$uncompared_file"
               fi
             fi
           '
@@ -107,6 +116,14 @@ jobs:
             echo "::warning::Submodule pin(s) that do not descend from the base branch's pin: $rolled_back"
             if [ "$held" != "true" ]; then
               echo "::error::Submodule pin(s) rolled back from the base branch's pin without the '$HOLD_LABEL' label: $rolled_back"
+              failed=true
+            fi
+          fi
+          if [ -s "$uncompared_file" ]; then
+            uncompared=$(paste -sd, "$uncompared_file")
+            echo "::warning::Submodule pin(s) that could not be compared with the base branch's pin, so a rollback cannot be ruled out: $uncompared"
+            if [ "$held" != "true" ]; then
+              echo "::error::Could not compare submodule pin(s) with the base branch's pin (the fetch failed or the base pin is gone upstream; this is not known to be a rollback), without the '$HOLD_LABEL' label: $uncompared"
               failed=true
             fi
           fi

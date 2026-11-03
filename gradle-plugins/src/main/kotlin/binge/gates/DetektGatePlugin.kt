@@ -43,7 +43,9 @@ abstract class DetektGateExtension {
 
     /**
      * The Kotlin compilation whose classpath detekt resolves types against. Defaults to `main` on a
-     * JVM project and `debug` on an Android one.
+     * JVM project and `debug` on an Android one. A name that matches no compilation, as a flavoured Android module has
+     * with `debug`, fails every detekt task and lists the compilations that exist, since the task would otherwise run
+     * without type resolution and stay green.
      */
     abstract val typeResolutionCompilation: Property<String>
 
