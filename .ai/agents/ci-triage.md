@@ -21,7 +21,8 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the governed-paths script | `tools/test-governed-paths.sh` - `restore-agent-governed-paths.sh` against scratch repositories: what it restores, merges, discards and keeps, the markers each case leaves, and the paths its prompt note names |
 | Test the submodule-pin check | `tools/test-submodule-pins.sh` - the pin check's step in `submodule-pins.yml` against scratch repositories, one case per outcome: unchanged, same pin, forward and merged, rolled back, forward and unmerged, off the base, and a base pin missing upstream, and the failing ones again with the hold label |
 | Test the fork-review workflow | `tools/test-fork-review.sh` - the tripwires `fork-review.yml`'s safety rests on (no checkout and no `pull_request_target`, no `${{ }}` inside a `run:` block, no skip-permissions flag, no shell or write tool for the agent, each job holding only the permissions and secret it was given) and its shared `collect_pr` function, whose two copies must be identical |
-| shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`) and `tools/*.sh` |
+| Test the actionlint download | `tools/test-download-actionlint.sh` - `download-actionlint.sh` against a stubbed `gh`: a good tarball, a checksum mismatch (one re-fetch, then failure), an HTML error page, and a transfer that keeps failing |
+| shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
 
 The second, `gradle-plugins`, is the one thing that builds. It runs `./gradlew build` in
@@ -85,6 +86,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-governed-paths.sh
 ./tools/test-submodule-pins.sh
 ./tools/test-fork-review.sh
+./tools/test-download-actionlint.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
 (cd gradle-plugins && ./gradlew test --tests '<the failing test class>')

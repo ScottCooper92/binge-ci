@@ -98,6 +98,11 @@ jobs:
       - name: Test the fork-review workflow's safety properties and its shared function
         run: ./tools/test-fork-review.sh
 
+      # The actionlint action's download is the one step every consumer runs against the network, so
+      # its outcomes are tested against a stubbed `gh`: a mismatch, an error page, a failing transfer.
+      - name: Test the actionlint download-and-verify script
+        run: ./tools/test-download-actionlint.sh
+
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.
       - name: shellcheck the action scripts and the tools
