@@ -4,7 +4,7 @@ description: >
   shellchecks every `run:` block in them.
 
 # One version and one checksum, here, rather than one per repository drifting apart. The release
-# is downloaded and verified against its published SHA-256 before it runs.
+# is downloaded with the job's token and verified against its published SHA-256 before it runs.
 #
 # Run it after actions/checkout: it lints the workspace, which is the caller's. With no `args`
 # actionlint finds `.github/workflows/` itself.
@@ -26,6 +26,13 @@ inputs:
     required: false
     default: ''
 
+  token:
+    description: >
+      Token for downloading the actionlint release. Authenticated downloads are not shed when
+      GitHub limits anonymous traffic. Callers need not set it.
+    required: false
+    default: ${{ github.token }}
+
 runs:
   using: composite
   steps:
@@ -44,25 +51,12 @@ runs:
         VERSION: 1.7.12
         SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         ARGS: ${{ inputs.args }}
+        ACTION_PATH: ${{ github.action_path }}
+        GH_TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
         dir=$(mktemp -d)
-        url="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
-        # A truncated download has passed curl and failed the checksum, so the check gets one
-        # fresh download before it fails the job. A second mismatch is a real one.
-        fetch() {
-          curl -fsSL --retry 3 --retry-all-errors -o "$dir/actionlint.tar.gz" "$url"
-        }
-        verify() {
-          echo "${SHA256}  $dir/actionlint.tar.gz" | sha256sum -c -
-        }
-        fetch
-        if ! verify; then
-          echo "::warning::actionlint checksum mismatch, downloading once more"
-          fetch
-          verify
-        fi
-        tar xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
+        "$ACTION_PATH/download-actionlint.sh" "$dir"
         extra=()
         # Word-splitting and pathname expansion are both wanted: the arguments are paths and globs.
         for arg in $ARGS; do extra+=("$arg"); done
