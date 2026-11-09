@@ -369,3 +369,7 @@ bump merging and the tag being cut. That red is the report, not a fault, and it 
 moment the tag is pushed. It detects rather than prevents: by the time a tag push fails
 there, `v1` has moved and consumers are already broken, so it turns a silent breakage into a
 loud one rather than stopping it.
+
+## Licence
+
+Apache License 2.0. See `LICENSE`.
