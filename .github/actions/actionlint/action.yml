@@ -47,9 +47,21 @@ runs:
       run: |
         set -euo pipefail
         dir=$(mktemp -d)
-        curl -sSLo "$dir/actionlint.tar.gz" \
-          "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
-        echo "${SHA256}  $dir/actionlint.tar.gz" | sha256sum -c -
+        url="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+        # A truncated download has passed curl and failed the checksum, so the check gets one
+        # fresh download before it fails the job. A second mismatch is a real one.
+        fetch() {
+          curl -fsSL --retry 3 --retry-all-errors -o "$dir/actionlint.tar.gz" "$url"
+        }
+        verify() {
+          echo "${SHA256}  $dir/actionlint.tar.gz" | sha256sum -c -
+        }
+        fetch
+        if ! verify; then
+          echo "::warning::actionlint checksum mismatch, downloading once more"
+          fetch
+          verify
+        fi
         tar xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
         extra=()
         # Word-splitting and pathname expansion are both wanted: the arguments are paths and globs.
