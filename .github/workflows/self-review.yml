@@ -75,7 +75,7 @@ jobs:
         tools/test-internal-refs.sh, tools/check-token-permissions.sh,
         tools/test-token-permissions.sh, tools/test-check-callers.sh, tools/test-merge-guards.sh,
         tools/test-governed-paths.sh, tools/test-submodule-pins.sh, tools/test-fork-review.sh,
-        or the gradle-plugins
+        tools/test-download-actionlint.sh, or the gradle-plugins
         build and its tests
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}

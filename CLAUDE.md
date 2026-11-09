@@ -66,9 +66,10 @@ and `tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing t
 fixtures, `tools/check-token-permissions.sh`, which holds each app-token mint to its app's grant
 (tested by `tools/test-token-permissions.sh`), `tools/test-check-callers.sh`, which runs the caller check against fixture callers for each shape of `permissions:` grant, `tools/test-merge-guards.sh`, which runs the
 merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh`, which runs the governed-paths script against scratch
-repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way, and
+repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way,
 `tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its
-shared `collect_pr` function against a stubbed `gh`. It also runs `./gradlew build` in `gradle-plugins/`, which
+shared `collect_pr` function against a stubbed `gh`, and `tools/test-download-actionlint.sh`, which runs the actionlint
+action's download-and-verify script against a stubbed `gh`. It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
 
