@@ -134,12 +134,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # JDK 17 because the consumers build on it, and the plugins run inside their builds.
-      - name: Set up JDK 17
+      # JDK 21, the one the consumers build on; the plugins run inside their builds. The bytecode
+      # target stays 17, set by the plugins' own build.
+      - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       # Also validates the wrapper jar's checksum, which matters for a jar copied in by hand.
       - name: Set up Gradle

@@ -53,10 +53,10 @@ jobs:
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
-      # A JDK for gradle-plugins, the one thing here that builds, as self-ci-fix.yml has. 17, as
+      # A JDK for gradle-plugins, the one thing here that builds, as self-ci-fix.yml has. 21, as
       # ci.yml's job uses. Without it a comment asking for a change to a gate gets an untested reply.
       toolchain: jvm
-      java_version: '17'
+      java_version: '21'
       verify_guidance: >
         Verify what you change with the tools ci.yml runs, scoped to what you touched:
         `shellcheck --severity=warning` on a changed script or `run:` block, and
