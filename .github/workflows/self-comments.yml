@@ -65,7 +65,9 @@ jobs:
         `./tools/test-internal-refs.sh`, `./tools/check-token-permissions.sh`,
         `./tools/test-token-permissions.sh`, `./tools/test-check-callers.sh`,
         `./tools/test-merge-guards.sh`, `./tools/test-governed-paths.sh`,
-        `./tools/test-submodule-pins.sh` or `./tools/test-fork-review.sh` for the invariant
+        `./tools/test-submodule-pins.sh`, `./tools/test-fork-review.sh`,
+        `./tools/test-download-actionlint.sh`, `./tools/check-gate-lists.sh` or
+        `./tools/test-check-gate-lists.sh` for the invariant
         you touched. actionlint is not preinstalled; fetch it the way
         .github/actions/actionlint/action.yml does if a workflow file changed. For a change
         under gradle-plugins/, run the affected test class or `./gradlew build` from

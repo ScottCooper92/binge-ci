@@ -22,6 +22,8 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the submodule-pin check | `tools/test-submodule-pins.sh` - the pin check's step in `submodule-pins.yml` against scratch repositories, one case per outcome: unchanged, same pin, forward and merged, rolled back, forward and unmerged, off the base, and a base pin missing upstream, and the failing ones again with the hold label |
 | Test the fork-review workflow | `tools/test-fork-review.sh` - the tripwires `fork-review.yml`'s safety rests on (no checkout and no `pull_request_target`, no `${{ }}` inside a `run:` block, no skip-permissions flag, no shell or write tool for the agent, each job holding only the permissions and secret it was given) and its shared `collect_pr` function, whose two copies must be identical |
 | Test the actionlint download | `tools/test-download-actionlint.sh` - `download-actionlint.sh` against a stubbed `gh`: a good tarball, a checksum mismatch (one re-fetch, then failure), an HTML error page, and a transfer that keeps failing |
+| Check the gate lists | `tools/check-gate-lists.sh` - every list of gate tests (CLAUDE.md, the review guide, this file's three parts, the PR template, `gated_checks` and `verify_guidance`) names each `tools/test-*.sh` and `tools/check-*.sh` that `ci.yml` runs |
+| Test the gate-lists check | `tools/test-check-gate-lists.sh` - `check-gate-lists.sh` against fixture trees: a complete set passes, a script missing from each list fails naming that list, and a longer name does not stand in for a shorter one |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
 
@@ -54,6 +56,10 @@ to improvise.
 | `check-token-permissions.sh`: `has no grant recorded` | A mint narrows its token for an app the script does not know | **Stop.** Recording an app's grant is a human's call, made from that installation's settings |
 | `test-token-permissions.sh`: a case FAILs | `check-token-permissions.sh` no longer reads a step's app and permissions the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen the line it expects |
 | `test-check-callers.sh`: a case FAILs | `check-callers.sh` no longer reads a caller's permissions grant the way that case expects | Fix `check-callers.sh` if this PR changed it. Never delete a case or loosen the text it expects |
+| `test-internal-refs.sh`: a case FAILs | `check-internal-refs.sh` no longer treats a fixture tree the way that case expects | Fix `check-internal-refs.sh` if this PR changed it. Never delete a case or loosen what it expects |
+| `test-download-actionlint.sh`: a case FAILs | `download-actionlint.sh` no longer reaches the outcome that case expects against the stubbed `gh` | Fix the script if this PR changed it. A bad tarball wrongly accepted puts an unverified binary in every consumer's CI. Never delete a case or loosen what it expects |
+| `check-gate-lists.sh`: `does not name tools/X.sh` | A list of gate tests was not updated when `ci.yml` gained or renamed a script | Add `X.sh` to the list the line names, in that list's own style. Never remove the script from `ci.yml`, or the check, to make it pass |
+| `test-check-gate-lists.sh`: a case FAILs | `check-gate-lists.sh` no longer reads the lists the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen what it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
 | `test-governed-paths.sh`: a case FAILs | The governed-paths script no longer leaves the note, marker or file that case expects | Fix the script if this PR changed it. If the PR deliberately changed what a case expects, change that case and say so; never delete one or loosen what it asserts |
 | `test-submodule-pins.sh`: a case FAILs | The pin check no longer reaches the outcome that case expects for that pin | Fix the `run:` block in `submodule-pins.yml` if this PR changed it. A pin wrongly passed lets a consumer merge a submodule commit its upstream does not have. Never delete a case or loosen what it expects |
@@ -87,6 +93,8 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-submodule-pins.sh
 ./tools/test-fork-review.sh
 ./tools/test-download-actionlint.sh
+./tools/check-gate-lists.sh
+./tools/test-check-gate-lists.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
 ./actionlint -shellcheck 'shellcheck --severity=warning' callers/*/*.yml
 (cd gradle-plugins && ./gradlew test --tests '<the failing test class>')
