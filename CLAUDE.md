@@ -5,12 +5,12 @@ it as the source of truth; so should you.
 
 ## What this repository is
 
-The shared CI for Binge and its companions: ten reusable workflows, the composite actions
+The shared CI for Binge and its companions: eleven reusable workflows, the composite actions
 they and the consumers need, the checks actionlint cannot do, and worked callers for the public
 consumers. Five of the workflows are the bots, a review bot and four author bots. Three more are
 shared steps a consumer would otherwise copy: the submodule-pin check, the consumer check and
-the emulator lane. The last two are the weekly storage sweep and `fork-review.yml`, an advisory,
-read-only review of a fork PR. Read `README.md` for the shape of it and
+the emulator lane. Then the weekly storage sweep, `fork-review.yml`, an advisory,
+read-only review of a fork PR, and `upstream-watch.yml`, which opens an issue when a server the apps use ships a release. Read `README.md` for the shape of it and
 `MIGRATION.md` for how the consumers got here.
 
 Most of it is shell and YAML, and it runs inside every repository that calls it. The one thing that builds is
@@ -69,7 +69,8 @@ merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh
 repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way,
 `tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its
 shared `collect_pr` function against a stubbed `gh`, and `tools/test-download-actionlint.sh`, which runs the actionlint
-action's download-and-verify script against a stubbed `gh`, and `tools/check-gate-lists.sh`, which fails when a list of these
+action's download-and-verify script against a stubbed `gh`, `tools/test-upstream-watch.sh`, which runs the upstream-watch
+script against a stubbed `gh`, and `tools/check-gate-lists.sh`, which fails when a list of these
 gates here does not name one `ci.yml` runs (tested by `tools/test-check-gate-lists.sh`). It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.

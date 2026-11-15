@@ -103,6 +103,11 @@ jobs:
       - name: Test the actionlint download-and-verify script
         run: ./tools/test-download-actionlint.sh
 
+      # upstream-watch opens issues in every consumer on a schedule, so what it does with a tag it
+      # cannot parse, a duplicate and a missing state entry is tested against a stubbed `gh`.
+      - name: Test the upstream-watch script against a stubbed gh
+        run: ./tools/test-upstream-watch.sh
+
       # Each gate test is named by hand in the lists the bots read, and a list that falls behind
       # leaves a bot with guidance CI never complains about.
       - name: Check that every list of gate tests names each one this workflow runs

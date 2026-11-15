@@ -1,0 +1,58 @@
+name: Upstream watch
+description: >
+  Opens one issue per new stable upstream release, comparing each upstream's newest release with
+  the version a state file in the calling repository says was last checked.
+
+# An action for the same reason as merge-guards: a reusable workflow runs against the CALLER's
+# checkout, and a composite action is the only way to hand it a script that travels with it. The
+# caller must have checked out its own repository first, so the state file is in the workspace.
+#
+# The token needs `issues: write`. It reads public releases and opens issues in the calling
+# repository; it never writes the state file, which is the person's record of what they reviewed.
+
+inputs:
+  upstreams:
+    description: 'JSON array of {"name": "<slug>", "repo": "<owner>/<repo>"}.'
+    required: true
+  state_file:
+    description: Path, in the workspace, of the JSON file recording the version last checked per upstream.
+    required: false
+    default: docs/upstream.json
+  label:
+    description: Label put on each issue. Created when the repository lacks it.
+    required: false
+    default: upstream
+  dry_run:
+    description: Report what would be opened and open nothing.
+    required: false
+    default: 'false'
+  token:
+    description: Token that opens the issues. Callers need not set it.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  opened:
+    description: JSON array of `name@version` for each issue opened (or, in a dry run, that would be).
+    value: ${{ steps.watch.outputs.opened }}
+  newest:
+    description: JSON object of upstream name to its newest stable version.
+    value: ${{ steps.watch.outputs.newest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the upstreams
+      id: watch
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        UPSTREAMS: ${{ inputs.upstreams }}
+        STATE_FILE: ${{ inputs.state_file }}
+        LABEL: ${{ inputs.label }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        bash "${ACTION_PATH}/upstream-watch.sh"

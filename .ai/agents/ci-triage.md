@@ -22,9 +22,10 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the submodule-pin check | `tools/test-submodule-pins.sh` - the pin check's step in `submodule-pins.yml` against scratch repositories, one case per outcome: unchanged, same pin, forward and merged, rolled back, forward and unmerged, off the base, and a base pin missing upstream, and the failing ones again with the hold label |
 | Test the fork-review workflow | `tools/test-fork-review.sh` - the tripwires `fork-review.yml`'s safety rests on (no checkout and no `pull_request_target`, no `${{ }}` inside a `run:` block, no skip-permissions flag, no shell or write tool for the agent, each job holding only the permissions and secret it was given) and its shared `collect_pr` function, whose two copies must be identical |
 | Test the actionlint download | `tools/test-download-actionlint.sh` - `download-actionlint.sh` against a stubbed `gh`: a good tarball, a checksum mismatch (one re-fetch, then failure), an HTML error page, and a transfer that keeps failing |
+| Test the upstream-watch script | `tools/test-upstream-watch.sh` - `upstream-watch.sh` against a stubbed `gh`: a newer stable release, an equal or older one, drafts and prereleases, a tag that is not `vMAJOR.MINOR.PATCH`, a missing state entry, a duplicate by title or marker, a dry run, and version order by number rather than text |
 | Check the gate lists | `tools/check-gate-lists.sh` - every list of gate tests (CLAUDE.md, the review guide, this file's three parts, the PR template, `gated_checks` and `verify_guidance`) names each `tools/test-*.sh` and `tools/check-*.sh` that `ci.yml` runs |
 | Test the gate-lists check | `tools/test-check-gate-lists.sh` - `check-gate-lists.sh` against fixture trees: a complete set passes, a script missing from each list fails naming that list, and a longer name does not stand in for a shorter one |
-| shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`) and `tools/*.sh` |
+| shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`, `upstream-watch.sh`) and `tools/*.sh` |
 | Workflows and callers are .yml | `find .github callers -name '*.yaml'` - every check here globs `.yml` only, so a `.yaml` file would be seen by none of them |
 
 The second, `gradle-plugins`, is the one thing that builds. It runs `./gradlew build` in
@@ -58,6 +59,7 @@ to improvise.
 | `test-check-callers.sh`: a case FAILs | `check-callers.sh` no longer reads a caller's permissions grant the way that case expects | Fix `check-callers.sh` if this PR changed it. Never delete a case or loosen the text it expects |
 | `test-internal-refs.sh`: a case FAILs | `check-internal-refs.sh` no longer treats a fixture tree the way that case expects | Fix `check-internal-refs.sh` if this PR changed it. Never delete a case or loosen what it expects |
 | `test-download-actionlint.sh`: a case FAILs | `download-actionlint.sh` no longer reaches the outcome that case expects against the stubbed `gh` | Fix the script if this PR changed it. A bad tarball wrongly accepted puts an unverified binary in every consumer's CI. Never delete a case or loosen what it expects |
+| `test-upstream-watch.sh`: a case FAILs | `upstream-watch.sh` no longer reaches the outcome that case expects against the stubbed `gh` | Fix the script if this PR changed it. A tag it skips instead of failing hides a release in every consumer. Never delete a case or loosen what it expects |
 | `check-gate-lists.sh`: `does not name tools/X.sh` | A list of gate tests was not updated when `ci.yml` gained or renamed a script | Add `X.sh` to the list the line names, in that list's own style. Never remove the script from `ci.yml`, or the check, to make it pass |
 | `test-check-gate-lists.sh`: a case FAILs | `check-gate-lists.sh` no longer reads the lists the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen what it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
@@ -93,6 +95,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-submodule-pins.sh
 ./tools/test-fork-review.sh
 ./tools/test-download-actionlint.sh
+./tools/test-upstream-watch.sh
 ./tools/check-gate-lists.sh
 ./tools/test-check-gate-lists.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
