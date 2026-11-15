@@ -103,6 +103,14 @@ jobs:
       - name: Test the actionlint download-and-verify script
         run: ./tools/test-download-actionlint.sh
 
+      # Each gate test is named by hand in the lists the bots read, and a list that falls behind
+      # leaves a bot with guidance CI never complains about.
+      - name: Check that every list of gate tests names each one this workflow runs
+        run: ./tools/check-gate-lists.sh
+
+      - name: Test the gate-lists check against its fixtures
+        run: ./tools/test-check-gate-lists.sh
+
       # Plain files, so no `run:` block carries them into the checks above. The tools are
       # the checks themselves: one of them passing silently is a gate that is not there.
       - name: shellcheck the action scripts and the tools

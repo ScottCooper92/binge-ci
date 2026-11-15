@@ -69,7 +69,8 @@ merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh
 repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way,
 `tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its
 shared `collect_pr` function against a stubbed `gh`, and `tools/test-download-actionlint.sh`, which runs the actionlint
-action's download-and-verify script against a stubbed `gh`. It also runs `./gradlew build` in `gradle-plugins/`, which
+action's download-and-verify script against a stubbed `gh`, and `tools/check-gate-lists.sh`, which fails when a list of these
+gates here does not name one `ci.yml` runs (tested by `tools/test-check-gate-lists.sh`). It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
 
