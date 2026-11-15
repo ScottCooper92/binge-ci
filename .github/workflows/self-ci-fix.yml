@@ -29,10 +29,10 @@ jobs:
     uses: ScottCooper92/binge-ci/.github/workflows/author-ci-fix.yml@v1.0.41
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
-      # A JDK for the gradle-plugins job, the one thing here that builds. 17, as ci.yml's job uses,
+      # A JDK for the gradle-plugins job, the one thing here that builds. 21, as ci.yml's job uses,
       # because the gates run inside consumer builds on it. Without it the bot cannot verify a fix there.
       toolchain: jvm
-      java_version: '17'
+      java_version: '21'
       # The name ci.yml's gradle-plugins job uploads its reports and test results under, on
       # failure. The default, build-reports, names nothing here and would silently read nothing.
       reports_artifact: gradle-plugins-reports
