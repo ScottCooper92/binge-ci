@@ -313,8 +313,10 @@ A person edits the file, in the PR that closes the issue. The workflow never wri
 
 For each stable release newer than `checked`, it opens an issue titled `<name> <version>: new
 upstream release`, labelled `upstream`, with the release link and notes and a checklist. It looks for
-an existing issue for that version, open or closed, by its title and by a marker in its body, and
-opens none twice. Release notes are quoted as code, so an `@mention` in them notifies nobody.
+an existing issue for that version, open or closed, among the issues carrying the label. It matches
+by the generated title and by a marker in the body, so a renamed issue still counts, and it opens none
+twice. Removing the label from an issue hides it from this check. If the issues cannot be listed, it
+opens nothing and fails the run. Release notes are quoted as code, so an `@mention` in them notifies nobody.
 
 It does not guess a version. A stable tag that is not `vMAJOR.MINOR.PATCH` fails the run, as does
 an upstream with no stable release in its latest 30. Drafts and prereleases are ignored. The other

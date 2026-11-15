@@ -94,12 +94,24 @@ $fence
 BODY
 }
 
-# Whether an issue for this release exists in any state, by title or by the marker in its body.
+# Every issue this workflow has opened, in any state, read once. By label, not by a title search: a
+# person renames an issue, and only the marker in its body still names the release. A failed read
+# is an error, never "no issues", or a rate limit would open a duplicate.
+issues_json=''
+load_issues() {
+  [ -n "$issues_json" ] && return 0
+  local out
+  out=$(gh issue list --state all --label "$LABEL" --limit 1000 --json title,body) || return 1
+  jq -e 'type == "array"' <<<"$out" >/dev/null 2>&1 || return 1
+  issues_json=$out
+}
+
+# Whether an issue for this release exists, by its generated title or by the marker in its body.
+# Returns 0 for yes, 1 for no, 2 when the issues could not be read.
 exists() { # $1=name $2=version $3=title
-  local found
-  found=$(gh issue list --state all --limit 100 --search "\"$3\" in:title" --json title,body \
-    --jq "[.[] | select(.title == \"$3\" or (.body // \"\" | contains(\"<!-- upstream-watch:$1:$2 -->\")))] | length")
-  [ "$found" -gt 0 ]
+  load_issues || return 2
+  jq -e --arg t "$3" --arg m "<!-- upstream-watch:$1:$2 -->" \
+    'any(.[]; .title == $t or ((.body // "") | contains($m)))' <<<"$issues_json" >/dev/null
 }
 
 process() { # $1=name $2=repo
@@ -142,8 +154,14 @@ process() { # $1=name $2=repo
   local v title release rc=0
   while read -r v; do
     title="$name $v: new upstream release"
-    if exists "$name" "$v" "$title"; then
+    local seen=0
+    exists "$name" "$v" "$title" || seen=$?
+    if [ "$seen" -eq 0 ]; then
       lines+=("- $name $v: an issue exists already. Skipped.")
+      continue
+    elif [ "$seen" -ne 1 ]; then
+      fail "$name" "could not list the \`$LABEL\` issues to look for $v, so none was opened."
+      rc=1
       continue
     fi
     if [ "$DRY_RUN" = "true" ]; then

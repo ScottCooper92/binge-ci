@@ -33,12 +33,16 @@ case "$1 $2" in
   "label list") printf '%s\n' "$FAKE_LABELS" ;;
   "label create") echo "label $3" >> "$FAKE/created.log" ;;
   "issue list")
-    jq_expr=''
+    [ -z "${FAKE_ISSUES_FAIL:-}" ] || { echo "HTTP 502" >&2; exit 1; }
+    # Honours the query the script sends: --label keeps issues carrying it, and a --search phrase
+    # keeps issues whose title contains it, as the real `in:title` search does.
+    label=''; phrase=''
     while [ $# -gt 0 ]; do
-      [ "$1" != --jq ] || jq_expr=$2
+      case $1 in --label) label=$2 ;; --search) phrase=${2%\" in:title}; phrase=${phrase#\"} ;; esac
       shift
     done
-    if [ -n "$jq_expr" ]; then jq -r "$jq_expr" "$FAKE/issues.json"; else cat "$FAKE/issues.json"; fi ;;
+    jq --arg l "$label" --arg p "$phrase" \
+      '[.[] | select(($l == "" or ((.labels // []) | index($l))) and ($p == "" or (.title | contains($p))))]' "$FAKE/issues.json" ;;
   "issue create")
     title=''; body=''
     shift 2
@@ -107,19 +111,24 @@ if run_case "10.11 is newer than 10.9 (numeric order)" 0 '{"jellyfin":{"checked"
 fi
 
 # An existing issue, open or closed, stops a duplicate; a stranger's title match does not.
-echo '[{"title":"jellyfin 10.11.6: new upstream release","body":"x"}]' > "$FAKE/issues.json"
+echo '[{"title":"jellyfin 10.11.6: new upstream release","body":"x","labels":["upstream"]}]' > "$FAKE/issues.json"
 if run_case "a duplicate by title is skipped" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
   expect "  none opened" '[ "$(created)" = 0 ]'
 fi
-echo '[{"title":"renamed by a person","body":"<!-- upstream-watch:jellyfin:10.11.6 -->"}]' > "$FAKE/issues.json"
+echo '[{"title":"Jellyfin 10.11.6 compatibility","body":"<!-- upstream-watch:jellyfin:10.11.6 -->","labels":["upstream"]}]' > "$FAKE/issues.json"
 if run_case "a duplicate by marker is skipped" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
   expect "  none opened" '[ "$(created)" = 0 ]'
 fi
-echo '[{"title":"jellyfin 10.11.60: new upstream release","body":"<!-- upstream-watch:jellyfin:10.11.60 -->"}]' > "$FAKE/issues.json"
+echo '[{"title":"jellyfin 10.11.60: new upstream release","body":"<!-- upstream-watch:jellyfin:10.11.60 -->","labels":["upstream"]}]' > "$FAKE/issues.json"
 if run_case "another version's issue is not a duplicate" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
   expect "  one opened" '[ "$(created)" = 1 ]'
 fi
+# A lookup that fails must not read as "no issue": nothing is opened and the run fails.
 echo '[]' > "$FAKE/issues.json"
+if FAKE_ISSUES_FAIL=1 run_case "a failed issue lookup opens nothing and fails" 1 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
+  expect "  none opened" '[ "$(created)" = 0 ]'
+  expect "  the summary says why" 'grep -q "could not list" "$FAKE/summary.md"'
+fi
 
 if run_case "dry run opens nothing and reports" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J" true; then
   expect "  nothing created" '[ "$(created)" = 0 ]'
