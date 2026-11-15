@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 #
 # Compares the newest stable release of each upstream with the version the calling repository
-# says it last checked, and opens one issue per newer release.
+# says it last checked, and opens one issue per upstream: for the newest release, naming any
+# releases between that and the checked one.
 #
 # Environment: UPSTREAMS (JSON), STATE_FILE, LABEL, DRY_RUN, REPO, GH_TOKEN. GITHUB_OUTPUT and
 # GITHUB_STEP_SUMMARY are written when set.
 #
 # Every upstream is processed even after one fails, so one broken tag does not hide a release of
 # another; the run then fails. It must not guess a version: a stable tag that is not exactly
-# v<MAJOR>.<MINOR>.<PATCH> is an error, never skipped.
+# [v]<MAJOR>.<MINOR> or [v]<MAJOR>.<MINOR>.<PATCH> is an error, never skipped. Jellyfin tags v12.4,
+# and v10.11.11 too. A missing patch compares as 0, but the version is kept as the upstream wrote it.
+export GH_REPO="${REPO:-}"
 set -euo pipefail
 
 : "${UPSTREAMS:?UPSTREAMS is required}"
@@ -19,8 +22,8 @@ DRY_RUN=${DRY_RUN:-false}
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
 out=${GITHUB_OUTPUT:-/dev/null}
 
-version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
-tag_re='^v[0-9]+\.[0-9]+\.[0-9]+$'
+version_re='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+tag_re='^v?[0-9]+\.[0-9]+(\.[0-9]+)?$'
 
 errors=()
 lines=()
@@ -48,8 +51,8 @@ fail() { # $1=upstream  $2=what went wrong
   echo "::error::$1: $2"
 }
 
-# Dotted versions as sortable text: 10.11.6 -> 000010.000011.000006.
-sortable() { awk -F. '{ printf "%06d.%06d.%06d\n", $1, $2, $3 }' <<<"$1"; }
+# Dotted versions as sortable text: 10.11.6 -> 000010.000011.000006, and 12.4 -> 000012.000004.000000.
+sortable() { awk -F. '{ printf "%06d.%06d.%06d\n", $1, $2, $3 + 0 }' <<<"$1"; }
 
 # Whether $1 is a newer version than $2.
 newer() { [ "$(sortable "$1")" \> "$(sortable "$2")" ]; }
@@ -58,14 +61,18 @@ ensure_label() {
   [ "$DRY_RUN" != "true" ] || return 0
   local names
   names=$(gh label list --limit 1000 --json name --jq '.[].name')
-  grep -qxF -- "$LABEL" <<<"$names" || gh label create "$LABEL" --description "A server the apps use shipped a release" >/dev/null
+  grep -qixF -- "$LABEL" <<<"$names" || gh label create "$LABEL" --description "A server the apps use shipped a release" >/dev/null
 }
 
-issue_body() { # $1=name $2=version $3=checked $4=release json
-  local url notes fence='~~~~~~~~~~'
+issue_body() { # $1=name $2=version $3=checked $4=release json $5=skipped releases json (array)
+  local url notes fence='~~~~~~~~~~' skipped=''
   url=$(jq -r '.html_url' <<<"$4")
   # Release notes are quoted as code so an @mention in them notifies nobody here.
   notes=$(jq -r '(.body // "")[0:6000]' <<<"$4" | grep -vF "$fence" || true)
+  if [ "$(jq 'length' <<<"$5")" -gt 0 ]; then
+    skipped=$(jq -r '"### Also released since " + $c + "\n\nThis issue covers " + $v + ". These came out in between, newest first, and are covered by the same check:\n\n" + ([.[] | "- [" + (.tag_name | ltrimstr("v")) + "](" + .html_url + ")"] | join("\n")) + "\n"' \
+      --arg c "$3" --arg v "$2" <<<"$5")
+  fi
   cat <<BODY
 <!-- upstream-watch:$1:$2 -->
 $1 $2 is out, and this repository was last checked against $3.
@@ -74,9 +81,11 @@ $1 $2 is out, and this repository was last checked against $3.
 - Last checked: $3
 - Newest stable: $2
 
+$skipped
+
 ### Release notes
 
-<details><summary>Notes (cut at 6000 characters)</summary>
+<details><summary>Notes for $2 (cut at 6000 characters)</summary>
 
 $fence
 $notes
@@ -88,7 +97,7 @@ $fence
 
 - [ ] Upgrade a disposable test server to $2.
 - [ ] Run the device checks and the settings sweep against it.
-- [ ] Read the release notes for API changes and removed options.
+- [ ] Read the release notes for API changes and removed options, for $2 and any release listed above.
 - [ ] Update the server-compatibility notes and the feature gates if anything moved.
 - [ ] Bump \`$1.checked\` to \`$2\` in \`$STATE_FILE\` in a PR that closes this issue.
 BODY
@@ -118,11 +127,11 @@ process() { # $1=name $2=repo
   local name=$1 repo=$2 checked releases bad eligible top
   checked=$(jq -r --arg n "$name" '.[$n].checked // empty' "$STATE_FILE")
   if [ -z "$checked" ]; then
-    fail "$name" "no \"checked\" version in $STATE_FILE. Add \`\"$name\": {\"checked\": \"X.Y.Z\"}\` for the version last reviewed."
+    fail "$name" "no \"checked\" version in $STATE_FILE. Add \`\"$name\": {\"checked\": \"X.Y\"}\` for the version last reviewed."
     return 1
   fi
   if ! [[ $checked =~ $version_re ]]; then
-    fail "$name" "checked version \"$checked\" in $STATE_FILE is not MAJOR.MINOR.PATCH (no leading v)."
+    fail "$name" "checked version \"$checked\" in $STATE_FILE is not MAJOR.MINOR or MAJOR.MINOR.PATCH (no leading v)."
     return 1
   fi
   if ! releases=$(gh api "repos/$repo/releases?per_page=30"); then
@@ -132,7 +141,7 @@ process() { # $1=name $2=repo
   eligible=$(jq -c '[.[] | select(.draft == false and .prerelease == false)]' <<<"$releases")
   bad=$(jq -r --arg re "$tag_re" '.[] | select(.tag_name | test($re) | not) | .tag_name' <<<"$eligible")
   if [ -n "$bad" ]; then
-    fail "$name" "stable release tag(s) of $repo not in the form vMAJOR.MINOR.PATCH: $(tr '\n' ' ' <<<"$bad")"
+    fail "$name" "stable release tag(s) of $repo not in the form [v]MAJOR.MINOR or [v]MAJOR.MINOR.PATCH: $(tr '\n' ' ' <<<"$bad")"
     return 1
   fi
   top=$(jq -r '.[].tag_name | ltrimstr("v")' <<<"$eligible" | while read -r v; do echo "$(sortable "$v") $v"; done | sort | tail -n 1 | cut -d' ' -f2)
@@ -151,35 +160,37 @@ process() { # $1=name $2=repo
     return 0
   fi
 
-  local v title release rc=0
-  while read -r v; do
-    title="$name $v: new upstream release"
-    local seen=0
-    exists "$name" "$v" "$title" || seen=$?
-    if [ "$seen" -eq 0 ]; then
-      lines+=("- $name $v: an issue exists already. Skipped.")
-      continue
-    elif [ "$seen" -ne 1 ]; then
-      fail "$name" "could not list the \`$LABEL\` issues to look for $v, so none was opened."
-      rc=1
-      continue
-    fi
-    if [ "$DRY_RUN" = "true" ]; then
-      lines+=("- $name $v: would open \"$title\".")
-      opened=$(jq -c --arg e "$name@$v" '. + [$e]' <<<"$opened")
-      continue
-    fi
-    release=$(jq -c --arg t "v$v" '.[] | select(.tag_name == $t)' <<<"$eligible")
-    if issue_body "$name" "$v" "$checked" "$release" > "$bodyfile" \
-       && gh issue create --title "$title" --label "$LABEL" --body-file "$bodyfile" >/dev/null; then
-      lines+=("- $name $v: opened \"$title\".")
-      opened=$(jq -c --arg e "$name@$v" '. + [$e]' <<<"$opened")
-    else
-      fail "$name" "could not open the issue for $v."
-      rc=1
-    fi
-  done <<<"$pending"
-  return "$rc"
+  # One issue, for the newest release. The ones between it and `checked` are listed in its body, so a
+  # first run against an old baseline is one issue rather than a dozen.
+  local v title release skipped seen=0
+  v=$(tail -n 1 <<<"$pending")
+  title="$name $v: new upstream release"
+  exists "$name" "$v" "$title" || seen=$?
+  if [ "$seen" -eq 0 ]; then
+    lines+=("- $name $v: an issue exists already. Skipped.")
+    return 0
+  elif [ "$seen" -ne 1 ]; then
+    fail "$name" "could not list the \`$LABEL\` issues to look for $v, so none was opened."
+    return 1
+  fi
+  if [ "$DRY_RUN" = "true" ]; then
+    lines+=("- $name $v: would open \"$title\", naming $(($(wc -l <<<"$pending") - 1)) release(s) in between.")
+    opened=$(jq -c --arg e "$name@$v" '. + [$e]' <<<"$opened")
+    return 0
+  fi
+  release=$(jq -c --arg v "$v" '.[] | select((.tag_name | ltrimstr("v")) == $v)' <<<"$eligible" | head -n 1)
+  # Newest first by version, not in the API's order.
+  skipped=$(tac <<<"$pending" | sed 1d | while read -r sv; do
+    jq -c --arg v "$sv" '.[] | select((.tag_name | ltrimstr("v")) == $v)' <<<"$eligible" | head -n 1
+  done | jq -sc '.')
+  if issue_body "$name" "$v" "$checked" "$release" "$skipped" > "$bodyfile" \
+     && gh issue create --title "$title" --label "$LABEL" --body-file "$bodyfile" >/dev/null; then
+    lines+=("- $name $v: opened \"$title\".")
+    opened=$(jq -c --arg e "$name@$v" '. + [$e]' <<<"$opened")
+  else
+    fail "$name" "could not open the issue for $v."
+    return 1
+  fi
 }
 
 # --- validate the inputs ---

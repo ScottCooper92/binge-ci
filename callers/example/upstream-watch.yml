@@ -1,7 +1,7 @@
 name: Upstream watch
 
-# Opens one issue per new stable release of a server this repository's app talks to, with a
-# compatibility checklist. Weekly, and by hand: run it from the Actions tab with `dry_run` on first
+# Opens one issue for the newest new stable release of each server this repository's app talks to,
+# with a compatibility checklist. Weekly, and by hand: run it from the Actions tab with `dry_run` on first
 # to see what it would open.
 #
 # `docs/upstream.json` records the version last checked, per upstream name, without a leading v:

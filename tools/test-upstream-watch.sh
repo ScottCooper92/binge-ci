@@ -73,6 +73,7 @@ run_case() {
   local label=$1 want=$2 state=$3 ups=$4 dry=${5:-false} rc=0
   : > "$FAKE/created.log"; rm -f "$FAKE"/body-*.md
   printf '%s' "$state" > "$FAKE/state.json"
+  [ "$state" != "__none__" ] || rm -f "$FAKE/state.json"
   : > "$FAKE/summary.md"; : > "$FAKE/output.txt"
   env PATH="$work/bin:$PATH" FAKE="$FAKE" FAKE_LABELS="${FAKE_LABELS-upstream}" GH_TOKEN=t REPO=o/r \
     UPSTREAMS="$ups" STATE_FILE="$FAKE/state.json" LABEL=upstream DRY_RUN="$dry" \
@@ -107,8 +108,43 @@ if run_case "checked ahead of newest opens nothing" 0 '{"jellyfin":{"checked":"1
   expect "  none opened" '[ "$(created)" = 0 ]'
 fi
 if run_case "10.11 is newer than 10.9 (numeric order)" 0 '{"jellyfin":{"checked":"10.9.11"}}' "$J"; then
-  expect "  opens 10.11.5 and 10.11.6, oldest first" '[ "$(created)" = 2 ] && [ "$(grep "^issue " "$FAKE/created.log" | sed -n 1p)" = "issue jellyfin 10.11.5: new upstream release" ]'
+  expect "  one issue, for the newest" '[ "$(created)" = 1 ] && grep -q "^issue jellyfin 10.11.6: new upstream release$" "$FAKE/created.log"'
+  expect "  it names the release in between, with its link" 'grep -q "^### Also released since 10.9.11" "$FAKE/body-0.md" && grep -q "^- \[10.11.5\](https://github.com/x/y/releases/tag/v10.11.5)$" "$FAKE/body-0.md"'
+  expect "  and not the draft, the prerelease or the version itself" '! grep -q "10.13.0\|rc1\|^- \[10.11.6\]" "$FAKE/body-0.md"'
 fi
+if run_case "a baseline one release behind has no skipped section" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
+  expect "  no \"Also released\"" '! grep -q "Also released" "$FAKE/body-0.md"'
+fi
+
+# Jellyfin tags v12.4, and v10.11.11 too: two or three parts, kept as the upstream writes them.
+releases_file jellyfin__jellyfin "$(release v12.4)" "$(release v12.3)" "$(release v12.0)" "$(release v10.11.11)" "$(release v12.0-rc7 true)"
+if run_case "12.4 is newer than 12.3" 0 '{"jellyfin":{"checked":"12.3"}}' "$J"; then
+  expect "  title and output keep 12.4, not 12.4.0" '[ "$(created)" = 1 ] && grep -q "^issue jellyfin 12.4: new upstream release$" "$FAKE/created.log" && grep -qx "newest={\"jellyfin\":\"12.4\"}" "$FAKE/output.txt"'
+  expect "  the marker keeps 12.4" 'grep -q "<!-- upstream-watch:jellyfin:12.4 -->" "$FAKE/body-0.md"'
+fi
+if run_case "12.4 is newer than 10.11.11" 0 '{"jellyfin":{"checked":"10.11.11"}}' "$J"; then
+  expect "  one issue for 12.4 naming 12.3 and 12.0, newest first" '[ "$(created)" = 1 ] && grep -q "^issue jellyfin 12.4: " "$FAKE/created.log" && [ "$(grep -n "^- \[12\." "$FAKE/body-0.md" | sed "s/^[0-9]*://" | sed -n 1p)" = "- [12.3](https://github.com/x/y/releases/tag/v12.3)" ] && grep -q "^- \[12.0\]" "$FAKE/body-0.md"'
+fi
+if run_case "a checked version of 12.4 opens nothing" 0 '{"jellyfin":{"checked":"12.4"}}' "$J"; then
+  expect "  none opened" '[ "$(created)" = 0 ]'
+fi
+releases_file jellyfin__jellyfin "$(release v12.0)"
+if run_case "12.0 equals 12.0.0" 0 '{"jellyfin":{"checked":"12.0.0"}}' "$J"; then
+  expect "  none opened" '[ "$(created)" = 0 ]'
+fi
+releases_file jellyfin__jellyfin "$(release v12.0.0)"
+if run_case "12.0.0 equals 12.0" 0 '{"jellyfin":{"checked":"12.0"}}' "$J"; then
+  expect "  none opened" '[ "$(created)" = 0 ]'
+fi
+releases_file jellyfin__jellyfin "$(release v12.0.1)"
+if run_case "12.0.1 is newer than 12.0" 0 '{"jellyfin":{"checked":"12.0"}}' "$J"; then
+  expect "  one opened" '[ "$(created)" = 1 ]'
+fi
+releases_file jellyfin__jellyfin "$(release 10.11.6)"
+if run_case "a tag without a v is accepted" 0 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
+  expect "  one opened" '[ "$(created)" = 1 ]'
+fi
+releases_file jellyfin__jellyfin "$(release v10.11.6)" "$(release v10.11.5)" "$(release v10.9.11)" "$(release v10.12.0-rc1 true)" "$(release v10.13.0 false true)"
 
 # An existing issue, open or closed, stops a duplicate; a stranger's title match does not.
 echo '[{"title":"jellyfin 10.11.6: new upstream release","body":"x","labels":["upstream"]}]' > "$FAKE/issues.json"
@@ -140,9 +176,9 @@ if FAKE_LABELS=other run_case "a missing label is created" 0 '{"jellyfin":{"chec
 fi
 
 # Failures: loud, never skipped, and the other upstreams still run.
-releases_file jellyfin__jellyfin "$(release v10.11.6)" "$(release 10.11.7)"
+releases_file jellyfin__jellyfin "$(release v10.11.6)" "$(release latest)"
 if run_case "an unparsable stable tag fails" 1 '{"jellyfin":{"checked":"10.11.5"}}' "$J"; then
-  expect "  names the tag" 'grep -q "10.11.7" "$FAKE/stdout.txt"'
+  expect "  names the tag" 'grep -q "latest" "$FAKE/stdout.txt"'
   expect "  opens nothing for it" '[ "$(created)" = 0 ]'
 fi
 releases_file jellyfin__jellyfin "$(release v10.11.6)" "$(release v10.11.7-rc1)"
@@ -150,7 +186,7 @@ run_case "a suffixed stable tag fails" 1 '{"jellyfin":{"checked":"10.11.5"}}' "$
 releases_file jellyfin__jellyfin "$(release v10.11.6)"
 run_case "a missing state entry fails" 1 '{}' "$J" || true
 run_case "a checked version with a v fails" 1 '{"jellyfin":{"checked":"v10.11.5"}}' "$J" || true
-run_case "a missing state file fails" 1 '{}' "$J" || true
+run_case "a missing state file fails" 1 '__none__' "$J" || true
 rm -f "$FAKE/releases/seerr-team__seerr.json"
 TWO='[{"name":"seerr","repo":"seerr-team/seerr"},{"name":"jellyfin","repo":"jellyfin/jellyfin"}]'
 if run_case "one upstream failing still processes the next" 1 '{"seerr":{"checked":"3.5.0"},"jellyfin":{"checked":"10.11.5"}}' "$TWO"; then :; fi

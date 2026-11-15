@@ -1,6 +1,6 @@
 name: Upstream watch
 description: >
-  Opens one issue per new stable upstream release, comparing each upstream's newest release with
+  Opens one issue per upstream with a new stable release, for the newest, comparing it with
   the version a state file in the calling repository says was last checked.
 
 # An action for the same reason as merge-guards: a reusable workflow runs against the CALLER's

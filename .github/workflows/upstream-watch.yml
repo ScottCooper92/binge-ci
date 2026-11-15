@@ -1,13 +1,13 @@
 name: Upstream watch
 
-# Notices when a server the apps talk to ships a stable release, and opens one issue per release in
-# the calling repository, with a compatibility checklist. A caller runs it weekly and by hand.
+# Notices when a server the apps talk to ships a stable release, and opens one issue for the newest
+# release in the calling repository, naming any between it and the last one checked, with a compatibility checklist. A caller runs it weekly and by hand.
 #
 # What was last checked lives in the caller, in a small JSON file a person edits to say "reviewed,
 # this version is fine". This workflow never writes it. It needs only the default token, to open
 # issues, and the public releases API: one call per upstream.
 #
-# A release tag that is not vMAJOR.MINOR.PATCH fails the run. A comparison that guessed would hide a
+# A release tag that is not [v]MAJOR.MINOR or [v]MAJOR.MINOR.PATCH fails the run. A comparison that guessed would hide a
 # release, which is the one thing this exists to prevent. A failed scheduled run notifies the repository.
 
 on:

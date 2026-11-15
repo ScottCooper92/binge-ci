@@ -302,7 +302,8 @@ Inputs: `upstreams` (required), `state_file`, `label`, `dry_run`, `runner`. The 
 ```
 
 The state lives in the caller, in `docs/upstream.json` unless `state_file` says otherwise. It holds
-the newest version *checked*, which is not always the newest released. It has no leading `v`.
+the newest version *checked*, which is not always the newest released. It has no leading `v`, and
+it is written as the upstream writes it: `12.4` for Jellyfin 12.4, `10.11.6` for 10.11.6.
 
 ```json
 { "jellyfin": { "checked": "10.11.6" } }
@@ -311,17 +312,22 @@ the newest version *checked*, which is not always the newest released. It has no
 A person edits the file, in the PR that closes the issue. The workflow never writes it. A name in
 `upstreams` with no entry fails the run, so a new upstream starts with a baseline you chose.
 
-For each stable release newer than `checked`, it opens an issue titled `<name> <version>: new
-upstream release`, labelled `upstream`, with the release link and notes and a checklist. It looks for
-an existing issue for that version, open or closed, among the issues carrying the label. It matches
-by the generated title and by a marker in the body, so a renamed issue still counts, and it opens none
-twice. Removing the label from an issue hides it from this check. If the issues cannot be listed, it
-opens nothing and fails the run. Release notes are quoted as code, so an `@mention` in them notifies nobody.
+For each upstream, it opens one issue for the newest stable release if that is newer than `checked`,
+titled `<name> <version>: new upstream release` and labelled `upstream`. The body has the release
+link and notes and a checklist. Releases between `checked` and the newest, if any, are listed in the
+body with their links, so a first run against an old baseline is one issue, not a dozen. Bumping
+`checked` to the newest version closes them all. It looks for an existing issue for that version,
+open or closed, among the issues carrying the label. It matches by the generated title and by a
+marker in the body, so a renamed issue still counts, and it opens none twice. Removing the label from
+an issue hides it from this check. If the issues cannot be listed, it opens nothing and fails the run.
+Release notes are quoted as code, so an `@mention` in them notifies nobody.
 
-It does not guess a version. A stable tag that is not `vMAJOR.MINOR.PATCH` fails the run, as does
-an upstream with no stable release in its latest 30. Drafts and prereleases are ignored. The other
-upstreams still run before the run fails. The run summary lists every outcome, and a failed
-scheduled run notifies the repository. Versions compare by number, so 10.11 is newer than 10.9.
+It does not guess a version. A tag is `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`, with or without a leading
+`v`, digits only. Jellyfin's current tags are `v12.4` and `v10.11.11`. Versions compare by number, a
+missing patch counts as 0, so 12.0 equals 12.0.0 and 12.4 is newer than 10.11.11. Any other stable tag
+fails the run, as does an upstream with no stable release in its latest 30. Drafts and prereleases
+(`v12.0-rc7`) are dropped before the tag is read. The other upstreams still run before the run fails.
+The run summary lists every outcome, and a failed scheduled run notifies the repository.
 
 Outputs: `opened`, a JSON array of `name@version`, and `newest`, a JSON object of name to newest
 stable version. With `dry_run` it opens nothing and reports what it would. Run it that way first.
