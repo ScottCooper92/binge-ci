@@ -204,6 +204,52 @@ class GatesFunctionalTest {
         assertTheBanFires("detekt", withKotlin = true, withAndroid = true)
     }
 
+    // A Multiplatform module's production source is every `src/*Main`, and types resolve against the
+    // jvm target's `main`, which holds `commonMain`. A `!!` in `commonTest` is out of scope.
+    @Test
+    fun `detekt gate reads every Multiplatform main source set with types, and never a test one`() {
+        val sdk =
+            checkNotNull(System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")) {
+                "This test needs an Android SDK: set ANDROID_HOME."
+            }
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.multiplatform")
+                id("com.android.kotlin.multiplatform.library")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            kotlin {
+                jvm()
+                android {
+                    namespace = "sample"
+                    compileSdk = 37
+                    minSdk = 26
+                }
+            }
+            """.trimIndent(),
+        )
+        write("local.properties", "sdk.dir=${File(sdk).invariantSeparatorsPath}\n")
+        write("detekt.yml", "potential-bugs:\n  UnsafeCallOnNullableType:\n    active: true\n")
+        val banned = "package sample\n\nfun length(text: String?): Int = text!!.length\n"
+        val clean = "package sample\n\nfun length(text: String?): Int = text?.length ?: 0\n"
+        write("src/commonTest/kotlin/sample/Test.kt", banned.replace("length", "testLength"))
+        write("src/jvmMain/kotlin/sample/Jvm.kt", "package sample\n\nfun jvmLength(text: String?): Int = text!!.length\n")
+        write("src/commonMain/kotlin/sample/Length.kt", banned)
+
+        val failing = runner("detekt", withKotlin = true, withAndroid = true).buildAndFail()
+
+        assertTrue(failing.output.contains("UnsafeCallOnNullableType"), failing.output)
+        assertTrue(failing.output.contains("commonMain"), failing.output)
+        assertTrue(failing.output.contains("jvmMain"), failing.output)
+        assertFalse(failing.output.contains("sample/Test.kt"), failing.output)
+
+        write("src/commonMain/kotlin/sample/Length.kt", clean)
+        write("src/jvmMain/kotlin/sample/Jvm.kt", "package sample\n\nfun jvmLength(text: String?): Int = text?.length ?: 0\n")
+        runner("detekt", withKotlin = true, withAndroid = true).build()
+    }
+
     // End to end against detekt's own output: the baseline it writes and the report it emits are the
     // two formats staleness parses, and both changed between detekt majors.
     @Test
