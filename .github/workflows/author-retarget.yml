@@ -93,6 +93,16 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint author app token
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
@@ -100,7 +110,7 @@ jobs:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
           # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
-          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', github.event.repository.name, inputs.private_submodules) || '' }}
+          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
 
       - name: Check the PR is opted in
         id: gate

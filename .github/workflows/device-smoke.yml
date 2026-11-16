@@ -152,6 +152,16 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
       # github.sha rather than github.ref as the fallback: on a push or a schedule the ref
       # re-resolves the branch and could test a newer commit than the one that triggered the run.
       # A separate, read-only token: this job only reads the checkout. The caller is listed too, because
@@ -163,7 +173,7 @@ jobs:
         with:
           app-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-          repositories: ${{ format('{0},{1}', github.event.repository.name, inputs.private_submodules) }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
           permission-contents: read
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

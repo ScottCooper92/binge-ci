@@ -287,7 +287,9 @@ secrets: inherit
   three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
   secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
 - The author bots check out and push with their one app token, so for them the input widens that
-  token's scope instead. The pushes still go to the pull request's branch in the calling repository.
+  token's scope instead. That token has the author app's write access, so with the input set an agent
+  run can write to every listed repository, not only read it. The workflows push only to the pull
+  request's branch in the calling repository. Opt in knowing that.
 - `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
   that a pin is an ancestor of it.
 
