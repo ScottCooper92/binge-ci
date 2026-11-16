@@ -262,6 +262,35 @@ drifted a word at a time, so they live here too:
 The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks
 them like the bot callers.
 
+### Private submodules
+
+A checkout that fetches submodules cannot read a second private repository with the token it has: the
+default `GITHUB_TOKEN` and the author app's token both reach the calling repository only. Every
+workflow that checks out with submodules takes an optional input for this, `private_submodules`: the
+names of the private repositories, comma- or newline-separated, under the caller's owner. Empty is the
+default and changes nothing.
+
+```yaml
+with:
+  private_submodules: shared-lib, other-lib
+secrets: inherit
+```
+
+- It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
+  `author-retarget.yml`, `submodule-pins.yml`, `device-smoke.yml` and `consumer-check.yml`. In
+  `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules.
+- The GitHub App has to be installed on every private repository listed, with read access to contents.
+- The token is scoped by `repositories:`, which replaces the default of the caller alone. The workflows
+  add the caller to the list themselves; a hand-written mint has to do the same.
+- The read-only workflows (`bot-review.yml`, `submodule-pins.yml`, `device-smoke.yml`,
+  `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
+  three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
+  secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
+- The author bots check out and push with their one app token, so for them the input widens that
+  token's scope instead. The pushes still go to the pull request's branch in the calling repository.
+- `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
+  that a pin is an ancestor of it.
+
 ### The emulator lane
 
 `device-smoke.yml` is the whole lane, so a consumer writes only its triggers and one `uses:`. It

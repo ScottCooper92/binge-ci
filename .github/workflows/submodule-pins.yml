@@ -23,6 +23,14 @@ name: Submodule pins
 on:
   workflow_call:
     inputs:
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
+          uses a GitHub App token that can read the caller and these repositories, so the app must be
+          installed on every one of them.
+        type: string
+        default: ''
       runner:
         description: runs-on, as a JSON array string.
         type: string
@@ -34,6 +42,12 @@ on:
       timeout_minutes:
         type: number
         default: 10
+    secrets:
+      REVIEWER_APP_ID:
+        description: Only read when `private_submodules` is set, to mint the read-only submodule token.
+        required: false
+      REVIEWER_APP_PRIVATE_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -45,9 +59,22 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      # A separate, read-only token: this job only reads the checkout. The caller is listed too, because
+      # `repositories` replaces the default scope of the caller alone.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', github.event.repository.name, inputs.private_submodules) }}
+          permission-contents: read
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
 
       - name: Check submodule pins are merged upstream and not rolled back
         env:

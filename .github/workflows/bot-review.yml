@@ -77,6 +77,14 @@ name: Bot review
 on:
   workflow_call:
     inputs:
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
+          uses a GitHub App token that can read the caller and these repositories, so the app must be
+          installed on every one of them.
+        type: string
+        default: ''
       runner:
         description: >
           runs-on, as a JSON array string. Defaults to a GitHub-hosted runner: ephemeral,
@@ -957,11 +965,24 @@ jobs:
           summary: A review is running against this commit. This check is replaced with the verdict when it finishes.
           details-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
+      # A separate, read-only token: this job only reads the checkout. The caller is listed too, because
+      # `repositories` replaces the default scope of the caller alone.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: steps.pin.outputs.skip != 'true' && inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', github.event.repository.name, inputs.private_submodules) }}
+          permission-contents: read
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pin.outputs.skip != 'true'
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
           # A consumer may build from a git submodule (binge-seerr includes binge-companions
           # as one), and an agent that cannot build the checkout cannot fix or judge it.
           submodules: recursive

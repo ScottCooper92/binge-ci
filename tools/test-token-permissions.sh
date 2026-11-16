@@ -48,7 +48,7 @@ $(mint '        ' '' AUTHOR_APP_ID 'contents pull-requests')"
 expect granted pass
 
 fixture whole-installation "      - name: Mint
-$(mint '        ' '' REVIEWER_APP_ID '')"
+$(mint '        ' '' UNLISTED_APP_ID '')"
 expect whole-installation pass
 
 fixture not-granted "      - name: Mint
@@ -56,21 +56,21 @@ $(mint '        ' '' AUTHOR_APP_ID 'contents issues')"
 expect not-granted fail "permission-issues is not granted to the AUTHOR_APP_ID installation"
 
 fixture unknown-app "      - name: Mint
-$(mint '        ' '' REVIEWER_APP_ID 'contents')"
-expect unknown-app fail "its app (REVIEWER_APP_ID) has no grant recorded"
+$(mint '        ' '' UNLISTED_APP_ID 'contents')"
+expect unknown-app fail "its app (UNLISTED_APP_ID) has no grant recorded"
 
 # A step opened by `- uses:` ends at the next step's dash, which sits at the same column. Read past
 # it, and the next step's app and permissions are taken for this one's: here, the reviewer mint
 # would be judged as the author's and pass.
-fixture dash-uses-then-step "$(mint '      ' '- ' REVIEWER_APP_ID 'contents')
+fixture dash-uses-then-step "$(mint '      ' '- ' UNLISTED_APP_ID 'contents')
       - name: Next
 $(mint '        ' '' AUTHOR_APP_ID 'contents')"
-expect dash-uses-then-step fail "its app (REVIEWER_APP_ID) has no grant recorded"
+expect dash-uses-then-step fail "its app (UNLISTED_APP_ID) has no grant recorded"
 
-fixture dash-uses-blames-own-app "$(mint '      ' '- ' REVIEWER_APP_ID 'issues')
+fixture dash-uses-blames-own-app "$(mint '      ' '- ' UNLISTED_APP_ID 'issues')
       - name: Next
 $(mint '        ' '' AUTHOR_APP_ID 'contents')"
-expect dash-uses-blames-own-app fail "its app (REVIEWER_APP_ID) has no grant recorded"
+expect dash-uses-blames-own-app fail "its app (UNLISTED_APP_ID) has no grant recorded"
 
 # A step whose `with:` comes before its `uses:` still has its app and permissions read.
 fixture with-before-uses "      - name: Mint
