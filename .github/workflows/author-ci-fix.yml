@@ -8,6 +8,14 @@ name: Author - fix failing CI
 on:
   workflow_call:
     inputs:
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
+          uses a GitHub App token that can read the caller and these repositories, so the app must be
+          installed on every one of them.
+        type: string
+        default: ''
       runner:
         type: string
         default: '["ubuntu-latest"]'
@@ -240,12 +248,24 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint author app token
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
+          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
 
       # workflow_run.pull_requests is unreliable, so resolve by head branch.
       - name: Resolve the PR
@@ -1245,12 +1265,24 @@ jobs:
       group: author-ci-default-${{ github.repository }}
       cancel-in-progress: false
     steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint author app token
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
+          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
 
       # The guards, in the order they are cheapest to answer. Each skip says why in the log; none of
       # them is an outcome a human is waiting on, so none posts.

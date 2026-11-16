@@ -20,10 +20,19 @@ name: Consumer check
 # caller should also run it on pushes to its default branch: setup-gradle saves its cache only there,
 # so a job that ran on pull requests alone would start cold every time.
 #
-# A private consumer needs a token this does not take; it is out of scope.
+# A private consumer needs a token this does not take; it is out of scope. `private_submodules` covers the
+# calling repository's own checkout only, not the consumer's other submodules.
 on:
   workflow_call:
     inputs:
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
+          uses a GitHub App token that can read the caller and these repositories, so the app must be
+          installed on every one of them.
+        type: string
+        default: ''
       runner:
         description: runs-on, as a JSON array string.
         type: string
@@ -58,6 +67,12 @@ on:
           Gradle job.
         type: boolean
         default: true
+    secrets:
+      REVIEWER_APP_ID:
+        description: Only read when `private_submodules` is set, to mint the read-only submodule token.
+        required: false
+      REVIEWER_APP_PRIVATE_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -74,6 +89,28 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      # A separate, read-only token: this job only reads the checkout. The caller is listed too, because
+      # `repositories` replaces the default scope of the caller alone.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
       # Recursive, because the change can carry submodules of its own: a repository that applies
       # binge-ci's Gradle gates includes them from a binge-ci submodule, and the consumer's build
       # includes this one, so without them the consumer's build cannot configure.
@@ -83,6 +120,7 @@ jobs:
           path: candidate
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
 
       # Submodules are fetched one by one below: the consumer's pin of the calling repository is
       # exactly what this job replaces, so cloning it would be wasted work.

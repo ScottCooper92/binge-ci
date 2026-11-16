@@ -24,6 +24,9 @@ import glob, re, sys
 # app gets. It has no Issues permission; a PR's conversation is read through pull requests.
 GRANTS = {
     "AUTHOR_APP_ID": {"contents", "pull-requests", "workflows", "metadata"},
+    # The reviewer app is installed on the owner's repositories with read access to contents. Only the
+    # read-only submodule mints narrow its token, and they ask for contents alone.
+    "REVIEWER_APP_ID": {"contents", "metadata"},
 }
 
 USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')
