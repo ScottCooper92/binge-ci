@@ -26,7 +26,10 @@ abstract class DetektGateExtension {
     /** A project holding custom rules, such as `:detekt-rules`, added to `detektPlugins`. Unset means none. */
     abstract val customRulesProject: Property<String>
 
-    /** The source detekt reads, relative to the project. Defaults to `src/main`. */
+    /**
+     * The source detekt reads, relative to the project. Unset means `src/main`, or on a Kotlin Multiplatform project every
+     * `Main` source set directory under `src`, such as `src/commonMain`, and never a test one. Setting it wins on either.
+     */
     abstract val sourceDirectory: Property<String>
 
     /** Globs left out of [sourceDirectory]. Defaults to every file named `…PreviewData.kt`, preview tooling rather than logic. */
@@ -58,7 +61,7 @@ abstract class DetektGateExtension {
 
     /**
      * The Kotlin compilation whose classpath detekt resolves types against. Defaults to `main` on a
-     * JVM project and `debug` on an Android one. A name that matches no compilation, as a flavoured Android module has
+     * JVM project, `debug` on an Android one and `main` of the `jvm` target (else the Android target) on a Multiplatform one. A name that matches no compilation, as a flavoured Android module has
      * with `debug`, fails every detekt task and lists the compilations that exist, since the task would otherwise run
      * without type resolution and stay green.
      */
@@ -95,7 +98,6 @@ class DetektGatePlugin : Plugin<Project> {
 
         val gate = project.extensions.create("detektGate", DetektGateExtension::class.java)
         gate.configFile.convention(project.layout.settingsDirectory.file("detekt.yml"))
-        gate.sourceDirectory.convention("src/main")
         gate.excludes.convention(listOf("**/*PreviewData.kt"))
         gate.suppressedPaths.convention(emptyList())
         gate.suppressedRuleSets.convention(emptyList())
@@ -151,11 +153,28 @@ class DetektGatePlugin : Plugin<Project> {
 }
 
 /** Pinned with `setSource` rather than exclude patterns, so a test or generated source set never leaks in. */
-private fun Project.productionSource(gate: DetektGateExtension): FileTree =
-    fileTree(gate.sourceDirectory.get()) {
-        include("**/*.kt")
-        exclude(gate.excludes.get() - gate.suppressedPaths.get().toSet())
-    }
+private fun Project.productionSource(gate: DetektGateExtension): FileTree {
+    val excluded = gate.excludes.get() - gate.suppressedPaths.get().toSet()
+    val explicit = gate.sourceDirectory.orNull
+    val directories =
+        when {
+            explicit != null -> listOf(explicit)
+            isKotlinMultiplatform() ->
+                // `src/commonMain`, `src/jvmMain`, `src/androidMain`; `…Test` and `…TestFixtures`-style sets never end in `Main`.
+                (layout.projectDirectory.dir("src").asFile.listFiles().orEmpty())
+                    .filter { it.isDirectory && it.name.endsWith("Main") }
+                    .map { "src/${it.name}" }
+                    .sorted()
+            else -> listOf("src/main")
+        }
+    return directories
+        .map { dir ->
+            fileTree(dir) {
+                include("**/*.kt")
+                exclude(excluded)
+            }
+        }.fold(files().asFileTree) { all, tree -> all + tree }
+}
 
 private fun Project.existingFile(file: RegularFileProperty): Provider<RegularFile> =
     layout.file(file.map { it.asFile }.filter { it.exists() })

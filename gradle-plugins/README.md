@@ -48,10 +48,17 @@ on the build classpath, so the gate fails at once with a message saying so. It d
 bare detekt setup does not.
 
 - **Production source only.** Every detekt task reads `src/main`, minus files named `…PreviewData.kt`.
+  On a Kotlin Multiplatform module, with `sourceDirectory` unset, it reads every `src/*Main`
+  directory (`commonMain`, `jvmMain`, `androidMain`, and so on) and never a `*Test` one. Setting
+  `sourceDirectory` still wins on either.
 - **Type resolution.** A detekt task carries no classpath by default, and without one the rules
   that need types load and never fire. `UnsafeCallOnNullableType`, the `!!` ban, is one. The plugin
   wires the compile classpath of one Kotlin compilation onto every detekt task: `main` on a JVM
-  project, `debug` on an Android one.
+  project, `debug` on an Android one. On a Kotlin Multiplatform module it is `main` of the `jvm`
+  target, or of the Android target when there is no `jvm` target. That classpath resolves
+  `commonMain` and the chosen target's own source set. The other platforms' source sets are
+  analysed without types, so the type-resolved rules do not fire there. `typeResolutionCompilation`
+  overrides the compilation.
 - **Compiler errors.** detekt prints `There were N compiler errors found during analysis` and
   still passes. A type-resolved rule is blind to code that did not resolve, so the `!!` ban goes
   quiet there with a green build. The gate reads that line. With `allowedCompilerErrors` unset it

@@ -6,9 +6,15 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
+import org.jetbrains.kotlin.gradle.plugin.KotlinTarget
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinJvmAndroidCompilation
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompileTool
+
+/** True when the Kotlin Multiplatform plugin is applied. */
+internal fun Project.isKotlinMultiplatform(): Boolean = extensions.findByType(KotlinMultiplatformExtension::class.java) != null
 
 /** Every reference to a Kotlin Gradle plugin type lives here, so the class only loads when the plugin can. */
 internal object KotlinTypeResolution {
@@ -16,7 +22,7 @@ internal object KotlinTypeResolution {
         project: Project,
         requestedCompilation: String?,
     ) {
-        val production =
+        val production: Pair<KotlinTarget, String>? =
             project.extensions
                 .findByType(KotlinJvmProjectExtension::class.java)
                 ?.target
@@ -25,8 +31,12 @@ internal object KotlinTypeResolution {
                     .findByType(KotlinAndroidProjectExtension::class.java)
                     ?.target
                     ?.let { it to (requestedCompilation ?: "debug") }
+                ?: project.extensions
+                    .findByType(KotlinMultiplatformExtension::class.java)
+                    ?.let { multiplatformTarget(it) }
+                    ?.let { it to (requestedCompilation ?: KotlinCompilation.MAIN_COMPILATION_NAME) }
         if (production == null) {
-            project.logger.warn("binge.gates.detekt: ${project.path} has no Kotlin JVM or Android target, so detekt runs without type resolution.")
+            project.logger.warn("binge.gates.detekt: ${project.path} has no Kotlin JVM, Android or Multiplatform jvm/Android target, so detekt runs without type resolution.")
             return
         }
         val (target, compilationName) = production
@@ -68,4 +78,9 @@ internal object KotlinTypeResolution {
             }
         }
     }
+
+    /** The `jvm` target, else the Android one: its `main` classpath resolves `commonMain` and the platform's own source. */
+    private fun multiplatformTarget(extension: KotlinMultiplatformExtension): KotlinTarget? =
+        extension.targets.firstOrNull { it.platformType == KotlinPlatformType.jvm }
+            ?: extension.targets.firstOrNull { it.platformType == KotlinPlatformType.androidJvm }
 }
