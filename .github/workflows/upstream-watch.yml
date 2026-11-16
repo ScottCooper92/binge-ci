@@ -1,0 +1,80 @@
+name: Upstream watch
+
+# Notices when a server the apps talk to ships a stable release, and opens one issue for the newest
+# release in the calling repository, naming any between it and the last one checked, with a compatibility checklist. A caller runs it weekly and by hand.
+#
+# What was last checked lives in the caller, in a small JSON file a person edits to say "reviewed,
+# this version is fine". This workflow never writes it. It needs only the default token, to open
+# issues, and the public releases API: one call per upstream.
+#
+# A release tag that is not [v]MAJOR.MINOR or [v]MAJOR.MINOR.PATCH fails the run. A comparison that guessed would hide a
+# release, which is the one thing this exists to prevent. A failed scheduled run notifies the repository.
+
+on:
+  workflow_call:
+    inputs:
+      upstreams:
+        description: >
+          JSON array, one object per upstream: {"name": "jellyfin", "repo": "jellyfin/jellyfin"}. The
+          name is a lowercase slug, unique, and the key in the state file.
+        type: string
+        required: true
+      state_file:
+        description: >
+          Path of the JSON file recording the version last checked, per upstream name:
+          {"jellyfin": {"checked": "10.11.6"}}. No leading v. A name missing from it fails the run.
+        type: string
+        default: docs/upstream.json
+      label:
+        description: Label for the issues. Created when the repository lacks it.
+        type: string
+        default: upstream
+      dry_run:
+        description: Report what would be opened and open nothing.
+        type: boolean
+        default: false
+      runner:
+        description: >
+          runs-on, as a JSON array string. Defaults to a GitHub-hosted runner. The job is a few `gh`
+          calls, so a repository that keeps its jobs off hosted runners points this at a light one. The
+          runner needs bash, jq and the `gh` CLI.
+        type: string
+        default: '["ubuntu-latest"]'
+    outputs:
+      opened:
+        description: JSON array of `name@version` for each issue opened, or that a dry run would open.
+        value: ${{ jobs.watch.outputs.opened }}
+      newest:
+        description: JSON object of upstream name to its newest stable version.
+        value: ${{ jobs.watch.outputs.newest }}
+
+# `issues: write` opens the issues; a caller must hold it, or this dies as startup_failure.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 10
+    outputs:
+      opened: ${{ steps.watch.outputs.opened }}
+      newest: ${{ steps.watch.outputs.newest }}
+    steps:
+      # The caller's own checkout, for the state file.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the upstreams
+        id: watch
+        uses: ScottCooper92/binge-ci/.github/actions/upstream-watch@v1.0.41
+        with:
+          upstreams: ${{ inputs.upstreams }}
+          state_file: ${{ inputs.state_file }}
+          label: ${{ inputs.label }}
+          dry_run: ${{ inputs.dry_run }}

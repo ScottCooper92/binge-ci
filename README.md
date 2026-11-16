@@ -191,12 +191,12 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 
 ```
 .github/workflows/    The five bot workflows, the shared CI ones (submodule-pins,
-                      consumer-check, device-smoke, actions-storage-sweep), fork-review,
+                      consumer-check, device-smoke, actions-storage-sweep, upstream-watch), fork-review,
                       and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report
-                      and actionlint (all below)
+                      upstream-watch and actionlint (all below)
 callers/              Worked callers for the public repos
                       and a generic pair for fork-review in example/
 docs/                 fork-review.md
@@ -255,6 +255,7 @@ drifted a word at a time, so they live here too:
 | `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
+| `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
 | `nightly-report` | composite action | Keeps one issue open while a run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it; optional `run-kind` is what the issue's text calls the run (default `scheduled`; when the job also runs on a push, pass a name that fits both, such as `main`, since the text reads "The <run-kind> run failed"). The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
@@ -283,6 +284,58 @@ The caller keeps the triggers, the concurrency group and any report on a red sch
 `nightly-report` makes from a job of its own. It does not use `ci-setup`. A build that reads
 credentials from `local.properties` passes them as the optional `local_properties` secret, which the
 lane writes to that file before the build and never prints.
+
+### Upstream watch
+
+`upstream-watch.yml` notices when a server the app talks to ships a stable release and opens one
+issue for it in the calling repository. Renovate keeps dependencies current; this covers the
+servers, which it cannot. Call it weekly and by hand. `callers/example/upstream-watch.yml` is the
+worked caller. It needs the default token only, no secret, and one `releases` API call per upstream.
+
+Inputs: `upstreams` (required), `state_file`, `label`, `dry_run`, `runner`. The caller grants
+`contents: read` and `issues: write`.
+
+`upstreams` is a JSON array of `{"name", "repo"}`: a lowercase slug and a GitHub `owner/repo`.
+
+```json
+[{"name": "jellyfin", "repo": "jellyfin/jellyfin"}]
+```
+
+List upstreams that are separate projects. A repository that moved, or whose project merged into another,
+is listed once under its current name: GitHub redirects the old name to the new one, so listing both
+would open the same release twice. Fallenbagel/jellyseerr now redirects to seerr-team/seerr, for example,
+so a Seerr consumer lists `seerr-team/seerr` and not Jellyseerr.
+
+The state lives in the caller, in `docs/upstream.json` unless `state_file` says otherwise. It holds
+the newest version *checked*, which is not always the newest released. It has no leading `v`, and
+it is written as the upstream writes it: `12.4` for Jellyfin 12.4, `10.11.6` for 10.11.6.
+
+```json
+{ "jellyfin": { "checked": "10.11.6" } }
+```
+
+A person edits the file, in the PR that closes the issue. The workflow never writes it. A name in
+`upstreams` with no entry fails the run, so a new upstream starts with a baseline you chose.
+
+For each upstream, it opens one issue for the newest stable release if that is newer than `checked`,
+titled `<name> <version>: new upstream release` and labelled `upstream`. The body has the release
+link and notes and a checklist. Releases between `checked` and the newest, if any, are listed in the
+body with their links, so a first run against an old baseline is one issue, not a dozen. Bumping
+`checked` to the newest version closes them all. It looks for an existing issue for that version,
+open or closed, among the issues carrying the label. It matches by the generated title and by a
+marker in the body, so a renamed issue still counts, and it opens none twice. Removing the label from
+an issue hides it from this check. If the issues cannot be listed, it opens nothing and fails the run.
+Release notes are quoted as code, so an `@mention` in them notifies nobody.
+
+It does not guess a version. A tag is `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`, with or without a leading
+`v`, digits only. Jellyfin's current tags are `v12.4` and `v10.11.11`. Versions compare by number, a
+missing patch counts as 0, so 12.0 equals 12.0.0 and 12.4 is newer than 10.11.11. Any other stable tag
+fails the run, as does an upstream with no stable release in its latest 30. Drafts and prereleases
+(`v12.0-rc7`) are dropped before the tag is read. The other upstreams still run before the run fails.
+The run summary lists every outcome, and a failed scheduled run notifies the repository.
+
+Outputs: `opened`, a JSON array of `name@version`, and `newest`, a JSON object of name to newest
+stable version. With `dry_run` it opens nothing and reports what it would. Run it that way first.
 
 ## The shared Gradle gates
 

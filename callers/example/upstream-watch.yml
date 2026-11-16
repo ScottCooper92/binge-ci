@@ -1,0 +1,31 @@
+name: Upstream watch
+
+# Opens one issue for the newest new stable release of each server this repository's app talks to,
+# with a compatibility checklist. Weekly, and by hand: run it from the Actions tab with `dry_run` on first
+# to see what it would open.
+#
+# `docs/upstream.json` records the version last checked, per upstream name, without a leading v:
+#   { "jellyfin": { "checked": "10.11.6" } }
+# A person edits it, in the PR that closes the issue. The workflow never writes it. A name in
+# `upstreams` that the file lacks fails the run.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report what would be opened and open nothing
+        type: boolean
+        default: true
+  schedule:
+    - cron: '17 6 * * 1'
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    uses: ScottCooper92/binge-ci/.github/workflows/upstream-watch.yml@v1
+    with:
+      upstreams: '[{"name":"jellyfin","repo":"jellyfin/jellyfin"}]'
+      dry_run: ${{ inputs.dry_run == true }}
