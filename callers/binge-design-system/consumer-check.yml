@@ -1,6 +1,6 @@
 name: Consumer check
 
-# Compiles binge-seerr, binge-archive and binge-jellyfin against this PR's head, one job each, side by side.
+# Compiles binge-seerr, binge-archive and ephyra against this PR's head, one job each, side by side.
 # Informational: a workflow of its own, deliberately not named `CI`, and not a required check. See
 # consumer-check.yml in binge-ci for why.
 #
@@ -54,5 +54,5 @@ jobs:
   jellyfin:
     uses: ScottCooper92/binge-ci/.github/workflows/consumer-check.yml@v1
     with:
-      consumer: ScottCooper92/binge-jellyfin
+      consumer: ScottCooper92/ephyra
       tasks: ':app:compileDebugKotlin :app:compileDebugUnitTestKotlin'
