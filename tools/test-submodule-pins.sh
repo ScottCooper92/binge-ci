@@ -14,7 +14,7 @@ trap 'rm -rf "$work"' EXIT
 failures=0
 
 # The step's script: everything under its `run: |`, the last block in the file.
-awk 'f { sub(/^          /, ""); print } /^        run: \|/ { f = 1 }' "$workflow" > "$work/step.sh"
+awk '/^        run: \|/ { buf = ""; f = 1; next } f { sub(/^          /, ""); buf = buf $0 "\n" } END { printf "%s", buf }' "$workflow" > "$work/step.sh"
 
 # Scratch repositories reached over file://. The step fetches pins by SHA, which a GitHub remote
 # allows and a local one does not unless told to.
