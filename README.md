@@ -255,7 +255,7 @@ drifted a word at a time, so they live here too:
 | `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
-| `upstream-watch.yml` | reusable workflow | Opens one issue per new stable release of a server the app talks to (Jellyfin, Seerr, Jellyseerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
+| `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
 | `nightly-report` | composite action | Keeps one issue open while a run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it; optional `run-kind` is what the issue's text calls the run (default `scheduled`; when the job also runs on a push, pass a name that fits both, such as `main`, since the text reads "The <run-kind> run failed"). The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
@@ -300,6 +300,11 @@ Inputs: `upstreams` (required), `state_file`, `label`, `dry_run`, `runner`. The 
 ```json
 [{"name": "jellyfin", "repo": "jellyfin/jellyfin"}]
 ```
+
+List upstreams that are separate projects. A repository that moved, or whose project merged into another,
+is listed once under its current name: GitHub redirects the old name to the new one, so listing both
+would open the same release twice. Fallenbagel/jellyseerr now redirects to seerr-team/seerr, for example,
+so a Seerr consumer lists `seerr-team/seerr` and not Jellyseerr.
 
 The state lives in the caller, in `docs/upstream.json` unless `state_file` says otherwise. It holds
 the newest version *checked*, which is not always the newest released. It has no leading `v`, and
