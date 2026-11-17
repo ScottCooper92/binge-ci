@@ -119,6 +119,11 @@ jobs:
       - name: Test the author bot's PR body check
         run: ./tools/test-body-checklist.sh
 
+      # The review's fourth door re-opens on every author reply, so what stops it after the cap is
+      # tested on fixed counts, and the input is held to the default the consumers rely on.
+      - name: Test the review bot's rebuttal cap
+        run: ./tools/test-rebuttal-cap.sh
+
       # Each gate test is named by hand in the lists the bots read, and a list that falls behind
       # leaves a bot with guidance CI never complains about.
       - name: Check that every list of gate tests names each one this workflow runs

@@ -75,7 +75,7 @@ jobs:
         tools/test-internal-refs.sh, tools/check-token-permissions.sh,
         tools/test-token-permissions.sh, tools/test-check-callers.sh, tools/test-merge-guards.sh,
         tools/test-governed-paths.sh, tools/test-submodule-pins.sh, tools/test-fork-review.sh,
-        tools/test-download-actionlint.sh, tools/test-upstream-watch.sh, tools/test-submodule-bump.sh, tools/test-body-checklist.sh,
+        tools/test-download-actionlint.sh, tools/test-upstream-watch.sh, tools/test-submodule-bump.sh, tools/test-body-checklist.sh, tools/test-rebuttal-cap.sh,
         tools/check-gate-lists.sh,
         tools/test-check-gate-lists.sh, or the gradle-plugins
         build and its tests
