@@ -162,8 +162,11 @@ if [ -n "$old_remote" ]; then
     # costs a noisy PR, wrongly rebuilding costs somebody's commit.
     merge_base=$(git merge-base "origin/$BASE_BRANCH" "$old_remote" 2> /dev/null) || merge_base=''
     if [ -n "$merge_base" ]; then
-      mapfile -t touched < <(git diff --name-only "$merge_base" "$old_remote" -- . ":(exclude)$path")
-      if [ "${#touched[@]}" -gt 0 ] && git diff --quiet "origin/$BASE_BRANCH" "$old_remote" -- "${touched[@]}"; then
+      # NUL-delimited and without rename detection: git quotes a name with a non-ASCII byte, which
+      # then matches no file and reads as "the same", and a rename lists only its new name, so the
+      # deletion of the old one would go unchecked. Literal pathspecs, so a `*` or `[` in a name is not a glob.
+      mapfile -d '' -t touched < <(git diff -z --no-renames --name-only "$merge_base" "$old_remote" -- . ":(exclude)$path")
+      if [ "${#touched[@]}" -gt 0 ] && git --literal-pathspecs diff --quiet "origin/$BASE_BRANCH" "$old_remote" -- "${touched[@]}"; then
         mode=rebuild
         echo "::notice::$bump_branch holds commits whose changes $BASE_BRANCH already has, so it is rebuilt rather than stacked on."
       fi

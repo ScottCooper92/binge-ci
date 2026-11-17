@@ -348,6 +348,48 @@ head=$(git -C "$case_dir/sub" rev-parse HEAD)
 run
 expect "  still stacks, because the branch's content is not all in main" '[ $rc -eq 0 ] && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
 
+echo "-- the leftover branch's commit adds a file with a non-ASCII name that main lacks"
+new_world nonascii
+run
+git clone -q "$case_dir/caller.git" "$case_dir/human" 2> /dev/null
+git -C "$case_dir/human" checkout -q $bump
+echo fix > "$case_dir/human/café.txt"
+git -C "$case_dir/human" add .
+git -C "$case_dir/human" commit -q -m "fix: adapt the caller"
+git -C "$case_dir/human" push -q origin HEAD
+human_sha=$(git -C "$case_dir/human" rev-parse HEAD)
+export human_sha
+sub_commit "feat: third"
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+: > "$FAKE/calls.log"
+run
+expect "  stacks: a name git quotes is still compared" '[ $rc -eq 0 ] && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
+
+echo "-- the leftover branch's commit renames a file, and main has the new name but kept the old one"
+new_world renamed
+git -C "$case_dir/seed" pull -q origin main
+echo old > "$case_dir/seed/a.txt"
+git -C "$case_dir/seed" add a.txt
+git -C "$case_dir/seed" commit -q -m "chore: add a.txt"
+git -C "$case_dir/seed" push -q origin HEAD:main
+run
+git clone -q "$case_dir/caller.git" "$case_dir/human" 2> /dev/null
+git -C "$case_dir/human" checkout -q $bump
+git -C "$case_dir/human" mv a.txt b.txt
+git -C "$case_dir/human" commit -q -m "fix: rename a to b"
+git -C "$case_dir/human" push -q origin HEAD
+human_sha=$(git -C "$case_dir/human" rev-parse HEAD)
+export human_sha
+echo old > "$case_dir/seed/b.txt"
+git -C "$case_dir/seed" add b.txt
+git -C "$case_dir/seed" commit -q -m "chore: add b.txt"
+git -C "$case_dir/seed" push -q origin HEAD:main
+sub_commit "feat: third"
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+: > "$FAKE/calls.log"
+run
+expect "  stacks: the deletion of the old name is not in main" '[ $rc -eq 0 ] && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
+
 echo "-- a path that is not a submodule, and an unsafe one"
 new_world badpath
 run SUBMODULE_PATH=nothing/here
