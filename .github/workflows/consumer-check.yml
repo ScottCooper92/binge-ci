@@ -171,6 +171,7 @@ jobs:
           cache-cleanup: on-success
 
       - name: Compile the consumer against this change
+        id: compile
         working-directory: consumer
         env:
           TASKS: ${{ inputs.tasks }}
@@ -182,7 +183,9 @@ jobs:
       - name: Report
         if: ${{ always() }}
         env:
-          OUTCOME: ${{ job.status }}
+          # The compile step's own outcome, not the job's: a failed mint, checkout or swap leaves it
+          # `skipped`, and that is not a compile failure.
+          COMPILE: ${{ steps.compile.outcome }}
           CONSUMER: ${{ inputs.consumer }}
           TASKS: ${{ inputs.tasks }}
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -194,9 +197,15 @@ jobs:
             echo
             echo "Ran \`${TASKS}\` in the consumer. Its lint, unit tests and screenshot baselines are not run here."
             echo
-            if [ "${OUTCOME}" = "success" ]; then
-              echo "${CONSUMER} still compiles against this change."
-            else
-              echo "The consumer no longer compiles against this change. Its bump PR will need code changes. Expected for an intentional signature change; say so in the PR body."
-            fi
+            case "${COMPILE}" in
+              success)
+                echo "${CONSUMER} still compiles against this change."
+                ;;
+              failure)
+                echo "The consumer no longer compiles against this change. Its bump PR will need code changes. Expected for an intentional signature change; say so in the PR body."
+                ;;
+              *)
+                echo "The consumer was not compiled: the job stopped before the compile step finished (${COMPILE}). This says nothing about the change. Look at the failed step in the job log: a token mint, a checkout, or the swap."
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
