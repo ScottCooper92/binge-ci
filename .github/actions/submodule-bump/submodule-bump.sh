@@ -56,7 +56,9 @@ finish() {
   } >> "$out"
   if [ "$rc" -ne 0 ] && [ -n "$pr_number" ] && [ "$DRY_RUN" != true ]; then
     local marker="<!-- submodule-bump-failed:$path:${head:-unknown} -->"
-    if ! gh api "repos/$REPO/issues/$pr_number/comments" 2> /dev/null | jq -e --arg m "$marker" 'any(.[]; .body | contains($m))' > /dev/null 2>&1; then
+    # Paginated: the endpoint returns 30 comments a page, and the bots comment on this PR freely.
+    seen=$(gh api "repos/$REPO/issues/$pr_number/comments?per_page=100" --paginate --jq '.[].body' 2> /dev/null)
+    if ! grep -qF -- "$marker" <<< "$seen"; then
       printf '%s\nThe submodule bump for `%s` failed on this PR: %s/%s/actions/runs/%s\n' \
         "$marker" "$path" "${GITHUB_SERVER_URL:-https://github.com}" "$REPO" "${GITHUB_RUN_ID:-0}" > "$work/failed.md"
       gh api -X POST "repos/$REPO/issues/$pr_number/comments" -F body=@"$work/failed.md" > /dev/null 2>&1
@@ -149,7 +151,8 @@ fi
 
 # The body quotes text from another repository, so it goes in fences: nothing in a commit subject or
 # a migration note can @mention anyone, render as markup, or forge the marker comments.
-tidy() { sed 's/<!--/<!- -/g'; }
+# A line of three or more tildes, indented up to three spaces, would close the fence, so it is escaped.
+tidy() { sed -E -e 's/<!--/<!- -/g' -e 's/^( {0,3})(~{3,})/\1\\\2/'; }
 fence='~~~~~~~~'
 total=$(git -C "$path" rev-list --count "$pinned..$head")
 {

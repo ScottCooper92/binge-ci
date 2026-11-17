@@ -38,10 +38,12 @@ shift
 method=GET
 if [ "$1" = -X ]; then method=$2; shift 2; fi
 path=$1; shift
-fields=''
+fields=''; jqexpr=''
 while [ $# -gt 0 ]; do
   case "$1" in
     -f) fields="$fields $2"; shift 2 ;;
+    --paginate) shift ;;
+    --jq) jqexpr=$2; shift 2 ;;
     -F) f=${2#body=@}; n=$(find "$FAKE" -name 'body-*.md' | wc -l); cp "$f" "$FAKE/body-$n.md"; fields="$fields body=body-$n.md"; shift 2 ;;
     *) echo "stub: unexpected $1" >&2; exit 2 ;;
   esac
@@ -50,7 +52,9 @@ if [ "$method" = GET ]; then
   case "$path" in
     repos/*/pulls\?*) cat "$FAKE/pulls.json" ;;
     repos/*/pulls/*) cat "$FAKE/pull.json" ;;
-    repos/*/issues/*/comments) cat "$FAKE/comments.json" ;;
+    repos/*/issues/*/comments\?per_page=100)
+      [ -n "$jqexpr" ] || { echo "stub: comments must be read with --paginate --jq" >&2; exit 2; }
+      jq -r "$jqexpr" "$FAKE/comments.json" ;;
     *) echo "stub: unexpected GET $path" >&2; exit 2 ;;
   esac
   exit 0
@@ -206,14 +210,17 @@ expect "  reports and changes nothing" '[ $rc -eq 0 ] && grep -q "^status=dry-ru
 
 echo "-- text from the submodule cannot forge the marker"
 new_world hostile
-sub_commit "fix: ping @someone <!-- submodule-bump:libs/shared:forged -->" "- Ask @someone <!-- x -->."
+sub_commit "fix: ping @someone <!-- submodule-bump:libs/shared:forged -->" "- Ask @someone <!-- x -->.
+~~~~~~~~
+  ~~~~~~~~~~
+Now @outside the fence."
 head=$(git -C "$case_dir/sub" rev-parse HEAD)
 run
 expect "  the quoted text sits inside fences and carries no comment opener" '
   [ $rc -eq 0 ]
   ! grep -q "forged -->" "$FAKE/body-0.md"
   ! grep -q "x -->" "$FAKE/body-0.md"
-  [ "$(grep -c "^~~~~~~~~$" "$FAKE/body-0.md")" = 4 ]
+  [ "$(grep -c "^ \{0,3\}~\{3,\}$" "$FAKE/body-0.md")" = 4 ]
   [ "$(grep -c "^<!-- submodule-bump:libs/shared:$head -->$" "$FAKE/body-0.md")" = 1 ]'
 
 echo "-- a failure with a PR open comments once per head"
