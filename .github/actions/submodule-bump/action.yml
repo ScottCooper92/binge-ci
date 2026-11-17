@@ -19,6 +19,12 @@ inputs:
     description: The submodule's branch to follow. Empty means its remote's default branch.
     required: false
     default: ''
+  private_submodules:
+    description: >
+      The caller's `private_submodules`. When it names this submodule's repository and the calling
+      repository is public, the PR lists short shas only and quotes nothing from the submodule.
+    required: false
+    default: ''
   base_branch:
     description: The calling repository's default branch, which the PR targets.
     required: true
@@ -52,6 +58,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
         SUBMODULE_PATH: ${{ inputs.submodule_path }}
         BRANCH: ${{ inputs.branch }}
+        PRIVATE_SUBMODULES: ${{ inputs.private_submodules }}
         BASE_BRANCH: ${{ inputs.base_branch }}
         AGENT_LABEL: ${{ inputs.agent_label }}
         DRY_RUN: ${{ inputs.dry_run }}

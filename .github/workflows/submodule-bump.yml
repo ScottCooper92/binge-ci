@@ -29,7 +29,8 @@ on:
           Names of private repositories, comma- or newline-separated and under the caller's owner, that the
           checkout fetches as git submodules. Empty (the default) changes nothing. When set, the author app
           token can read the caller and these repositories, so the app must be installed on every one of them.
-          Name the bumped submodule here when it is private.
+          Name the bumped submodule here when it is private. In a public caller the PR then lists short
+          shas only and quotes no commit subject or migration note from it.
         type: string
         default: ''
       agent_label:
@@ -125,6 +126,7 @@ jobs:
         with:
           submodule_path: ${{ inputs.submodule_path }}
           branch: ${{ inputs.branch }}
+          private_submodules: ${{ inputs.private_submodules }}
           base_branch: ${{ steps.base.outputs.name }}
           agent_label: ${{ inputs.agent_label }}
           dry_run: ${{ inputs.dry_run }}

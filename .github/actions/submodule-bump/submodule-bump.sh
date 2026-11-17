@@ -5,7 +5,7 @@
 #
 # Run from the root of the caller's checkout, on its default branch, with the submodules initialised
 # and the checkout's credentials able to push. Environment: SUBMODULE_PATH, BASE_BRANCH, REPO,
-# GH_TOKEN; optional BRANCH (the submodule's branch; empty means its remote's default), AGENT_LABEL,
+# GH_TOKEN; optional PRIVATE_SUBMODULES (the caller's `private_submodules`), BRANCH (the submodule's branch; empty means its remote's default), AGENT_LABEL,
 # DRY_RUN, BOT_NAME, BOT_EMAIL. GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are written when set.
 #
 # What it does, by what it finds:
@@ -24,6 +24,7 @@ set -euo pipefail
 : "${REPO:?REPO is required}"
 BRANCH=${BRANCH:-}
 AGENT_LABEL=${AGENT_LABEL:-agent}
+PRIVATE_SUBMODULES=${PRIVATE_SUBMODULES:-}
 DRY_RUN=${DRY_RUN:-false}
 BOT_NAME=${BOT_NAME:-github-actions[bot]}
 BOT_EMAIL=${BOT_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}
@@ -154,12 +155,33 @@ if [ -n "$old_remote" ]; then
   [ "$foreign" -eq 0 ] || mode=stack
 fi
 
+# A private submodule's commit subjects and migration notes must not reach a public repository's PR.
+# The submodule is private when the caller lists it in `private_submodules`, matched by the name of
+# its remote's repository. The caller is taken to be public unless the API says it is private, so a
+# lookup that fails redacts rather than leaks.
+redact=false
+if [ -n "$PRIVATE_SUBMODULES" ]; then
+  sub_url=$(git -C "$path" config --get remote.origin.url)
+  sub_repo=$(basename "${sub_url%/}" .git)
+  listed=false
+  while IFS= read -r name; do
+    name=${name//[[:space:]]/}
+    if [ -n "$name" ] && [ "${name,,}" = "${sub_repo,,}" ]; then listed=true; fi
+  done < <(printf '%s\n' "${PRIVATE_SUBMODULES//,/$'\n'}")
+  if [ "$listed" = true ]; then
+    caller_private=$(gh api "repos/$REPO" --jq .private 2> /dev/null) || caller_private=unknown
+    [ "$caller_private" = true ] || redact=true
+  fi
+fi
+
 # The body quotes text from another repository, so it goes in fences: nothing in a commit subject or
 # a migration note can @mention anyone, render as markup, or forge the marker comments.
 # A line of three or more tildes, indented up to three spaces, could close the fence, so it gets a backslash.
 tidy() { sed -E -e 's/<!--/<!- -/g' -e 's/^( {0,3})(~{3,})/\1\\\2/'; }
 fence='~~~~~~~~'
 total=$(git -C "$path" rev-list --count "$pinned..$head")
+commit_format='%h %s'
+[ "$redact" != true ] || commit_format='%h'
 {
   echo "## What and why"
   echo
@@ -167,14 +189,19 @@ total=$(git -C "$path" rev-list --count "$pinned..$head")
   echo
   echo "## Commits ($total)"
   echo
+  if [ "$redact" = true ]; then
+    echo "The submodule is private and this repository is public, so only the short shas are listed. The subjects and any migration notes are in the submodule's own history."
+    echo
+  fi
   echo "$fence"
   # sed reads all of its input, unlike head: a producer that outlives its consumer dies of SIGPIPE, and
   # under pipefail that ends the script on exactly the long ranges the cap exists for.
-  git -C "$path" log --reverse --format='%h %s' "$pinned..$head" | sed -n "1,${max_commits}p" | tidy
+  git -C "$path" log --reverse --format="${commit_format}" "$pinned..$head" | sed -n "1,${max_commits}p" | tidy
   [ "$total" -le "$max_commits" ] || echo "... and $((total - max_commits)) more"
   echo "$fence"
 } > "$work/body.md"
-migrations=$(git -C "$path" diff -U0 --no-color "$pinned" "$head" -- docs/migrations.md 2> /dev/null \
+migrations=''
+[ "$redact" = true ] || migrations=$(git -C "$path" diff -U0 --no-color "$pinned" "$head" -- docs/migrations.md 2> /dev/null \
   | awk '/^@@/ {h = 1; next} h && /^\+/ {print substr($0, 2)}' | head -c "$max_migration_chars" | tidy || true)
 if [ -n "${migrations//[[:space:]]/}" ]; then
   {

@@ -50,6 +50,7 @@ while [ $# -gt 0 ]; do
 done
 if [ "$method" = GET ]; then
   case "$path" in
+    repos/o/r) [ -f "$FAKE/repo.json" ] || { echo "HTTP 403" >&2; exit 1; }; jq -r "${jqf:-.}" "$FAKE/repo.json" ;;
     repos/*/pulls\?*) cat "$FAKE/pulls.json" ;;
     repos/*/pulls/*) cat "$FAKE/pull.json" ;;
     # The real endpoint returns 30 comments a page and only --paginate reads past the first.
@@ -238,6 +239,35 @@ expect "  the quoted text sits inside fences and carries no comment opener" '
   [ "$(grep -c "^~~~~~~~~$" "$FAKE/body-0.md")" = 4 ]
   [ "$(grep -c "^<!-- submodule-bump:libs/shared:$head -->$" "$FAKE/body-0.md")" = 1 ]
   ! grep -qE "^ {0,3}~{3,}.*@someone" "$FAKE/body-0.md"'
+
+echo "-- a private submodule in a public repository quotes nothing"
+new_world redact
+sub_commit "fix: SECRET subject" "- SECRET migration note."
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+echo '{"private":false}' > "$FAKE/repo.json"
+run PRIVATE_SUBMODULES=sub
+expect "  lists short shas only and says why" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out" && grep -q "^${head:0:7}$" "$FAKE/body-0.md" && grep -q "only the short shas are listed" "$FAKE/body-0.md" && grep -q "^## Commits (2)$" "$FAKE/body-0.md"'
+expect "  quotes no subject and no migration text anywhere in the PR or the commit" '! grep -rq "SECRET\|Rename the old option\|fix: second" "$FAKE"/body-*.md "$FAKE/calls.log" && ! git -C "$case_dir/caller.git" log -1 --format=%B $bump | grep -q "SECRET"'
+echo "-- ... and when the caller's visibility cannot be read"
+rm -f "$FAKE/repo.json" "$FAKE"/body-*.md
+git -C "$case_dir/caller.git" branch -q -D $bump
+: > "$FAKE/calls.log"
+run PRIVATE_SUBMODULES=sub
+expect "  it is treated as public" '[ $rc -eq 0 ] && grep -q "only the short shas are listed" "$FAKE/body-0.md" && ! grep -q "SECRET" "$FAKE/body-0.md"'
+
+echo "-- a private submodule in a private repository keeps the usual body"
+new_world private
+sub_commit "fix: SECRET subject" "- SECRET migration note."
+echo '{"private":true}' > "$FAKE/repo.json"
+run PRIVATE_SUBMODULES=other,SUB
+expect "  quotes the subjects and the migration note (name matched case-insensitively in a list)" '[ $rc -eq 0 ] && grep -q "fix: SECRET subject" "$FAKE/body-0.md" && grep -q "SECRET migration note" "$FAKE/body-0.md" && ! grep -q "only the short shas" "$FAKE/body-0.md"'
+
+echo "-- a public repository whose private list names another repository keeps the usual body"
+new_world unlisted
+sub_commit "fix: visible subject" "- visible note."
+echo '{"private":false}' > "$FAKE/repo.json"
+run PRIVATE_SUBMODULES=other-lib
+expect "  quotes the subjects and the migration note" '[ $rc -eq 0 ] && grep -q "fix: visible subject" "$FAKE/body-0.md" && grep -q "visible note" "$FAKE/body-0.md"'
 
 echo "-- a failure with a PR open comments once per head"
 new_world failing

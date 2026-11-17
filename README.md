@@ -341,7 +341,11 @@ What a run does:
 It pushes and opens the PR as the author app, not `GITHUB_TOKEN`, because a PR opened with that token
 starts no workflow run and nothing would check it. For a private submodule, name it in
 `private_submodules`, as in "Private submodules" above; the app then needs read access to it, and the
-token it mints has the author app's write access to every repository listed. Run it with `dry_run` on first.
+token it mints has the author app's write access to every repository listed. When the caller is public,
+the PR for a listed submodule carries short shas only: no commit subject and no migration text is quoted,
+because the PR is world-readable. The workflow reads whether the caller is private with the app token,
+and treats the caller as public when it cannot tell. Name the submodule by its repository name, as its
+remote spells it. Run it with `dry_run` on first.
 
 ### The emulator lane
 
