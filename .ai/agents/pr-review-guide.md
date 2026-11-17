@@ -22,7 +22,7 @@ should, case by case (`tools/test-governed-paths.sh`); the pin check's step reac
 block, the agent's allowlist and each job's permissions, and its two copies of `collect_pr` are identical (`tools/test-fork-review.sh`);
 the actionlint action's download keeps its outcomes against a stubbed `gh` (`tools/test-download-actionlint.sh`);
 the upstream-watch script keeps its outcomes against a stubbed `gh`, an unparsable tag failing loudly among them (`tools/test-upstream-watch.sh`);
-the submodule-bump script keeps its outcomes against scratch repositories and a stubbed `gh`, a held pin and commits pushed by someone else never being overwritten among them (`tools/test-submodule-bump.sh`);
+the submodule-bump script keeps its outcomes against scratch repositories and a stubbed `gh`, a held pin and commits pushed by someone else never being overwritten among them (`tools/test-submodule-bump.sh`), and the author bot's PR-body edit never reaching past a checklist box or the "Left to CI" line (`tools/test-body-checklist.sh`);
 every list of these gate scripts names each one `ci.yml` runs (`tools/check-gate-lists.sh`, tested by `tools/test-check-gate-lists.sh`);
 and `./gradlew build` in `gradle-plugins/`
 compiled the shared Gradle gates, validated the plugins, and ran their unit and TestKit tests.
