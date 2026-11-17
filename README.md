@@ -254,7 +254,7 @@ drifted a word at a time, so they live here too:
 | --- | --- | --- |
 | `fork-review.yml` | reusable workflow | An advisory, read-only review of a fork PR, after a maintainer labels it. Two callers, one for the untrusted `pull_request` stage and one for the trusted `workflow_run` stage, both in `callers/example/`; each needs `contents: read`, `actions: read` and `pull-requests: write`. See [docs/fork-review.md](docs/fork-review.md). |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
-| `consumer-check.yml` | reusable workflow | Compiles a public consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
+| `consumer-check.yml` | reusable workflow | Compiles a consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
@@ -281,7 +281,8 @@ secrets: inherit
 
 - It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
   `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml` and `consumer-check.yml`. In
-  `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules.
+  `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules; see
+  "Private consumers" below for those.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.
 - The token is scoped by `repositories:`, which replaces the default of the caller alone. The workflows
   add the caller to the list themselves; a hand-written mint has to do the same.
@@ -295,6 +296,31 @@ secrets: inherit
   request's branch in the calling repository. Opt in knowing that.
 - `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
   that a pin is an ancestor of it.
+
+### Private consumers
+
+`consumer-check.yml` compiles a consumer, and the consumer's own checkout needs a token when the consumer
+is private or includes private submodules. Set `private_consumer: true` and pass the two reviewer app
+secrets:
+
+```yaml
+with:
+  consumer: owner/consumer
+  private_consumer: true
+secrets:
+  REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+  REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+```
+
+- The workflow mints a read-only token (`permission-contents: read`) for the caller's owner, with no
+  `repositories:` list, so it reaches every repository the app is installed on. No private name appears
+  here or in the caller.
+- The app has to be installed on the consumer and on each of its private submodules, with read access to
+  contents. A repository it is not installed on fails to clone.
+- The token is used for the consumer's checkout and for its submodule fetch. Submodule URLs must be
+  https. It is never printed or written to the consumer's git config.
+- `private_submodules` is separate: it covers the caller's own checkout. Set both when both apply.
+- Empty or false changes nothing.
 
 ### Submodule bump
 
