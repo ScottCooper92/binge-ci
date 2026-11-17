@@ -160,6 +160,8 @@ fi
 tidy() { sed -E -e 's/<!--/<!- -/g' -e 's/^( {0,3})(~{3,})/\1\\\2/'; }
 fence='~~~~~~~~'
 total=$(git -C "$path" rev-list --count "$pinned..$head")
+# Captured before trimming: `head` closing the pipe early would hand git a SIGPIPE, and pipefail would end the run.
+commits=$(git -C "$path" log --reverse --format='%h %s' "$pinned..$head")
 {
   echo "## What and why"
   echo
@@ -168,7 +170,7 @@ total=$(git -C "$path" rev-list --count "$pinned..$head")
   echo "## Commits ($total)"
   echo
   echo "$fence"
-  git -C "$path" log --reverse --format='%h %s' "$pinned..$head" | head -n "$max_commits" | tidy
+  head -n "$max_commits" <<< "$commits" | tidy
   [ "$total" -le "$max_commits" ] || echo "... and $((total - max_commits)) more"
   echo "$fence"
 } > "$work/body.md"

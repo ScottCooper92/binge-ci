@@ -134,6 +134,22 @@ expect "  the body lists the commits, oldest first, as short sha and subject" '
 expect "  the body quotes the migration entry added in the range" 'grep -q "^- Rename the old option to the new one.$" "$FAKE/body-0.md" && grep -q "^## Migrations" "$FAKE/body-0.md"'
 expect "  the label is applied" 'grep -q "^POST repos/o/r/issues/7/labels labels\[\]=agent$" "$FAKE/calls.log"'
 
+echo "-- a pin far behind the head"
+new_world far
+# Enough commits that the log outruns the pipe buffer when the list is cut at 100.
+git -C "$case_dir/sub" fast-import --quiet --force --date-format=raw <<< "$(
+  echo "reset refs/heads/main"
+  echo "from $head"
+  for i in $(seq 1 1500); do
+    printf 'commit refs/heads/main\ncommitter t <t@example.test> %d +0000\ndata <<E\nchore: filler %d\nE\n\n' "$((1700000000 + i))" "$i"
+  done
+)"
+git -C "$case_dir/sub" push -q -f origin HEAD:main
+head=$(git -C "$case_dir/sub" rev-parse main)
+run
+expect "  still opens the PR" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out"'
+expect "  cuts the list at 100 and counts the rest" 'grep -q "^## Commits (1501)$" "$FAKE/body-0.md" && grep -q "^\.\.\. and 1401 more$" "$FAKE/body-0.md"'
+
 echo "-- a submodule with no migrations file"
 new_world nomig
 git -C "$case_dir/sub" rm -q -r docs
