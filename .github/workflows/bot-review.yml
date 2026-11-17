@@ -63,6 +63,11 @@ name: Bot review
 # author-comments marks every reply, including an answer to a maintainer's question on an
 # approved head, and there is nothing to dispute there.
 #
+# The door is capped (`max_rebuttals`, default 1): the author bot answers every comment, and one
+# that cannot act on a finding would otherwise be reviewed against the same bytes forever. Past the
+# cap the review stays shut, one comment keyed to the head says a human has to decide, and the
+# CHANGES_REQUESTED verdict stands. A push is a new head with a new count.
+#
 # Still demands a green CI run on the head, same as the other PR-scoped doors - a rebuttal does
 # not buy a review CI never vouched for, and one with no completed run on this sha (conclusion
 # empty) is skipped rather than reconsidered. Unlike labeled/synchronize this has no
@@ -125,6 +130,13 @@ on:
           workflow_run inherits its actor from the CI run.
         type: string
         default: binge-pr-author[bot]
+      max_rebuttals:
+        description: >
+          How many times the author bot's reply to a CHANGES_REQUESTED verdict re-opens the review
+          of an unchanged head. Past it the review stays shut, and one comment says a human has to
+          decide; the verdict stands. 0 never reconsiders. A new push is a new head with a new count.
+        type: number
+        default: 1
       review_guide_path:
         type: string
         default: .ai/agents/pr-review-guide.md
@@ -884,11 +896,22 @@ jobs:
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
           GH_RETRY: ${{ steps.guards.outputs.retry }}
           REBUTTAL: ${{ needs.resolve.outputs.rebuttal }}
+          MAX_REBUTTALS: ${{ inputs.max_rebuttals }}
         run: |
           set -euo pipefail
           # Every gh call below retries a connection that never opened.
           # shellcheck source=/dev/null
           . "$GH_RETRY"
+          [[ $MAX_REBUTTALS =~ ^[0-9]+$ ]] || { echo "::error::max_rebuttals must be a whole number, not '$MAX_REBUTTALS'."; exit 1; }
+          # bound:begin
+          # Whether the head has had all the reconsiderations it gets. The first pinned review is the
+          # review itself; each one after it answered a rebuttal. Counting verdicts rather than
+          # comparing findings keeps it deterministic: a summary's wording drifts between runs.
+          # tools/test-rebuttal-cap.sh runs this.
+          rebuttal_cap_reached() { # $1=this workflow's pinned reviews on the head  $2=max_rebuttals
+            [ $(($1 - 1)) -ge "$2" ]
+          }
+          # bound:end
           # This workflow's own reviews only (#90). Since #87 an approval found here also retries the
           # merge, so a pinned-looking approval from any other app must not count. Without the slug the
           # filter would match nothing and the head would be reviewed again, so it stops instead.
@@ -902,6 +925,19 @@ jobs:
           if [ "$REBUTTAL" = "true" ]; then
             latest=$(jq -r '.[-1].state // empty' <<<"$pinned")
             if [ "$latest" = "CHANGES_REQUESTED" ]; then
+              if rebuttal_cap_reached "$reviewed" "$MAX_REBUTTALS"; then
+                echo "$SHA has had $((reviewed - 1)) reconsideration(s) and the cap is $MAX_REBUTTALS - not reviewing it again."
+                # Once per head: the author bot answers each comment, so this door opens again on every one.
+                marker="<!-- review-stalled:${SHA} -->"
+                existing=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate --jq '.[].body' || true)
+                if ! grep -qF -- "$marker" <<<"$existing"; then
+                  printf '%s\nThe author bot has answered the review of `%s` and the head has not changed, so I am not reviewing it again. The verdict stands and a human needs to decide: fix it, or say why it is wrong.\n' \
+                    "$marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file - \
+                    || echo "::warning::Could not post the note that this head is waiting for a human."
+                fi
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               echo "A rebuttal to the CHANGES_REQUESTED verdict on $SHA - reviewing it again."
               exit 0
             fi
