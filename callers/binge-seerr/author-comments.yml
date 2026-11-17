@@ -84,8 +84,7 @@ jobs:
         `abortOnError = false`, and do not exclude a source set from `check`.
 
         A lint baseline is worse than it looks here: it silences the finding
-        permanently and silently, in a repository whose whole purpose is to
-        be copied.
+        permanently and silently.
 
         There is one more thing a comment cannot ask you for. This is the
         reference companion, and it has no privileged relationship with the
