@@ -25,7 +25,7 @@ they are worth keeping in one place.
 | --- | --- |
 | `bot-review.yml` | Reviews a PR once CI goes green, and optionally merges it by the caller's `merge_method`. While CI on the default branch is red it does not merge, except a PR carrying the `fix-default-branch` label; a held PR is marked `merge-held` and merged when the default branch goes green. |
 | `author-ci-fix.yml` | Makes one repair attempt per commit when CI goes red, at most two per human push, then stops rather than churning. While CI on the default branch is red it leaves PR branches alone, since they all inherit that failure, and opens one repair PR from the default branch instead (`repair_default_branch`). |
-| `author-comments.yml` | Answers review feedback — top-level comments, inline notes and reviews. |
+| `author-comments.yml` | Answers review feedback — top-level comments, inline notes and reviews. When a finding is only that the PR body ticks a check that did not pass, it un-ticks the box (or rewords the "Left to CI" line) and says so in its reply; it edits nothing else in the body. |
 | `author-conflicts.yml` | Finds PRs that conflict when the base moves, and resolves them. |
 | `author-retarget.yml` | Catches a stacked PR up to its base so it starts moving again. |
 

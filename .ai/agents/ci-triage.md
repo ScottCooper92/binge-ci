@@ -24,6 +24,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the actionlint download | `tools/test-download-actionlint.sh` - `download-actionlint.sh` against a stubbed `gh`: a good tarball, a checksum mismatch (one re-fetch, then failure), an HTML error page, and a transfer that keeps failing |
 | Test the upstream-watch script | `tools/test-upstream-watch.sh` - `upstream-watch.sh` against a stubbed `gh`: a newer stable release, an equal or older one, drafts and prereleases, two- and three-part tags (`v12.4`, `v10.11.11`) kept as written, a tag that is neither, a missing state entry or file, one issue naming the releases in between, a duplicate by title or marker, a failed issue lookup, a dry run, and version order by number rather than text |
 | Test the submodule-bump script | `tools/test-submodule-bump.sh` - `submodule-bump.sh` against scratch repositories and a stubbed `gh`: a pin at the head, a new bump, a re-run, a PR whose commits are all the bot's, one with a commit pushed by someone else, a conflicted PR, a pin that is not behind the branch, a dry run, text that tries to forge the marker, and a failure reported once per head |
+| Test the author bot's PR body check | `tools/test-body-checklist.sh` - the body-edit function in `author-comments.yml` against fixture bodies: a box un-ticked, the "Left to CI" line reworded, and every other change (a box ticked, a line added or removed, prose edited) refused |
 | Check the gate lists | `tools/check-gate-lists.sh` - every list of gate tests (CLAUDE.md, the review guide, this file's three parts, the PR template, `gated_checks` and `verify_guidance`) names each `tools/test-*.sh` and `tools/check-*.sh` that `ci.yml` runs |
 | Test the gate-lists check | `tools/test-check-gate-lists.sh` - `check-gate-lists.sh` against fixture trees: a complete set passes, a script missing from each list fails naming that list, and a longer name does not stand in for a shorter one |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`, `upstream-watch.sh`) and `tools/*.sh` |
@@ -62,6 +63,7 @@ to improvise.
 | `test-download-actionlint.sh`: a case FAILs | `download-actionlint.sh` no longer reaches the outcome that case expects against the stubbed `gh` | Fix the script if this PR changed it. A bad tarball wrongly accepted puts an unverified binary in every consumer's CI. Never delete a case or loosen what it expects |
 | `test-upstream-watch.sh`: a case FAILs | `upstream-watch.sh` no longer reaches the outcome that case expects against the stubbed `gh` | Fix the script if this PR changed it. A tag it skips instead of failing hides a release in every consumer. Never delete a case or loosen what it expects |
 | `test-submodule-bump.sh`: a case FAILs | `submodule-bump.sh` no longer reaches the outcome that case expects against the scratch repositories | Fix the script if this PR changed it. A branch force-pushed over someone else's commits, or a held pin moved, damages every consumer on its next scheduled run. Never delete a case or loosen what it expects |
+| `test-body-checklist.sh`: a case FAILs | The body-edit check in `author-comments.yml` allows or refuses a body it should not | Fix the function if this PR changed it. It guards a write-token edit of the PR author's own text: never loosen it to pass a case, and never delete one |
 | `check-gate-lists.sh`: `does not name tools/X.sh` | A list of gate tests was not updated when `ci.yml` gained or renamed a script | Add `X.sh` to the list the line names, in that list's own style. Never remove the script from `ci.yml`, or the check, to make it pass |
 | `test-check-gate-lists.sh`: a case FAILs | `check-gate-lists.sh` no longer reads the lists the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen what it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
@@ -99,6 +101,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-download-actionlint.sh
 ./tools/test-upstream-watch.sh
 ./tools/test-submodule-bump.sh
+./tools/test-body-checklist.sh
 ./tools/check-gate-lists.sh
 ./tools/test-check-gate-lists.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
