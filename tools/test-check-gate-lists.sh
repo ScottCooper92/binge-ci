@@ -61,6 +61,7 @@ expect complete pass "3 scripts"
 
 without claude CLAUDE.md tools/check-one.sh
 expect claude fail "CLAUDE.md does not name tools/check-one.sh"
+expect claude fail "in an author-bot run CLAUDE.md is the base branch's copy"
 
 without guide .ai/agents/pr-review-guide.md tools/test-two.sh
 expect guide fail ".ai/agents/pr-review-guide.md does not name tools/test-two.sh"
