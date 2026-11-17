@@ -20,8 +20,11 @@ name: Consumer check
 # caller should also run it on pushes to its default branch: setup-gradle saves its cache only there,
 # so a job that ran on pull requests alone would start cold every time.
 #
-# A private consumer needs a token this does not take; it is out of scope. `private_submodules` covers the
-# calling repository's own checkout only, not the consumer's other submodules.
+# A private consumer, or a consumer that includes private submodules of its own, sets `private_consumer`.
+# The workflow then mints a read-only GitHub App token for every repository the app can reach under the
+# caller's owner, and uses it for the consumer's checkout and the submodules fetched below. The
+# repositories are not listed, so no caller names a private one. `private_submodules` is separate: it
+# covers the calling repository's own checkout only.
 on:
   workflow_call:
     inputs:
@@ -33,6 +36,15 @@ on:
           installed on every one of them.
         type: string
         default: ''
+      private_consumer:
+        description: >
+          The consumer, or a submodule the consumer includes, is private. When true, the consumer's checkout
+          and its submodule fetch use a read-only GitHub App token for the caller's owner, scoped to
+          whatever the app is installed on. The app must be installed on the consumer and on each of its
+          private submodules, with read access to contents. Needs REVIEWER_APP_ID and
+          REVIEWER_APP_PRIVATE_KEY. Default false changes nothing.
+        type: boolean
+        default: false
       runner:
         description: runs-on, as a JSON array string.
         type: string
@@ -69,7 +81,7 @@ on:
         default: true
     secrets:
       REVIEWER_APP_ID:
-        description: Only read when `private_submodules` is set, to mint the read-only submodule token.
+        description: Only read when `private_submodules` or `private_consumer` is set, to mint a read-only token.
         required: false
       REVIEWER_APP_PRIVATE_KEY:
         required: false
@@ -111,6 +123,18 @@ jobs:
           repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
           permission-contents: read
 
+      # No `repositories`: the token covers whatever the app is installed on under the owner, so the
+      # private names stay out of this repository and out of every caller's workflow file.
+      - name: Mint a read-only token for the consumer
+        id: consumer_token
+        if: inputs.private_consumer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+
       # Recursive, because the change can carry submodules of its own: a repository that applies
       # binge-ci's Gradle gates includes them from a binge-ci submodule, and the consumer's build
       # includes this one, so without them the consumer's build cannot configure.
@@ -130,13 +154,27 @@ jobs:
           repository: ${{ inputs.consumer }}
           ref: ${{ inputs.consumer_ref }}
           path: consumer
+          token: ${{ steps.consumer_token.outputs.token || github.token }}
+          # With the app token, the swap step below hands it to git itself for the submodule fetch, so
+          # nothing is written to the consumer's git config. Without it, checkout's default stands.
+          persist-credentials: ${{ !inputs.private_consumer }}
 
       - name: Swap the change in for the consumer's pin
         env:
           CONSUMER: ${{ inputs.consumer }}
           SELF: ${{ github.repository }}
+          CONSUMER_TOKEN: ${{ steps.consumer_token.outputs.token }}
         run: |
           set -euo pipefail
+          if [ -n "$CONSUMER_TOKEN" ]; then
+            # Environment config rather than `git -c`: it reaches the clone of every submodule, and the
+            # token stays out of the process list.
+            auth=$(printf 'x-access-token:%s' "$CONSUMER_TOKEN" | base64 -w0)
+            echo "::add-mask::$auth"
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+            export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          fi
           modules=consumer/.gitmodules
           if [ ! -f "$modules" ]; then
             echo "::error::$CONSUMER has no .gitmodules, so it does not include $SELF as a submodule."
