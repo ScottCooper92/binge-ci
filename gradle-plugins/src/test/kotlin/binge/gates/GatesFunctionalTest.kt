@@ -299,7 +299,17 @@ class GatesFunctionalTest {
                 (getProperty("baselineFile") as RegularFileProperty).set(layout.settingsDirectory.file("detekt-baseline.xml"))
             }
             """.trimIndent()
-        build("plugins {\n    id(\"binge.gates.baseline-staleness-aggregate\")\n}\n", settings = "include(\"first\", \"second\", \"docs\")")
+        // The root resolves every plugin the subprojects use, once, and they inherit it. Under Isolated Projects the
+        // subprojects configure in parallel, and each looking the injected TestKit plugin up for itself has twice come
+        // back "not found" (#327) or without a class the plugin registers (#182). A consumer declares them at the root
+        // the same way, `apply false`, for the same reason.
+        build(
+            "plugins {\n" +
+                "    id(\"binge.gates.baseline-staleness-aggregate\")\n" +
+                "    id(\"org.jetbrains.kotlin.jvm\") apply false\n" +
+                "    id(\"binge.gates.baseline-staleness\") apply false\n" +
+                "}\n",
+            settings = "include(\"first\", \"second\", \"docs\")")
         // Under Isolated Projects, as a large consumer builds: the root must not reach into a subproject's model.
         File(root, "gradle.properties").appendText("binge.gates.baseline-staleness.aggregate=true\norg.gradle.unsafe.isolated-projects=true\n")
         write("first/build.gradle.kts", module)
