@@ -14,6 +14,7 @@
 #   no open bump PR                 branch rebuilt from the base tip with one commit, PR opened
 #   open bump PR, all commits ours  branch rebuilt the same way, PR updated
 #   a bump branch with a commit not ours, PR open or not: the new pin commit is added on top; nobody's work is force-pushed over
+#   ... unless the base already has every file that commit changed (a squash-merged PR's leftover branch): rebuilt
 #   open bump PR with a conflict    left alone: the conflict bot owns it
 # A second run against the same head changes nothing.
 export LC_ALL=C
@@ -152,7 +153,22 @@ if [ -n "$old_remote" ]; then
   while IFS='|' read -r email subject; do
     if [ "$email" != "$BOT_EMAIL" ] || [[ $subject != "chore: bump "* ]]; then foreign=$((foreign + 1)); fi
   done < <(git log --format='%ae|%s' "origin/$BASE_BRANCH..$old_remote")
-  [ "$foreign" -eq 0 ] || mode=stack
+  if [ "$foreign" -gt 0 ]; then
+    mode=stack
+    # A squash merge leaves the branch's commits outside the base, though their content is in it, and
+    # stacking on them would carry that content into the next bump PR. So when every file the branch
+    # changed outside the pin already reads the same in the base, there is no work left to protect.
+    # Anything the base has since changed again differs, and that stays a stack: wrongly stacking
+    # costs a noisy PR, wrongly rebuilding costs somebody's commit.
+    merge_base=$(git merge-base "origin/$BASE_BRANCH" "$old_remote" 2> /dev/null) || merge_base=''
+    if [ -n "$merge_base" ]; then
+      mapfile -t touched < <(git diff --name-only "$merge_base" "$old_remote" -- . ":(exclude)$path")
+      if [ "${#touched[@]}" -gt 0 ] && git diff --quiet "origin/$BASE_BRANCH" "$old_remote" -- "${touched[@]}"; then
+        mode=rebuild
+        echo "::notice::$bump_branch holds commits whose changes $BASE_BRANCH already has, so it is rebuilt rather than stacked on."
+      fi
+    fi
+  fi
 fi
 
 # A private submodule's commit subjects and migration notes must not reach a public repository's PR.

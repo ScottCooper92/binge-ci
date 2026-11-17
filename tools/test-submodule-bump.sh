@@ -305,6 +305,49 @@ head=$(git -C "$case_dir/sub" rev-parse HEAD)
 run
 expect "  stacks on their commit and opens a new PR" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out" && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
 
+echo "-- the PR was squash-merged and its branch left behind, with a commit that is now in main"
+new_world squashed
+run
+git clone -q "$case_dir/caller.git" "$case_dir/human" 2> /dev/null
+git -C "$case_dir/human" checkout -q $bump
+echo fix > "$case_dir/human/fix.txt"
+git -C "$case_dir/human" add fix.txt
+git -C "$case_dir/human" commit -q -m "fix: adapt the caller"
+git -C "$case_dir/human" push -q origin HEAD
+# The squash: the same content lands on main as one new commit, and the branch stays.
+git -C "$case_dir/seed" pull -q origin main
+echo fix > "$case_dir/seed/fix.txt"
+git -C "$case_dir/seed" add fix.txt
+git -C "$case_dir/seed" commit -q -m "chore: bump libs/shared (#1)"
+git -C "$case_dir/seed" push -q origin HEAD:main
+sub_commit "feat: third"
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+: > "$FAKE/calls.log"
+run
+expect "  rebuilds the branch to one commit, so the old commits are not in the new PR" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out" && [ "$(bump_commits $bump)" = 1 ] && [ "$(remote_pin $bump)" = "$head" ]'
+
+echo "-- the leftover branch's file has since changed again on main"
+new_world squashed-then-edited
+run
+git clone -q "$case_dir/caller.git" "$case_dir/human" 2> /dev/null
+git -C "$case_dir/human" checkout -q $bump
+echo fix > "$case_dir/human/fix.txt"
+git -C "$case_dir/human" add fix.txt
+git -C "$case_dir/human" commit -q -m "fix: adapt the caller"
+git -C "$case_dir/human" push -q origin HEAD
+human_sha=$(git -C "$case_dir/human" rev-parse HEAD)
+export human_sha
+git -C "$case_dir/seed" pull -q origin main
+echo "fix, then changed" > "$case_dir/seed/fix.txt"
+git -C "$case_dir/seed" add fix.txt
+git -C "$case_dir/seed" commit -q -m "fix: adapt the caller, differently"
+git -C "$case_dir/seed" push -q origin HEAD:main
+sub_commit "feat: third"
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+: > "$FAKE/calls.log"
+run
+expect "  still stacks, because the branch's content is not all in main" '[ $rc -eq 0 ] && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
+
 echo "-- a path that is not a submodule, and an unsafe one"
 new_world badpath
 run SUBMODULE_PATH=nothing/here
