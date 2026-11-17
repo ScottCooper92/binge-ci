@@ -13,7 +13,7 @@
 #   pin is not behind the head      skipped: a held pin or one ahead of the branch is not ours to move
 #   no open bump PR                 branch rebuilt from the base tip with one commit, PR opened
 #   open bump PR, all commits ours  branch rebuilt the same way, PR updated
-#   open bump PR, a commit not ours the new pin commit is added on top; nobody's work is force-pushed over
+#   a bump branch with a commit not ours, PR open or not: the new pin commit is added on top; nobody's work is force-pushed over
 #   open bump PR with a conflict    left alone: the conflict bot owns it
 # A second run against the same head changes nothing.
 export LC_ALL=C
@@ -56,7 +56,10 @@ finish() {
   } >> "$out"
   if [ "$rc" -ne 0 ] && [ -n "$pr_number" ] && [ "$DRY_RUN" != true ]; then
     local marker="<!-- submodule-bump-failed:$path:${head:-unknown} -->"
-    if ! gh api "repos/$REPO/issues/$pr_number/comments" 2> /dev/null | jq -e --arg m "$marker" 'any(.[]; .body | contains($m))' > /dev/null 2>&1; then
+    # Paginated, and captured before it is searched: the endpoint returns 30 comments a page, oldest first,
+    # and a bump PR the bots comment on freely outgrows that.
+    existing=$(gh api "repos/$REPO/issues/$pr_number/comments?per_page=100" --paginate --jq '.[].body' 2> /dev/null)
+    if ! grep -qF -- "$marker" <<< "$existing"; then
       printf '%s\nThe submodule bump for `%s` failed on this PR: %s/%s/actions/runs/%s\n' \
         "$marker" "$path" "${GITHUB_SERVER_URL:-https://github.com}" "$REPO" "${GITHUB_RUN_ID:-0}" > "$work/failed.md"
       gh api -X POST "repos/$REPO/issues/$pr_number/comments" -F body=@"$work/failed.md" > /dev/null 2>&1
@@ -140,6 +143,10 @@ if [ -n "$pr_number" ]; then
     detail="the open bump PR already pins $(short "$head")"
     exit 0
   fi
+fi
+
+# Whether or not a PR is open: a branch left behind by a closed PR may still hold someone's work.
+if [ -n "$old_remote" ]; then
   foreign=0
   while IFS='|' read -r email subject; do
     if [ "$email" != "$BOT_EMAIL" ] || [[ $subject != "chore: bump "* ]]; then foreign=$((foreign + 1)); fi
@@ -149,7 +156,8 @@ fi
 
 # The body quotes text from another repository, so it goes in fences: nothing in a commit subject or
 # a migration note can @mention anyone, render as markup, or forge the marker comments.
-tidy() { sed 's/<!--/<!- -/g'; }
+# A line of three or more tildes, indented up to three spaces, could close the fence, so it gets a backslash.
+tidy() { sed -E -e 's/<!--/<!- -/g' -e 's/^( {0,3})(~{3,})/\1\\\2/'; }
 fence='~~~~~~~~'
 total=$(git -C "$path" rev-list --count "$pinned..$head")
 {
@@ -194,7 +202,10 @@ else
   git checkout --quiet -B "$bump_branch" "origin/$BASE_BRANCH"
 fi
 git update-index --add --cacheinfo "160000,$head,$path"
-git commit --quiet -m "$title" -m "Moves the pin from $(short "$pinned") to $(short "$head"), $total commit(s) on $branch."
+# A branch left behind by a closed PR can already pin the head, and then there is nothing to commit.
+if ! git diff --cached --quiet; then
+  git commit --quiet -m "$title" -m "Moves the pin from $(short "$pinned") to $(short "$head"), $total commit(s) on $branch."
+fi
 if [ "$mode" = stack ]; then
   git push --quiet origin "HEAD:refs/heads/$bump_branch"
 else

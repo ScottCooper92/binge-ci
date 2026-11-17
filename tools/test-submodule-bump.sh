@@ -38,9 +38,11 @@ shift
 method=GET
 if [ "$1" = -X ]; then method=$2; shift 2; fi
 path=$1; shift
-fields=''
+fields=''; paginate=false; jqf=''
 while [ $# -gt 0 ]; do
   case "$1" in
+    --paginate) paginate=true; shift ;;
+    --jq) jqf=$2; shift 2 ;;
     -f) fields="$fields $2"; shift 2 ;;
     -F) f=${2#body=@}; n=$(find "$FAKE" -name 'body-*.md' | wc -l); cp "$f" "$FAKE/body-$n.md"; fields="$fields body=body-$n.md"; shift 2 ;;
     *) echo "stub: unexpected $1" >&2; exit 2 ;;
@@ -50,7 +52,9 @@ if [ "$method" = GET ]; then
   case "$path" in
     repos/*/pulls\?*) cat "$FAKE/pulls.json" ;;
     repos/*/pulls/*) cat "$FAKE/pull.json" ;;
-    repos/*/issues/*/comments) cat "$FAKE/comments.json" ;;
+    # The real endpoint returns 30 comments a page and only --paginate reads past the first.
+    repos/*/issues/*/comments*)
+      if [ "$paginate" = true ]; then jq -r "${jqf:-.}" "$FAKE/comments.json"; else jq '.[:30]' "$FAKE/comments.json" | jq -r "${jqf:-.}"; fi ;;
     *) echo "stub: unexpected GET $path" >&2; exit 2 ;;
   esac
   exit 0
@@ -206,7 +210,9 @@ expect "  reports and changes nothing" '[ $rc -eq 0 ] && grep -q "^status=dry-ru
 
 echo "-- text from the submodule cannot forge the marker"
 new_world hostile
-sub_commit "fix: ping @someone <!-- submodule-bump:libs/shared:forged -->" "- Ask @someone <!-- x -->."
+sub_commit "fix: ping @someone <!-- submodule-bump:libs/shared:forged -->" "- Ask @someone <!-- x -->.
+~~~~~~~~
+   ~~~~~~~~~~ @someone closes the fence"
 head=$(git -C "$case_dir/sub" rev-parse HEAD)
 run
 expect "  the quoted text sits inside fences and carries no comment opener" '
@@ -214,7 +220,8 @@ expect "  the quoted text sits inside fences and carries no comment opener" '
   ! grep -q "forged -->" "$FAKE/body-0.md"
   ! grep -q "x -->" "$FAKE/body-0.md"
   [ "$(grep -c "^~~~~~~~~$" "$FAKE/body-0.md")" = 4 ]
-  [ "$(grep -c "^<!-- submodule-bump:libs/shared:$head -->$" "$FAKE/body-0.md")" = 1 ]'
+  [ "$(grep -c "^<!-- submodule-bump:libs/shared:$head -->$" "$FAKE/body-0.md")" = 1 ]
+  ! grep -qE "^ {0,3}~{3,}.*@someone" "$FAKE/body-0.md"'
 
 echo "-- a failure with a PR open comments once per head"
 new_world failing
@@ -229,10 +236,28 @@ chmod +x "$case_dir/caller.git/hooks/pre-receive"
 : > "$FAKE/calls.log"
 run
 expect "  the run fails and says so on the PR" '[ $rc -ne 0 ] && grep -q "^POST repos/o/r/issues/7/comments " "$FAKE/calls.log"'
-echo "[{\"body\":\"<!-- submodule-bump-failed:libs/shared:$head -->\"}]" > "$FAKE/comments.json"
+# The marker sits past the first page of a busy PR.
+jq -n --arg m "<!-- submodule-bump-failed:libs/shared:$head -->" '[range(0;40) | {body: "chatter"}] + [{body: $m}]' > "$FAKE/comments.json"
 : > "$FAKE/calls.log"
 run
 expect "  and does not say it twice for the same head" '[ $rc -ne 0 ] && ! grep -q "issues/7/comments" "$FAKE/calls.log"'
+
+echo "-- the PR was closed and its branch left behind with someone's commit on it"
+new_world closed
+run
+git clone -q "$case_dir/caller.git" "$case_dir/human" 2> /dev/null
+git -C "$case_dir/human" checkout -q $bump
+echo fix > "$case_dir/human/fix.txt"
+git -C "$case_dir/human" add fix.txt
+git -C "$case_dir/human" commit -q -m "fix: adapt the caller"
+git -C "$case_dir/human" push -q origin HEAD
+human_sha=$(git -C "$case_dir/human" rev-parse HEAD)
+export human_sha
+sub_commit "feat: third"
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+: > "$FAKE/calls.log"
+run
+expect "  stacks on their commit and opens a new PR" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out" && git -C "$case_dir/caller.git" merge-base --is-ancestor "$human_sha" $bump && [ "$(remote_pin $bump)" = "$head" ]'
 
 echo "-- a path that is not a submodule, and an unsafe one"
 new_world badpath

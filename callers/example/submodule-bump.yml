@@ -15,8 +15,7 @@ on:
 
 # What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   bump:

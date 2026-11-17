@@ -7,8 +7,8 @@ name: Submodule bump
 # The pull request lists the commits in between and quotes what the submodule's docs/migrations.md
 # gained in that range. It carries the agent label, so the caller's bots pick it up. A pin that is
 # not behind the branch (held, or ahead) is never moved, and a bump PR with a merge conflict is left
-# to the conflict bot. Commits someone else pushed to the bump branch are never overwritten: the new
-# pin commit goes on top of them.
+# to the conflict bot. Commits someone else pushed to the bump branch are never overwritten, whether its
+# pull request is still open or not: the new pin commit goes on top of them.
 #
 # It pushes and opens the pull request as the author app, not with GITHUB_TOKEN: a pull request
 # opened with that token starts no workflow run, so nothing would check it.
@@ -63,11 +63,10 @@ on:
         description: URL of the pull request opened or updated, or of the open one a run left alone. Empty when there is none.
         value: ${{ jobs.bump.outputs.pull_request }}
 
-# `contents: write` pushes the bump branch and `pull-requests: write` opens the pull request; the
-# token is the app's, but the caller must still hold both or this dies as startup_failure.
+# Every write, and the checkout, uses the author app's token, so the job's own token only reads. A caller
+# must still hold `contents: read` or this dies as startup_failure.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   # Two runs pushing one branch is a lost update. NOT cancel-in-progress: cancelling between the push

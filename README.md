@@ -257,7 +257,7 @@ drifted a word at a time, so they live here too:
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
-| `submodule-bump.yml` | reusable workflow | Moves one submodule's pin to the head of its default branch, in a PR of its own that carries the `agent` label, and keeps that PR current on later runs. Does nothing while the pin is at the head. Give it a weekly schedule. Grant `contents: write` and `pull-requests: write`, and pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. See "Submodule bump" below. |
+| `submodule-bump.yml` | reusable workflow | Moves one submodule's pin to the head of its default branch, in a PR of its own that carries the `agent` label, and keeps that PR current on later runs. Does nothing while the pin is at the head. Give it a weekly schedule. Grant `contents: read`, and pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. See "Submodule bump" below. |
 | `nightly-report` | composite action | Keeps one issue open while a run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it; optional `run-kind` is what the issue's text calls the run (default `scheduled`; when the job also runs on a push, pass a name that fits both, such as `main`, since the text reads "The <run-kind> run failed"). The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
@@ -302,15 +302,14 @@ weekly and by hand, once per submodule. `callers/example/submodule-bump.yml` is 
 
 Inputs: `submodule_path` (required), `branch`, `private_submodules`, `agent_label`, `dry_run`, `runner`,
 `timeout_minutes`. Secrets: `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. The caller grants
-`contents: write` and `pull-requests: write`. Outputs: `status` and `pull_request`.
+`contents: read`: the app token does every write. Outputs: `status` and `pull_request`.
 
 ```yaml
 on:
   schedule:
     - cron: '23 5 * * 1'
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 jobs:
   bump:
     uses: ScottCooper92/binge-ci/.github/workflows/submodule-bump.yml@v1
@@ -331,7 +330,8 @@ What a run does:
   subject notifies nobody. The PR carries `agent_label` (default `agent`), so the consumer's bots act on it.
 - **A PR is already open:** a later run moves it to the new head and edits its title and body. If every
   commit on the branch is the workflow's own, the branch is rebuilt to the single commit. If someone
-  else pushed to it, the new pin commit goes on top and nothing of theirs is overwritten. A PR with a
+  else pushed to it, the new pin commit goes on top and nothing of theirs is overwritten. That holds for
+  a branch whose PR was closed and not deleted, too. A PR with a
   merge conflict is left to the conflict bot.
 - **A pin that is not behind the branch** (held on an unmerged branch, or ahead of it) is never moved.
   `status` is `skipped`.
