@@ -1,0 +1,62 @@
+name: Submodule bump
+description: >
+  Moves one submodule's pin in the calling repository to the head of the submodule's default branch,
+  in a pull request of its own, and updates that pull request on later runs.
+
+# An action for the same reason as upstream-watch: a reusable workflow runs against the CALLER's
+# checkout, and a composite action is the only way to hand it a script that travels with it. The
+# caller must have checked out its own repository, with submodules, as the app that will push.
+#
+# The token must be able to push a branch and write pull requests. It cannot be the default
+# GITHUB_TOKEN: a pull request opened with that starts no workflow run, so the PR would never be
+# checked and the bots would never see it.
+
+inputs:
+  submodule_path:
+    description: Path of the submodule in the calling repository.
+    required: true
+  branch:
+    description: The submodule's branch to follow. Empty means its remote's default branch.
+    required: false
+    default: ''
+  base_branch:
+    description: The calling repository's default branch, which the PR targets.
+    required: true
+  agent_label:
+    description: Label put on the pull request.
+    required: false
+    default: agent
+  dry_run:
+    description: Report what would be done and change nothing.
+    required: false
+    default: 'false'
+  token:
+    description: Token that pushes the branch and writes the pull request.
+    required: true
+
+outputs:
+  status:
+    description: One of current, opened, updated, skipped, dry-run.
+    value: ${{ steps.bump.outputs.status }}
+  pull_request:
+    description: URL of the pull request opened or updated, or of the open one a run left alone. Empty when there is none.
+    value: ${{ steps.bump.outputs.pull_request }}
+
+runs:
+  using: composite
+  steps:
+    - name: Move the pin
+      id: bump
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        SUBMODULE_PATH: ${{ inputs.submodule_path }}
+        BRANCH: ${{ inputs.branch }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        AGENT_LABEL: ${{ inputs.agent_label }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        bash "${ACTION_PATH}/submodule-bump.sh"
