@@ -62,7 +62,8 @@ jobs:
 
         Formatting failures are the cheapest class of failure to fix
         properly. A lint baseline is worse than it looks: it silences the
-        finding permanently and silently.
+        finding permanently and silently, in a repository meant to be
+        the reference implementation.
 
         If the only way to green is through one of those, that is a stop:
         make no changes and say so.
