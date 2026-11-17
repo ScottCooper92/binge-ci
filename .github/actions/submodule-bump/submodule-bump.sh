@@ -168,7 +168,9 @@ total=$(git -C "$path" rev-list --count "$pinned..$head")
   echo "## Commits ($total)"
   echo
   echo "$fence"
-  git -C "$path" log --reverse --format='%h %s' "$pinned..$head" | head -n "$max_commits" | tidy
+  # sed reads all of its input, unlike head: a producer that outlives its consumer dies of SIGPIPE, and
+  # under pipefail that ends the script on exactly the long ranges the cap exists for.
+  git -C "$path" log --reverse --format='%h %s' "$pinned..$head" | sed -n "1,${max_commits}p" | tidy
   [ "$total" -le "$max_commits" ] || echo "... and $((total - max_commits)) more"
   echo "$fence"
 } > "$work/body.md"

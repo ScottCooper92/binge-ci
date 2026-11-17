@@ -203,6 +203,18 @@ git -C "$case_dir/seed" push -q origin HEAD:main
 run
 expect "  is skipped, never a rollback" '[ $rc -eq 0 ] && grep -q "^status=skipped$" "$case_dir/out" && [ ! -s "$FAKE/calls.log" ]'
 
+echo "-- a pin far behind the branch"
+new_world far
+for i in $(seq 1 1200); do
+  echo "$i" >> "$case_dir/sub/many.txt"
+  git -C "$case_dir/sub" add -A
+  git -C "$case_dir/sub" commit -q -m "chore: change $i"
+done
+git -C "$case_dir/sub" push -q origin HEAD:main
+head=$(git -C "$case_dir/sub" rev-parse HEAD)
+run
+expect "  opens the PR with the list cut at 100 and the rest counted" '[ $rc -eq 0 ] && grep -q "^status=opened$" "$case_dir/out" && grep -q "^## Commits (1201)$" "$FAKE/body-0.md" && grep -q "^\.\.\. and 1101 more$" "$FAKE/body-0.md" && [ "$(remote_pin $bump)" = "$head" ]'
+
 echo "-- a dry run"
 new_world dry
 run DRY_RUN=true
