@@ -191,12 +191,13 @@ detail about a private repo. They live in Binge's own `.github/workflows/`.
 
 ```
 .github/workflows/    The five bot workflows, the shared CI ones (submodule-pins,
-                      consumer-check, device-smoke, actions-storage-sweep, upstream-watch), fork-review,
+                      consumer-check, device-smoke, actions-storage-sweep, upstream-watch,
+                      submodule-bump), fork-review,
                       and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report
-                      upstream-watch and actionlint (all below)
+                      upstream-watch, submodule-bump and actionlint (all below)
 callers/              Worked callers for the public repos
                       and a generic pair for fork-review in example/
 docs/                 fork-review.md
@@ -245,7 +246,7 @@ The tag is immutable rather than `v1`, so a caller pinning `@v1.0.N` gets the ac
 
 ## The shared CI steps
 
-Not every repeated step is a bot. Five ordinary CI pieces were pasted between the repositories and
+Not every repeated step is a bot. Ordinary CI pieces were pasted between the repositories and
 drifted a word at a time, so they live here too:
 
 | Piece | Kind | What it does |
@@ -256,6 +257,7 @@ drifted a word at a time, so they live here too:
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
+| `submodule-bump.yml` | reusable workflow | Moves one submodule's pin to the head of its default branch, in a PR of its own that carries the `agent` label, and keeps that PR current on later runs. Does nothing while the pin is at the head. Give it a weekly schedule. Grant `contents: read`, and pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. See "Submodule bump" below. |
 | `nightly-report` | composite action | Keeps one issue open while a run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it; optional `run-kind` is what the issue's text calls the run (default `scheduled`; when the job also runs on a push, pass a name that fits both, such as `main`, since the text reads "The <run-kind> run failed"). The job needs `issues: write`. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
@@ -277,7 +279,7 @@ secrets: inherit
 ```
 
 - It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
-  `author-retarget.yml`, `submodule-pins.yml`, `device-smoke.yml` and `consumer-check.yml`. In
+  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml` and `consumer-check.yml`. In
   `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.
 - The token is scoped by `repositories:`, which replaces the default of the caller alone. The workflows
@@ -292,6 +294,54 @@ secrets: inherit
   request's branch in the calling repository. Opt in knowing that.
 - `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
   that a pin is an ancestor of it.
+
+### Submodule bump
+
+`submodule-bump.yml` moves one submodule's pin to the head of that submodule's default branch. Call it
+weekly and by hand, once per submodule. `callers/example/submodule-bump.yml` is the worked caller.
+
+Inputs: `submodule_path` (required), `branch`, `private_submodules`, `agent_label`, `dry_run`, `runner`,
+`timeout_minutes`. Secrets: `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. The caller grants
+`contents: read`: the app token does every write. Outputs: `status` and `pull_request`.
+
+```yaml
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+permissions:
+  contents: read
+jobs:
+  bump:
+    uses: ScottCooper92/binge-ci/.github/workflows/submodule-bump.yml@v1
+    with:
+      submodule_path: libs/shared
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+```
+
+What a run does:
+
+- **Pin at the head:** nothing. `status` is `current`.
+- **Pin behind the head:** it opens a PR from `submodule-bump/<path>` whose one commit changes only the
+  pin. The body lists the commits in between as short sha and subject, and quotes what the submodule's
+  `docs/migrations.md` gained in that range. A submodule without that file, or a range that added
+  nothing to it, gets no such section. Both lists are quoted as code, so an `@mention` in a commit
+  subject notifies nobody. The PR carries `agent_label` (default `agent`), so the consumer's bots act on it.
+- **A PR is already open:** a later run moves it to the new head and edits its title and body. If every
+  commit on the branch is the workflow's own, the branch is rebuilt to the single commit. If someone
+  else pushed to it, the new pin commit goes on top and nothing of theirs is overwritten. That holds for
+  a branch whose PR was closed and not deleted, too. A PR with a
+  merge conflict is left to the conflict bot.
+- **A pin that is not behind the branch** (held on an unmerged branch, or ahead of it) is never moved.
+  `status` is `skipped`.
+- **A failure in the bump step** with a PR open comments on it, once per head. An earlier step (token, checkout) fails the run with no comment. A failed scheduled run notifies the
+  repository.
+
+It pushes and opens the PR as the author app, not `GITHUB_TOKEN`, because a PR opened with that token
+starts no workflow run and nothing would check it. For a private submodule, name it in
+`private_submodules`, as in "Private submodules" above; the app then needs read access to it, and the
+token it mints has the author app's write access to every repository listed. Run it with `dry_run` on first.
 
 ### The emulator lane
 

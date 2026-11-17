@@ -1,0 +1,131 @@
+name: Submodule bump
+
+# Moves one submodule's pin to the head of that submodule's default branch, in a pull request of its
+# own, and keeps that pull request current on later runs. Nothing happens while the pin is at the
+# head. A caller runs it weekly and by hand.
+#
+# The pull request lists the commits in between and quotes what the submodule's docs/migrations.md
+# gained in that range. It carries the agent label, so the caller's bots pick it up. A pin that is
+# not behind the branch (held, or ahead) is never moved, and a bump PR with a merge conflict is left
+# to the conflict bot. Commits someone else pushed to the bump branch are never overwritten, whether its
+# pull request is still open or not: the new pin commit goes on top of them.
+#
+# It pushes and opens the pull request as the author app, not with GITHUB_TOKEN: a pull request
+# opened with that token starts no workflow run, so nothing would check it.
+
+on:
+  workflow_call:
+    inputs:
+      submodule_path:
+        description: Path of the submodule in the calling repository, as in `git submodule status`.
+        type: string
+        required: true
+      branch:
+        description: The submodule's branch to follow. Empty (the default) means its remote's default branch.
+        type: string
+        default: ''
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the author app
+          token can read the caller and these repositories, so the app must be installed on every one of them.
+          Name the bumped submodule here when it is private.
+        type: string
+        default: ''
+      agent_label:
+        description: Label put on the pull request, so the caller's bots act on it.
+        type: string
+        default: agent
+      dry_run:
+        description: Report what would be opened or updated and change nothing.
+        type: boolean
+        default: false
+      runner:
+        description: >
+          runs-on, as a JSON array string. Defaults to a GitHub-hosted runner. The job is a checkout and a
+          few `git` and `gh` calls, so a repository that keeps its jobs off hosted runners points this
+          at a light one. The runner needs bash, git, jq and the `gh` CLI.
+        type: string
+        default: '["ubuntu-latest"]'
+      timeout_minutes:
+        description: Minutes before the job is cancelled.
+        type: number
+        default: 10
+    secrets:
+      AUTHOR_APP_ID:
+        required: true
+      AUTHOR_APP_PRIVATE_KEY:
+        required: true
+    outputs:
+      status:
+        description: One of current, opened, updated, skipped, dry-run, failed.
+        value: ${{ jobs.bump.outputs.status }}
+      pull_request:
+        description: URL of the pull request opened or updated, or of the open one a run left alone. Empty when there is none.
+        value: ${{ jobs.bump.outputs.pull_request }}
+
+# Every write, and the checkout, uses the author app's token, so the job's own token only reads. A caller
+# must still hold `contents: read` or this dies as startup_failure.
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs pushing one branch is a lost update. NOT cancel-in-progress: cancelling between the push
+  # and the PR update leaves a branch with no PR behind.
+  group: submodule-bump-${{ github.repository }}-${{ inputs.submodule_path }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.bump.outputs.status }}
+      pull_request: ${{ steps.bump.outputs.pull_request }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint author app token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
+          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
+
+      # The default branch is read live: a `schedule` event carries no repository payload, and a manual
+      # run from another ref must still bump against the default branch.
+      - name: Read the default branch
+        id: base
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "name=$(gh api "repos/$REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.base.outputs.name }}
+          submodules: true
+          token: ${{ steps.token.outputs.token }}
+
+      - name: Move the pin
+        id: bump
+        uses: ScottCooper92/binge-ci/.github/actions/submodule-bump@v1.0.43
+        with:
+          submodule_path: ${{ inputs.submodule_path }}
+          branch: ${{ inputs.branch }}
+          base_branch: ${{ steps.base.outputs.name }}
+          agent_label: ${{ inputs.agent_label }}
+          dry_run: ${{ inputs.dry_run }}
+          token: ${{ steps.token.outputs.token }}

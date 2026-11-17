@@ -1,0 +1,30 @@
+name: Submodule bump
+
+# Moves the `libs/shared` submodule's pin to the head of its default branch, weekly, in a pull request
+# that carries the `agent` label. Nothing happens while the pin is already at the head. Run it from the
+# Actions tab with `dry_run` on first to see what it would do.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report what would be opened or updated and change nothing
+        type: boolean
+        default: true
+  schedule:
+    - cron: '23 5 * * 1'
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    uses: ScottCooper92/binge-ci/.github/workflows/submodule-bump.yml@v1
+    with:
+      submodule_path: libs/shared
+      # A private submodule is named here, so the app token can read it:
+      # private_submodules: shared
+      dry_run: ${{ inputs.dry_run == true }}
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
