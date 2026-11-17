@@ -335,7 +335,7 @@ What a run does:
   merge conflict is left to the conflict bot.
 - **A pin that is not behind the branch** (held on an unmerged branch, or ahead of it) is never moved.
   `status` is `skipped`.
-- **A failure** with a PR open comments on it, once per head. A failed scheduled run notifies the
+- **A failure in the bump step** with a PR open comments on it, once per head. An earlier step (token, checkout) fails the run with no comment. A failed scheduled run notifies the
   repository.
 
 It pushes and opens the PR as the author app, not `GITHUB_TOKEN`, because a PR opened with that token

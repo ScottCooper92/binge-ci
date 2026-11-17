@@ -48,6 +48,7 @@ on:
         type: string
         default: '["ubuntu-latest"]'
       timeout_minutes:
+        description: Minutes before the job is cancelled.
         type: number
         default: 10
     secrets:
@@ -57,7 +58,7 @@ on:
         required: true
     outputs:
       status:
-        description: One of current, opened, updated, skipped, dry-run.
+        description: One of current, opened, updated, skipped, dry-run, failed.
         value: ${{ jobs.bump.outputs.status }}
       pull_request:
         description: URL of the pull request opened or updated, or of the open one a run left alone. Empty when there is none.

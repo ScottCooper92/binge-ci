@@ -36,7 +36,7 @@ inputs:
 
 outputs:
   status:
-    description: One of current, opened, updated, skipped, dry-run.
+    description: One of current, opened, updated, skipped, dry-run, failed.
     value: ${{ steps.bump.outputs.status }}
   pull_request:
     description: URL of the pull request opened or updated, or of the open one a run left alone. Empty when there is none.
