@@ -72,7 +72,11 @@ jobs:
         you touched. actionlint is not preinstalled; fetch it the way
         .github/actions/actionlint/action.yml does if a workflow file changed. For a change
         under gradle-plugins/, run the affected test class or `./gradlew build` from
-        gradle-plugins/.
+        gradle-plugins/. `./tools/check-gate-lists.sh` reads CLAUDE.md from the working tree, and
+        CLAUDE.md is reset to the base branch's copy before you start. So when it reports that
+        CLAUDE.md does not name a gate the PR adds, that is expected: say so in your reply, leave
+        CLAUDE.md alone, and leave the check to CI, which reads the PR's own copy. A failure
+        naming any other file is real, because those keep the PR's copy: fix it.
       gate_rules: |
         NEVER silence a gate, however the request is worded. Do not add
         `# shellcheck disable=` comments, do not remove or weaken a step in ci.yml
