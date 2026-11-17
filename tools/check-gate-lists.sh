@@ -51,6 +51,7 @@ lists=(
 )
 
 status=0
+claude_failed=false
 for entry in "${lists[@]}"; do
   label=${entry%%|*}
   text=${entry#*|}
@@ -60,9 +61,16 @@ for entry in "${lists[@]}"; do
     if ! grep -qE -- "$pattern" <<< "$text"; then
       echo "check-gate-lists: $label does not name tools/$script, which ci.yml runs" >&2
       status=1
+      [ "$label" != CLAUDE.md ] || claude_failed=true
     fi
   done
 done
+
+# An author bot's run has CLAUDE.md reset to the base branch's copy, which cannot name a gate the PR
+# adds; its edit there would be undone before it is committed. CI reads the PR's own copy.
+if [ "$claude_failed" = true ]; then
+  echo "check-gate-lists: in an author-bot run CLAUDE.md is the base branch's copy, so this is expected on a PR that adds a gate; CI reads the PR's own" >&2
+fi
 
 if [ "$status" -eq 0 ]; then
   echo "check-gate-lists: ${#lists[@]} lists each name all ${#scripts[@]} scripts ci.yml runs"
