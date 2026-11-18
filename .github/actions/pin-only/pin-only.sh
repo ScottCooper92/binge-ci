@@ -7,7 +7,8 @@
 #   - a `uses: ScottCooper92/binge-ci/<path>@<40 hex> # v1.0.N` line, the same line with a new commit and comment, or
 #   - the `binge-ci` gitlink moving from one commit to another,
 # every new commit is the same one, and that commit is the one the tag `v1.0.N` names in binge-ci's own repository
-# and is on its `main`. A workflow edit beside the pin, a pin to a commit no release tag names, a pin to `v1`, an
+# and is on its `main`, and it descends from every pin it replaces: a move back to an older release could bring back a guard
+# that release lacked. A workflow edit beside the pin, a pin to a commit no release tag names, a pin to `v1`, an
 # added or deleted line, another file: none of it is a pin-only change, and the normal rules apply.
 #
 # It decides by comparing each changed file's old and new lines one for one, not by reading a diff, so a changed line
@@ -33,13 +34,18 @@ no() {
 }
 
 # What a pin looks like: the part before `@` (indent, `- `, `uses:`, the action path), the commit, an optional comment.
-pin_re='^([[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+ScottCooper92/binge-ci/[^@[:space:]]+)@([0-9a-f]{40})([[:space:]]+#[[:space:]]*(v1(\.0\.[0-9]+)?))?[[:space:]]*$'
+# Nothing may follow it, trailing spaces and a carriage return included, so a change that touches only a line's ending
+# is not a pin change.
+pin_re='^([[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+ScottCooper92/binge-ci/[^@[:space:]]+)@([0-9a-f]{40})([[:space:]]+#[[:space:]]*(v1(\.0\.[0-9]+)?))?$'
 file_re='^\.github/(workflows/[^/]+\.ya?ml|actions/[^/]+/action\.ya?ml)$'
 
 mb=$(git merge-base "$BASE" "$HEAD" 2> /dev/null) || no "the pull request has no merge base with its base."
+scratch=$(mktemp -d)
+trap 'rm -rf "${scratch:?}"' EXIT
 
 commits=()
 versions=()
+olds=()
 gitlink=""
 changed=0
 
@@ -50,22 +56,31 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
   if [ "$path" = "$sub" ]; then
     [ "$old_mode" = 160000 ] && [ "$new_mode" = 160000 ] && [ "$status" = M ] || no "$sub is not a submodule moving from one commit to another."
     gitlink=$new_sha
+    olds+=("$_old_sha")
     continue
   fi
   [[ $path =~ $file_re ]] || no "$path is not a workflow or action file."
   [ "$old_mode" = "$new_mode" ] && [ "$status" = M ] || no "$path was added, deleted or had its mode changed."
-  mapfile -t old_lines < <(git show "$mb:$path")
-  mapfile -t new_lines < <(git show "$HEAD:$path")
+  # Only a regular file can be compared line for line: a submodule or a link at a workflow path is not a pin change.
+  [ "$new_mode" = 100644 ] || [ "$new_mode" = 100755 ] || no "$path is not a regular file."
+  # Each side is read to a file and a failed read is a refusal. A read inside a process substitution would fail
+  # silently, and two empty sides compare equal.
+  git cat-file blob "$mb:$path" > "$scratch/old" 2> /dev/null || no "could not read $path at the merge base."
+  git cat-file blob "$HEAD:$path" > "$scratch/new" 2> /dev/null || no "could not read $path at the head."
+  mapfile -t old_lines < "$scratch/old"
+  mapfile -t new_lines < "$scratch/new"
   [ "${#old_lines[@]}" -eq "${#new_lines[@]}" ] || no "$path gained or lost lines."
-  [ "$(git show "$mb:$path" | tail -c1 | od -An -c | tr -d ' ')" = "$(git show "$HEAD:$path" | tail -c1 | od -An -c | tr -d ' ')" ] \
+  [ "$(tail -c1 "$scratch/old" | od -An -c | tr -d ' ')" = "$(tail -c1 "$scratch/new" | od -An -c | tr -d ' ')" ] \
     || no "$path changed how it ends."
   for i in "${!old_lines[@]}"; do
     [ "${old_lines[$i]}" = "${new_lines[$i]}" ] && continue
     [[ ${old_lines[$i]} =~ $pin_re ]] || no "$path line $((i + 1)) changed and was not a binge-ci pin."
     old_prefix=${BASH_REMATCH[1]}
+    old_sha=${BASH_REMATCH[3]}
     [[ ${new_lines[$i]} =~ $pin_re ]] || no "$path line $((i + 1)) is no longer a binge-ci pin."
     [ "${BASH_REMATCH[1]}" = "$old_prefix" ] || no "$path line $((i + 1)) names a different action."
     [ -n "${BASH_REMATCH[6]}" ] || no "$path line $((i + 1)) does not carry a v1.0.N tag comment (a pin to v1 or to no tag is not pin-only)."
+    olds+=("${old_sha:-}")
     commits+=("${BASH_REMATCH[3]}")
     versions+=("${BASH_REMATCH[5]}")
   done
@@ -88,20 +103,26 @@ fi
 [ -n "$commit" ] || no "no pin changed."
 
 # The commit has to be a release: the tag names it, in binge-ci's own repository, and it is on that repository's main.
-scratch=$(mktemp -d)
-trap 'rm -rf "${scratch:?}"' EXIT
-git init -q --bare "$scratch"
-git -C "$scratch" fetch -q --no-tags "$url" '+refs/heads/main:refs/heads/main' '+refs/tags/v1.0.*:refs/tags/v1.0.*' 2> /dev/null \
+mirror="$scratch/binge-ci.git"
+git init -q --bare "$mirror"
+git -C "$mirror" fetch -q --no-tags "$url" '+refs/heads/main:refs/heads/main' '+refs/tags/v1.0.*:refs/tags/v1.0.*' 2> /dev/null \
   || no "could not read binge-ci's tags and main from $url."
 if [ -z "${version:-}" ]; then
   # Only the submodule moved: the release is whichever tag names the commit.
-  version=$(git -C "$scratch" tag --points-at "$commit" | grep -E '^v1\.0\.[0-9]+$' | sort -t. -k3 -n | tail -n 1 || true)
+  version=$(git -C "$mirror" tag --points-at "$commit" | grep -E '^v1\.0\.[0-9]+$' | sort -t. -k3 -n | tail -n 1 || true)
   [ -n "$version" ] || no "no v1.0.N tag of binge-ci names $commit."
 fi
 [[ $version =~ ^v1\.0\.[0-9]+$ ]] || no "'$version' is not a v1.0.N tag."
-tagged=$(git -C "$scratch" rev-parse -q --verify "refs/tags/$version^{commit}" 2> /dev/null) || no "binge-ci has no tag $version."
+tagged=$(git -C "$mirror" rev-parse -q --verify "refs/tags/$version^{commit}" 2> /dev/null) || no "binge-ci has no tag $version."
 [ "$tagged" = "$commit" ] || no "the tag $version names $tagged, not $commit."
-git -C "$scratch" merge-base --is-ancestor "$commit" refs/heads/main 2> /dev/null || no "$commit is not on binge-ci's main."
+git -C "$mirror" merge-base --is-ancestor "$commit" refs/heads/main 2> /dev/null || no "$commit is not on binge-ci's main."
+
+# Forward only. A pin that moves back to an older release could bring back a guard that release lacked, and it would
+# merge with no one reading it. Every commit it replaces must be an ancestor of the new one, so an old commit that
+# is not on binge-ci's main (or is unreadable) is not a pin-only change either.
+for old in "${olds[@]}"; do
+  git -C "$mirror" merge-base --is-ancestor "$old" "$commit" 2> /dev/null || no "$commit does not descend from the pin it replaces ($old): a downgrade, or a commit not on binge-ci's main."
+done
 
 emit pin_only true
 emit reason "every change is a pin to $version ($commit)."

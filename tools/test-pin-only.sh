@@ -117,6 +117,30 @@ fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; commit_all
 URL="$work/does-not-exist.git" check "binge-ci's remote cannot be read" false "could not read"
 unset URL
 
+echo "-- what it cannot read, and which way a pin moves"
+# A gitlink at a workflow path is not a file it can compare, and reading it fails on both sides.
+git checkout -q -B gl "$base"; git rm -q --cached .github/workflows/two.yml; rm -f .github/workflows/two.yml
+git update-index --add --cacheinfo "160000,$c1,.github/workflows/evil.yml"; git commit -q -m "gitlink at a workflow path"
+glbase=$(git rev-parse HEAD)
+git update-index --add --cacheinfo "160000,$c2,.github/workflows/evil.yml"; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; git add .github/workflows/one.yml; git commit -q -m "move it"
+saved=$base; base=$glbase
+check "a changed path it cannot read, beside a real pin change" false "regular file"
+base=$saved
+fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; commit_all
+git checkout -q -B up "$base"; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; git commit -qam up; upbase=$(git rev-parse HEAD)
+wf "$c1" " # v1.0.1" > .github/workflows/one.yml; git commit -qam down
+saved=$base; base=$upbase
+check "a pin moving back to an older release" false "descend"
+base=$saved
+fresh; wf "$c4" " # v1.0.9" > .github/workflows/two.yml; git commit -qam side -- .github/workflows/two.yml 2> /dev/null || { git add -A -- .github; git commit -qm side; }
+sidebase=$(git rev-parse HEAD)
+wf "$c2" " # v1.0.2" > .github/workflows/two.yml; git add -A -- .github; git commit -qm fromside
+saved=$base; base=$sidebase
+check "a pin that moves from a commit that is not on main" false "descend"
+base=$saved
+fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; sed -i '0,/v1.0.2$/s/v1.0.2$/v1.0.2 /' .github/workflows/one.yml; commit_all
+check "a pin line that gains trailing whitespace" false "no longer a binge-ci pin\|v1.0.N"
+
 echo "-- a pin line in a different shape"
 fresh; printf 'jobs:\n  a:\n    uses: ScottCooper92/binge-ci/.github/workflows/x.yml@%s # v1.0.2 and a note\n' "$c2" > .github/workflows/one.yml; commit_all
 check "a trailing note after the tag" false
