@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Holds the step that lets a self-hosted runner reuse one Claude Code and Bun install across jobs.
-# Each agent job carries a copy of it, since a new action has no release tag to pin until a release,
-# so this requires the copies to agree, ties each one to the pin of the claude-code-action step it
-# serves, and runs one against a stubbed installer: variable unset, cold cache, warm cache, two jobs at
+# The script is in the agent-claude-cache action. Each agent job still carries an inline copy, since a
+# new action has no release tag to pin until a release, so this requires each copy to equal the script,
+# ties each one to the pin of the claude-code-action step it serves, and runs the script against a
+# stubbed installer: variable unset, cold cache, warm cache, two jobs at
 # once, a corrupted file, a failed install, an unreadable version, and pruning.
 set -euo pipefail
 
@@ -74,14 +75,17 @@ for b in bad:
 print(f"ok    {n} agent jobs carry the cache step" if not bad else "")
 sys.exit(1 if bad or n != 5 else 0)
 PY
+script="$root/.github/actions/agent-claude-cache/claude-cache.sh"
+# The script is the step's body behind a header of comments; the body starts at its `set` line.
+tail -n +"$(grep -n '^set -uo pipefail' "$script" | head -n 1 | cut -d: -f1)" "$script" > "$work/script-body"
 same=true
-for copy in "$work"/steps/step.*; do cmp -s "$work/steps/step.1" "$copy" || same=false; done
+for copy in "$work"/steps/step.*; do cmp -s "$work/script-body" "$copy" || same=false; done
 if [ "$same" = true ] && [ "$(ls "$work"/steps/step.* | wc -l)" -eq 5 ]; then
-  ok "the cache step is the same in all five agent jobs"
+  ok "the cache step is the action's script in all five agent jobs"
 else
-  fail "the cache step differs between jobs"
+  fail "an inline cache step differs from the action's script"
 fi
-step="$work/steps/step.1"
+step="$script"
 
 # A runner: <root>/_work/<repo> as the workspace, the action's checkout beside it under _actions.
 ref=0123456789abcdef0123456789abcdef01234567
@@ -235,5 +239,18 @@ if [ $rc -eq 0 ] && [ -d "$cache/claude-9.9.9" ] && [ -d "$cache/claude-3.0.0" ]
 else
   fail "pruning kept or removed the wrong versions: $(ls "$cache" | tr '\n' ' ')"
 fi
+
+echo "-- the action"
+python3 -I - "$root/.github/actions/agent-claude-cache/action.yml" <<'PY' && ok "the pin reaches the script through env, is required, and both outputs are the step's" || fail "the action's wiring is wrong"
+import sys, yaml
+a = yaml.safe_load(open(sys.argv[1]))
+step = a["runs"]["steps"][0]
+assert a["inputs"]["action_ref"]["required"] is True
+assert step["env"]["ACTION_REF"] == "${{ inputs.action_ref }}"
+assert "${{" not in step["run"] and step.get("shell") == "bash"
+assert step.get("id") == "cache"
+for o in ("claude_path", "bun_path"):
+    assert a["outputs"][o]["value"] == "${{ steps.cache.outputs.%s }}" % o
+PY
 
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
