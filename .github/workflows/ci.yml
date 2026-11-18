@@ -132,6 +132,10 @@ jobs:
       - name: Test the runner-local Claude Code cache step
         run: ./tools/test-claude-code-cache.sh
 
+      # A frame no shard names is a frame nothing validates, so the split is held to completeness and to failing closed.
+      - name: Test the screenshot sharding
+        run: ./tools/test-shard-screenshots.sh
+
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
         run: ./tools/test-rerecord-comment.sh

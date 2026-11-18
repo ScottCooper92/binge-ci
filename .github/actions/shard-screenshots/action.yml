@@ -1,0 +1,64 @@
+name: Shard the screenshot tests
+description: >
+  Splits a module's screenshot test classes into shards and prints the Gradle `--tests` filters for
+  one of them, so each shard of a matrix renders in a JVM of its own.
+
+# An action for the same reason as the others here: a reusable workflow runs against the CALLER's
+# checkout, and a composite action is the only way to hand it a script that travels with it. Run it
+# after `actions/checkout`, in the job of one matrix shard.
+#
+# The render holds every frame's native memory until its JVM exits, so one JVM for the whole suite
+# grows with the suite and, past what a runner has, the job stalls and is cancelled with no log. Each
+# shard renders a share and exits.
+
+inputs:
+  shards:
+    description: How many shards the suite is split into. A positive whole number.
+    required: true
+  index:
+    description: This shard, counting from 0. A whole number below `shards`.
+    required: true
+  test_dir:
+    description: Where the screenshot test classes are, relative to the workspace.
+    required: false
+    default: app/src/screenshotTest
+  reference_dir:
+    description: Where the reference PNGs are, relative to the workspace.
+    required: false
+    default: app/src/screenshotTestDebug/reference
+
+outputs:
+  filters:
+    description: >
+      The shard's `--tests` arguments, one per line: a `--tests` line and a `*.<Class>` line for each
+      class. Read them with `mapfile -t filters <<< "$FILTERS"` and pass `"${filters[@]}"` to Gradle.
+    value: ${{ steps.shard.outputs.filters }}
+  empty:
+    description: >
+      `true` when this shard has no class (more shards than classes). Skip the Gradle run when it is
+      `true`: a validate task given no filter runs the whole suite, which is what sharding avoids.
+    value: ${{ steps.shard.outputs.empty }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pick this shard's test classes
+      id: shard
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        SHARDS: ${{ inputs.shards }}
+        INDEX: ${{ inputs.index }}
+        TEST_DIR: ${{ inputs.test_dir }}
+        REFERENCE_DIR: ${{ inputs.reference_dir }}
+      run: |
+        set -euo pipefail
+        filters=$(bash "${ACTION_PATH}/shard-screenshots.sh" "$SHARDS" "$INDEX" "$TEST_DIR" "$REFERENCE_DIR")
+        delim="EOF_$(openssl rand -hex 8)"
+        {
+          echo "filters<<${delim}"
+          printf '%s\n' "$filters"
+          echo "${delim}"
+          if [ -n "$filters" ]; then echo "empty=false"; else echo "empty=true"; fi
+        } >> "$GITHUB_OUTPUT"
+        echo "Shard $INDEX of $SHARDS: $(printf '%s\n' "$filters" | grep -c '^\*\.' || true) class(es)."
