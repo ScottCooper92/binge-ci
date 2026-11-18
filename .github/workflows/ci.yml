@@ -144,6 +144,10 @@ jobs:
       - name: Test the Renovate preset
         run: ./tools/test-renovate-preset.sh
 
+      # A false `true` lets an arbitrary workflow edit through without a human, so what must stay false is held here.
+      - name: Test the pin-only check
+        run: ./tools/test-pin-only.sh
+
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
         run: ./tools/test-rerecord-comment.sh

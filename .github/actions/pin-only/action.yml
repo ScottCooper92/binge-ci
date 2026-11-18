@@ -1,0 +1,55 @@
+name: Pin-only change
+description: >
+  Says whether a pull request changes nothing but its binge-ci pins (the `uses: ScottCooper92/binge-ci/...@<sha> # v1.0.N`
+  lines and the `binge-ci` submodule), all to one commit that a `v1.0.N` tag of binge-ci names on its main. Anything
+  else, or anything it cannot read, is `false`.
+
+# An action for the same reason as the others here: a reusable workflow runs against the CALLER's checkout, and a
+# composite action is the only way to hand it a script that travels with it. Run it after `actions/checkout` with
+# `fetch-depth: 0` and no submodules: it reads the files through git, and the gitlink from the tree. It needs
+# `contents: read` and network access to binge-ci's public remote. It never fails on a change that is not pin-only; it
+# answers `false`, which only keeps the normal merge rules in force.
+
+inputs:
+  base:
+    description: The pull request's base commit.
+    required: true
+  head:
+    description: The pull request's head commit.
+    required: true
+  binge_ci_url:
+    description: Where binge-ci's tags and main are read from.
+    required: false
+    default: https://github.com/ScottCooper92/binge-ci.git
+  submodule_path:
+    description: The path of the binge-ci submodule in the calling repository.
+    required: false
+    default: binge-ci
+
+outputs:
+  pin_only:
+    description: "`true` only when every change is a pin to one tagged binge-ci release."
+    value: ${{ steps.check.outputs.pin_only }}
+  reason:
+    description: Why it is, or the first reason it is not.
+    value: ${{ steps.check.outputs.reason }}
+  commit:
+    description: The commit every pin names, when pin_only is true.
+    value: ${{ steps.check.outputs.commit }}
+  version:
+    description: The v1.0.N tag that names it, when pin_only is true.
+    value: ${{ steps.check.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the pins
+      id: check
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+        BINGE_CI_URL: ${{ inputs.binge_ci_url }}
+        SUBMODULE_PATH: ${{ inputs.submodule_path }}
+      run: OUT="$GITHUB_OUTPUT" bash "${ACTION_PATH}/pin-only.sh"
