@@ -8,6 +8,9 @@
 # `HEAD` on a pull request is GitHub's merge commit, so the delta also holds what the base branch gained
 # since the fork point. That covers a semantic merge conflict; do not switch to the PR head SHA to save runs.
 #
+# A rename is listed as a deletion and an addition (`--no-renames`), since `--name-only` alone prints only
+# the new path and a source file moved into a set that cannot reach a job would hide the path it left.
+#
 # This runs with `-e` off around everything that can fail for a reason outside the diff (a run list that
 # cannot be read, a fetch that fails) because the answer to all of them is the same: run everything. A
 # wrong skip is the only costly error here, a wasted run is not.
@@ -38,7 +41,7 @@ if [ "${SAME_REPO:-false}" = true ] && [ -n "${HEAD_REF:-}" ]; then
     [ -n "$sha" ] || continue
     # A draft's run skips every job, the gate job too, and may still conclude success: only a run whose
     # gate job itself succeeded vouches for its commit.
-    built="$(gh api "repos/${REPOSITORY:?}/actions/runs/$run_id/jobs" \
+    built="$(gh api "repos/${REPOSITORY:?}/actions/runs/$run_id/jobs?per_page=100" \
       -q "[.jobs[] | select(.name == \"${GREEN_JOB:-build}\" and .conclusion == \"success\")] | length" 2>/dev/null || echo 0)"
     [ "${built:-0}" -gt 0 ] 2>/dev/null || continue
     if [ "$sha" != "$head" ] && git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
@@ -55,7 +58,7 @@ if [ -z "$base" ]; then
 fi
 [ -n "$base" ] || all "No baseline to diff against"
 
-git diff --name-only "$base" "$head" > "$tmp/changed.txt" 2>/dev/null || all "The diff could not be read"
+git diff --no-renames --name-only "$base" "$head" > "$tmp/changed.txt" 2>/dev/null || all "The diff could not be read"
 
 set -e
 bash "$here/classify-changes.sh" "$tmp/changed.txt" | tee -a "$OUT"

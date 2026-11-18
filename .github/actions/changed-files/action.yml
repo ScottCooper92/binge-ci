@@ -41,7 +41,11 @@ inputs:
     required: false
     default: ci.yml
   green_job:
-    description: The name of the job that only succeeds when the whole run did. A run vouches for its commit only if this job succeeded in it.
+    description: >
+      The name of the job that only succeeds when the whole run did. A run vouches for its commit only if
+      this job succeeded in it. The name is matched exactly as the Actions API reports it, and a job in a
+      called reusable workflow is reported as `<caller job> / <job>`; a name that matches nothing only costs
+      runs, since the baseline then falls back to the merge base. Only the first 100 jobs of a run are read.
     required: false
     default: build
   token:

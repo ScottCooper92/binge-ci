@@ -154,6 +154,27 @@ grep -q "the merge base" "$work/summary" && ok "a green run that is not an ances
 got="$(run pull_request BASE_REF=no-such-branch)"
 [ "$got" = "$all_true" ] && ok "a base branch that cannot be found runs everything" || fail "a missing base gave '$got'"
 
+# A file moved out of the build is a deletion from it: both the old and the new path have to be read.
+cd "$repo"
+git checkout -q main
+mkdir -p app/src/main app/src/test docs
+echo src > app/src/main/Foo.kt
+git add -A && git commit -q -m "add Foo" && git push -q origin main
+git checkout -q -b renamer
+git mv app/src/main/Foo.kt docs/Foo.kt
+git commit -q -m "move Foo into docs"
+: > "$work/runs.txt"
+got="$(run pull_request PRODUCT_NONE='docs/*' HEAD_REF=renamer)"
+[ "$got" = "product=true screens=true release=false" ] && ok "a source file moved into the documentation set still runs the Gradle jobs" || fail "a rename hid its source path: '$got'"
+grep -qx "app/src/main/Foo.kt" "$work/changed.txt" && grep -qx "docs/Foo.kt" "$work/changed.txt" && ok "and the diff lists both sides of the rename" || fail "the diff lists only one side of a rename"
+git checkout -q main
+git checkout -q -b frames
+git mv app/src/main/Foo.kt app/src/test/Foo.kt
+git commit -q -m "move Foo into tests"
+got="$(run pull_request NO_FRAMES='app/src/test/*' HEAD_REF=frames)"
+[ "$got" = "product=true screens=true release=false" ] && ok "a source file moved into a test directory still moves the frames" || fail "a rename into the tests skipped the frames: '$got'"
+cd "$root"
+
 mkdir "$work/notgit" && cd "$work/notgit"
 got="$(run pull_request)"
 [ "$got" = "$all_true" ] && ok "outside a repository it runs everything" || fail "no repository gave '$got'"
