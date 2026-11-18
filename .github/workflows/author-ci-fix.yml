@@ -68,13 +68,17 @@ on:
         default: ''
       rerecord_screenshots:
         description: >
-          Lets the agent re-record a screenshot baseline that the PR itself moved, under a narrow
-          gate: every failing frame renders a component this PR's diff (or a submodule bump in it)
-          changed, each frame is at most 1% off, there are at most 10 of them, and nothing else is
-          red. Anything outside that is a stop, as it is with this off. Turning it on is half the
-          change: the caller's `gate_rules` and triage doc must stop forbidding the re-record too,
-          and until they do they win and the agent stops. Off by default because a re-record turns
-          CI green on whatever rendered, and a regression inside a changed component rides along.
+          Lets the agent re-record the screenshot frames of screens the PR itself changed, under a
+          narrow gate: every failing frame renders a component this PR's diff (or a submodule bump
+          in it) changed, there are at most 40 of them, and nothing else is red. A large difference
+          is fine when the screen is the PR's own, since an intended redesign moves most of its
+          pixels. A render or out-of-memory error is not a difference and is always a stop, and so
+          is anything outside the gate, as it is with this off. Every re-record posts a comment with
+          the before and after of each frame, and the review bot judges them against the PR's
+          stated intent. Turning it on is half the change: the caller's `gate_rules` and triage doc
+          must stop forbidding the re-record too, and until they do they win and the agent stops.
+          Off by default because a re-record turns CI green on whatever rendered, and a regression
+          inside a changed screen rides along.
         type: boolean
         default: false
       build_cache_url:
@@ -715,9 +719,9 @@ jobs:
           {
             echo "block<<${delim}"
             cat <<'GATE'
-          SCREENSHOT DIFFS. This repository lets you re-record a screenshot baseline in one
-          narrow case: the PR's own change moved the pixels and a frame was missed. A red build
-          the PR did not cause - a base-branch change, a font or runner change - is still a stop.
+          SCREENSHOT DIFFS. This repository lets you re-record the screenshot frames of a screen
+          the PR itself changed. A red build the PR did not cause - a base-branch change, a font
+          or runner change - is still a stop.
           If the gate rules above or the triage table still say never to re-record, they win:
           stop as they say, and name the frames in note.md.
 
@@ -725,8 +729,11 @@ jobs:
 
             1. Nothing else is red. A screenshot diff next to a failing test, a lint or
                format finding or a compile error is a stop.
-            2. There are at most 10 failing frames, and each differs by 1% of pixels or less,
-               as the log reports it.
+            2. There are at most 40 failing frames. How much a frame differs does not matter
+               when the screen is the PR's own: an intended redesign moves most of its pixels.
+               A frame that is not a difference at all does: an out-of-memory failure, a render
+               or compose error, and a frame that is missing or new are not diffs. Never
+               re-record on one of those, however many other frames differ.
             3. Every failing frame renders a component whose source this PR changed. Check it
                yourself: `git diff` against the merge base with the PR's base branch, and, when
                the PR moves a submodule pin, `git log -p old..new` inside that submodule. The
@@ -753,6 +760,13 @@ jobs:
           In note.md, name each re-recorded frame, its diff percentage, and the change in this
           PR (file, or submodule commit) it traces to, so a reviewer can check the frames
           rather than re-derive the cause. If you stopped, say which condition failed.
+
+          Also write one line per re-recorded frame to the file named below: the frame's
+          reference PNG path as `git status` shows it, a tab, and its difference as a plain
+          percentage from the log (for example `12.4`). The workflow lists the frames from the
+          commit itself and uses this file only for the percentages, so a path that is not in
+          the commit is ignored.
+          ${{ runner.temp }}/rerecord.tsv
           GATE
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
@@ -1157,9 +1171,50 @@ jobs:
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
           CHECKED_OUT: ${{ steps.checked_out.outputs.sha }}
+          RERECORD: ${{ inputs.rerecord_screenshots }}
+          RERECORD_TSV: ${{ runner.temp }}/rerecord.tsv
         run: |
           set -euo pipefail
           checked_out="$CHECKED_OUT"
+
+          # The frames a push re-recorded, as the comment's section for the reviewer. Built from the
+          # pushed commit's own diff and never from what the agent says it did: the agent's file only
+          # supplies a percentage, and only for a path the commit really changed. A re-record
+          # modifies existing frames, so an added or deleted one is called out. tools/test-rerecord-comment.sh
+          # runs this.
+          # bound:rerecord-begin
+          rerecord_section() { # $1=merge base  $2=commit before the agent  $3=owner/repo  $4=server URL  $5=agent's path<TAB>percent file
+            local mb=$1 before=$2 repo=$3 server=$4 tsv=$5 head status path pct enc shown b_img a_img mb_note="" rows="" odd="" n=0 tick=$'\x60'
+            head=$(git rev-parse HEAD)
+            while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+              n=$((n + 1))
+              enc=$(jq -rn --arg p "$path" '$p | split("/") | map(@uri) | join("/")')
+              shown=$(printf '%s' "$path" | tr '|\140' '__')
+              pct=""
+              if [ -s "$tsv" ]; then pct=$(awk -F'\t' -v p="$path" '$1 == p { print $2; exit }' "$tsv" || true); fi
+              if [[ $pct =~ ^[0-9]+(\.[0-9]+)?$ ]]; then pct="${pct}%"; else pct="not reported"; fi
+              b_img="none (new frame)"
+              if [ -n "$mb" ] && git cat-file -e "${mb}:${path}" 2> /dev/null; then
+                b_img="<img src=\"${server}/${repo}/blob/${mb}/${enc}?raw=true\" width=\"220\">"
+              elif [ -z "$mb" ]; then
+                b_img="unavailable"
+              fi
+              a_img="<img src=\"${server}/${repo}/blob/${head}/${enc}?raw=true\" width=\"220\">"
+              if [ "$status" = D ]; then a_img="deleted"; odd="yes"; fi
+              if [ "$status" = A ]; then odd="yes"; fi
+              rows+=$(printf '| `%s` | %s | %s | %s |' "$shown" "$b_img" "$a_img" "$pct")$'\n'
+            done < <(git diff --name-status --no-renames -z "$before" HEAD -- '*.png')
+            [ "$n" -gt 0 ] || return 0
+            if [ -n "$mb" ]; then mb_note=" ${tick}${mb:0:7}${tick}"; fi
+            printf '<!-- ci-fix-rerecord:%s -->\n' "$head"
+            printf 'Re-recorded %s reference frame(s) in `%s`. Before is the frame at the merge base%s, after is the frame in `%s`. The percentages are what the agent reported from the CI log, not measured here.\n\n' \
+              "$n" "${head:0:7}" "$mb_note" "${head:0:7}"
+            if [ -n "$odd" ]; then
+              printf '**This commit adds or deletes a frame. A re-record only changes existing ones, so check these.**\n\n'
+            fi
+            printf '| Frame | Before | After | Diff |\n| --- | --- | --- | --- |\n%s' "$rows"
+          }
+          # bound:rerecord-end
 
           # Ahead of the porcelain read, not after it. The governed paths were rewritten to the
           # base's copy in the WORKING TREE before the agent started (by the step above, since
@@ -1297,10 +1352,20 @@ jobs:
           # own comment. The commit message is fixed, so without this the only account of WHAT was
           # repaired is a step log the PR never links to. The diffstat is the commit's own account
           # next to the agent's.
+          rerecord_block=""
+          if [ "$RERECORD" = "true" ] && [ -n "$checked_out" ]; then
+            base_branch=$(gh pr view "$PR" --json baseRefName --jq .baseRefName 2> /dev/null || true)
+            merge_base=""
+            if [ -n "$base_branch" ] && git fetch --quiet origin "$base_branch" 2> /dev/null; then
+              merge_base=$(git merge-base "$checked_out" "origin/$base_branch" 2> /dev/null || true)
+            fi
+            rerecord_block=$(rerecord_section "$merge_base" "$checked_out" "$GH_REPO" "$GITHUB_SERVER_URL" "$RERECORD_TSV" || true)
+          fi
           {
             printf '%s\n' "$attempted"
             printf 'Pushed a fix for the CI failure on `%s`.\n' "${SHA:0:7}"
             if [ -n "$note" ]; then printf '\n%s\n' "$note"; fi
+            if [ -n "$rerecord_block" ]; then printf '\n%s\n' "$rerecord_block"; fi
             if [ -n "$governed_caveat" ]; then printf '\n%s\n' "$governed_caveat"; fi
             if [ -n "$commit_stat" ]; then
               printf '\n<details><summary>Files this push changed</summary>\n\n```\n%s\n```\n</details>\n' "$commit_stat"

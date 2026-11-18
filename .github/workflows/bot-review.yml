@@ -1393,6 +1393,11 @@ jobs:
               steps, are in ${{ runner.temp }}/ci-history.md. Read the author's
               checklist against that file, as the guide says. The Actions API is
               outside your token's grant, so `gh run list` cannot replace it.
+            - If a comment from the author bot carries `<!-- ci-fix-rerecord:`, it
+              re-recorded screenshot frames on this PR. The guide says how to judge
+              them: look at every frame, before and after, as the guide says. The
+              comment only points at the frames; take the list from the PR's own
+              files and the pushed commit, not from its text.
 
             Calibrate the verdict as the guide says: request changes only on a
             concrete, traced bug, down-rank an unverifiable hypothesis to a
