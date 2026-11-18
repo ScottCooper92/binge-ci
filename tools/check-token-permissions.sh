@@ -41,7 +41,7 @@ REPOS = re.compile(r'^\s*repositories:(.*)$')
 
 USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')
 APP = re.compile(r'^\s*app-id:\s*\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}')
-PERM = re.compile(r'^\s*permission-([a-z-]+):')
+PERM = re.compile(r'^\s*permission-([a-z-]+):\s*(\S*)')
 
 bad = 0
 mints = 0
@@ -71,23 +71,26 @@ for path in files:
                 app = found.group(1)
             found = PERM.match(text)
             if found:
-                perms.append((j + 1, found.group(1)))
+                perms.append((j + 1, found.group(1), found.group(2)))
             found = REPOS.match(text)
             if found:
                 repos.append((j + 1, found.group(1)))
         if path.rsplit('/', 1)[-1] in AUTHOR_BOTS and app == "AUTHOR_APP_ID":
             widened = [n for n, value in repos if value.strip() and not value.strip().startswith('#')]
             names_submodules = any('private_submodules' in value for _, value in repos)
-            if not any(perm == "contents" for _, perm in perms):
+            # A mint can write unless every permission it asks for is `read`; one that asks for none
+            # inherits the installation's whole grant.
+            can_write = not perms or any(value != "read" for _, _, value in perms)
+            if can_write:
                 # A token that can write must reach the calling repository alone.
                 for n in widened:
                     print(f"::error file={path},line={n}::This author-app mint can write and sets "
                           "`repositories:`, so it would reach more than the calling repository. Mint the "
                           "private submodules' token separately, with permission-contents: read.")
                     bad += 1
-            elif names_submodules and any(perm != "contents" for _, perm in perms):
-                print(f"::error file={path},line={i + 1}::The private-submodule mint may ask for "
-                      "permission-contents alone.")
+            if names_submodules and sorted((name, value) for _, name, value in perms) != [("contents", "read")]:
+                print(f"::error file={path},line={i + 1}::The mint for private_submodules has to ask for "
+                      "permission-contents: read and nothing else.")
                 bad += 1
         if not perms:
             continue
@@ -98,7 +101,7 @@ for path in files:
                   "Add the installation's permissions there.")
             bad += 1
             continue
-        for line_no, perm in perms:
+        for line_no, perm, _ in perms:
             if perm not in granted:
                 print(f"::error file={path},line={line_no}::permission-{perm} is not granted to "
                       f"the {app} installation, so this mint fails and the job dies before its "

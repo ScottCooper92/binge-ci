@@ -440,8 +440,6 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # By SHA, not branch name: the head check above vetted this commit, and a push landing after it
-      # must not be repaired from this commit's log. Detached, so "Commit and push" names the branch.
       # A separate, read-only token for the submodule fetch, so the write token below reaches the calling
       # repository alone: an agent run here must not be able to write to a private submodule's repository.
       - name: Mint a read-only token for private submodules
@@ -454,6 +452,8 @@ jobs:
           repositories: ${{ inputs.private_submodules }}
           permission-contents: read
 
+      # By SHA, not branch name: the head check above vetted this commit, and a push landing after it
+      # must not be repaired from this commit's log. Detached, so "Commit and push" names the branch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true'
         with:
@@ -476,10 +476,11 @@ jobs:
           set -euo pipefail
           n=${GIT_CONFIG_COUNT:-0}
           add() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+          # As actions/checkout did for submodules: an ssh-form URL is fetched over https.
+          add url.https://github.com/.insteadOf git@github.com:
           if [ -n "$PRIVATE_SUBMODULES" ]; then
             basic=$(printf 'x-access-token:%s' "$SUBMODULE_TOKEN" | base64 -w0)
             echo "::add-mask::$basic"
-            add url.https://github.com/.insteadOf git@github.com:
             mapfile -t repos < <(sed -e 's/[, ]/\n/g' <<<"$PRIVATE_SUBMODULES" | sed '/^$/d')
             for repo in "${repos[@]}"; do
               # `<repo>` and `<repo>.git` both: git matches the URL path on whole segments, so a
@@ -1462,10 +1463,11 @@ jobs:
           set -euo pipefail
           n=${GIT_CONFIG_COUNT:-0}
           add() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+          # As actions/checkout did for submodules: an ssh-form URL is fetched over https.
+          add url.https://github.com/.insteadOf git@github.com:
           if [ -n "$PRIVATE_SUBMODULES" ]; then
             basic=$(printf 'x-access-token:%s' "$SUBMODULE_TOKEN" | base64 -w0)
             echo "::add-mask::$basic"
-            add url.https://github.com/.insteadOf git@github.com:
             mapfile -t repos < <(sed -e 's/[, ]/\n/g' <<<"$PRIVATE_SUBMODULES" | sed '/^$/d')
             for repo in "${repos[@]}"; do
               # `<repo>` and `<repo>.git` both: git matches the URL path on whole segments, so a

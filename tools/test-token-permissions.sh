@@ -120,7 +120,21 @@ expect write-plus-read pass
 bot_fixture read-too-wide author-comments.yml "$plain_write
 $read_mint
           permission-pull-requests: read"
-expect read-too-wide fail "permission-contents alone"
+expect read-too-wide fail "has to ask for permission-contents: read and nothing else"
+
+# The value is read, not just the name: a contents mint that can write is the old problem again.
+bot_fixture read-mint-writes author-comments.yml "$plain_write
+${read_mint/permission-contents: read/permission-contents: write}"
+expect read-mint-writes fail "has to ask for permission-contents: read and nothing else"
+
+bot_fixture write-mint-other-repos author-comments.yml "      - name: Mint author app token
+        uses: actions/create-github-app-token@0000000000000000000000000000000000000000 # v2
+        with:
+          app-id: \${{ secrets.AUTHOR_APP_ID }}
+          private-key: \${{ secrets.KEY }}
+          repositories: other-repo
+          permission-contents: write"
+expect write-mint-other-repos fail "would reach more than the calling repository"
 
 # submodule-bump.yml widens its token by design, so the rule does not reach it.
 bot_fixture bump-widens submodule-bump.yml "$widened_write"
@@ -183,11 +197,13 @@ run_fetch() { # the list of repositories, "" for none
     PRIVATE_SUBMODULES="$1" OWNER=acme bash "$work/fetch/step.1" >/dev/null
 }
 run_fetch ""
-if ! grep -q 'GIT_CONFIG_KEY' "$work/fetch.log" && grep -q '^GIT_CONFIG_COUNT=0' "$work/fetch.log" \
+# Only the ssh-to-https rewrite, as actions/checkout set it: no http.* entry, so no credential.
+if grep -qx 'GIT_CONFIG_COUNT=1' "$work/fetch.log" && grep -qx 'GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf' "$work/fetch.log" \
+   && ! grep -q 'GIT_CONFIG_KEY_[0-9]*=http\.' "$work/fetch.log" \
    && grep -q 'git submodule update --init --recursive' "$work/fetch.log"; then
   echo "ok    with no private submodules the step adds no credential and still fetches"
 else
-  echo "FAIL  the step added configuration with no private submodules"; failures=1
+  echo "FAIL  the step added a credential, or lost the ssh rewrite, with no private submodules"; failures=1
 fi
 run_fetch "lib-one" preset
 if grep -qx 'GIT_CONFIG_KEY_0=core.x' "$work/fetch.log" && grep -qx 'GIT_CONFIG_VALUE_0=kept' "$work/fetch.log" \
