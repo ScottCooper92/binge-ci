@@ -61,7 +61,7 @@ jobs:
   review:
     # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
     # here (binge-design-system#407). It checks the events that name a head repository and lets the others through.
-    # Coordinator status notes (`<!-- to-coordinator`) never open the rebuttal door.
+    # Skip coordinator status notes (`<!-- to-coordinator`) so they start no empty run.
     if: >-
       !startsWith(github.event.comment.body, '<!-- to-coordinator') &&
       (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository) &&

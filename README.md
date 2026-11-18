@@ -517,8 +517,9 @@ Add this clause to the job `if` in the caller's `author-comments.yml` and `bot-r
 ```
 
 On an event with no comment the body is null, so the clause is true and filters nothing else.
-`author-comments.yml` here skips the same notes itself, but only the caller's `if` stops the
-run before it starts.
+The filter belongs on the caller's job, not in the called workflow: a job whose `if` is false
+never joins the concurrency group, so it cannot cancel a pending run that has a real comment
+to answer.
 
 ## Versioning
 

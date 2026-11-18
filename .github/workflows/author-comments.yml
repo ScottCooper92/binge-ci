@@ -168,9 +168,6 @@ env:
 
 jobs:
   respond:
-    # Also in the callers; here too so a caller that has not copied the filter yet skips before the
-    # app-token mint. A comment event only: the body is null on the others, so this is true there.
-    if: ${{ !startsWith(github.event.comment.body, '<!-- to-coordinator') }}
     runs-on: ${{ fromJSON(inputs.runner) }}
     # A run here has no persistent GRADLE_USER_HOME, so it pays a full dependency resolve
     # before the agent's first task. Raise this WITH the turn cap, not instead of it.
