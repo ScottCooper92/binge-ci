@@ -1,0 +1,40 @@
+name: Reuse a runner-local Claude Code install
+description: >
+  On a self-hosted runner that sets `BINGE_CI_CLAUDE_CODE_CACHE`, installs Claude Code and Bun once per
+  version into that directory and reuses them, instead of downloading them in every job. Outputs the two
+  paths for `claude-code-action`. Unset, it does nothing and the action installs them as always.
+
+# An action for the same reason as the others here: five agent jobs carried the same step, and a
+# reusable workflow can only hand a script to a job that way. See "A runner-local Claude Code cache" in
+# the README for what it keeps and how it is checked.
+#
+# What the step that calls it still has to carry, because an action cannot set it for its caller:
+# `timeout-minutes: 10` and `continue-on-error: true` (a download that does not fit is left to the agent
+# step's own install), and the same `if:` as the agent step. Put it before the step that bounds the
+# agent's network calls, whose curl limits would cut a large download short.
+
+inputs:
+  action_ref:
+    description: >
+      The commit the `anthropics/claude-code-action` step is pinned to. The versions to install are read
+      from that action's checkout, so this has to be the pin of the step that uses the paths.
+    required: true
+
+outputs:
+  claude_path:
+    description: The cached Claude Code executable, or empty when the action should install it itself.
+    value: ${{ steps.cache.outputs.claude_path }}
+  bun_path:
+    description: The cached Bun executable, or empty when the action should install it itself.
+    value: ${{ steps.cache.outputs.bun_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install or reuse
+      id: cache
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACTION_REF: ${{ inputs.action_ref }}
+      run: bash "${ACTION_PATH}/claude-cache.sh"
