@@ -38,7 +38,10 @@ jobs:
     #
     # A fork PR never reaches the bot. binge-ci refuses one too, and this keeps the guard in sight
     # here. It checks the events that name a head repository and lets the others through.
+    # A coordinator's status note (first line `<!-- to-coordinator`) is posted under the maintainer's
+    # account and would otherwise pass the gate below and start a run with nothing to answer.
     if: >
+      !startsWith(github.event.comment.body, '<!-- to-coordinator') &&
       github.event.sender.login != 'binge-pr-author[bot]' &&
       (github.event_name != 'issue_comment' ||
        (github.event.issue.pull_request &&
