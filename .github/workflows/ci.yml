@@ -140,6 +140,10 @@ jobs:
       - name: Test the changed-files action
         run: ./tools/test-changed-files.sh
 
+      # The release workflow lets an App create tags a ruleset forbids, so what it refuses is held here.
+      - name: Test the release tagging
+        run: ./tools/test-release-tag.sh
+
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
         run: ./tools/test-rerecord-comment.sh

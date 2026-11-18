@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+#
+# The steps of release-tag.yml, kept in a script so tools/test-release-tag.sh can run them against scratch
+# repositories and a stubbed `gh`. The workflow tags a release when its PR merges, which hands a GitHub App
+# the right to create tags a ruleset otherwise forbids. So nothing here takes the version on trust.
+#
+#   release-tag.sh decide   Reads the merge commit $SHA. Writes `release`, `version`, `pr` and `resume` to $OUT
+#                           (GITHUB_OUTPUT). A merge that is not a release is `release=false` and a green exit.
+#                           A merge that looks like a release and is not safe to tag exits non-zero, so the
+#                           failure is reported rather than skipped.
+#   release-tag.sh tag      Creates the tag $VERSION at $SHA, checks it, moves `v1`, checks that, then moves the
+#                           `stable` branch that consumers' submodules follow. In that order, as CLAUDE.md says.
+#   release-tag.sh report   Opens (or updates) one issue for a release whose tagging failed.
+#
+# Environment: REPO (owner/name), SHA, GH_TOKEN, OUT, and for `tag` and `report` VERSION. Tags and branches are
+# written through the API, so this needs no push credentials and no git identity.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+here="$(pwd)"
+out="${OUT:-/dev/null}"
+# release/v1.0.N is the only line that is tagged. A new major needs a new alias, which is a decision, not a branch name.
+version_re='^v1\.0\.[0-9]+$'
+
+say() { echo "$*" >&2; }
+die() { echo "::error::$*" >&2; exit 1; }
+emit() { printf '%s=%s\n' "$1" "$2" >> "$out"; }
+
+patch_of() { printf '%s' "${1##*.}"; }
+
+decide() {
+  : "${REPO:?}" "${SHA:?}"
+  local prs pr head_ref head_repo merged_by merged_type number version newest old_refs diff
+
+  # The pull request this commit is the merge of. A direct push to main, or a squash of something else, has none.
+  prs=$(gh api "repos/$REPO/commits/$SHA/pulls") || die "could not list the pull requests for $SHA"
+  pr=$(jq -c --arg sha "$SHA" '[.[] | select(.merge_commit_sha == $sha and .merged_at != null)] | .[0] // empty' <<< "$prs")
+  if [ -z "$pr" ]; then
+    say "$SHA is not the merge of a pull request: not a release."
+    emit release false
+    return 0
+  fi
+  head_ref=$(jq -r '.head.ref' <<< "$pr")
+  head_repo=$(jq -r '.head.repo.full_name // ""' <<< "$pr")
+  merged_by=$(jq -r '.merged_by.login // ""' <<< "$pr")
+  merged_type=$(jq -r '.merged_by.type // ""' <<< "$pr")
+  number=$(jq -r '.number' <<< "$pr")
+  case "$head_ref" in
+    release/v*) ;;
+    *)
+      say "PR #$number came from '$head_ref', not a release/v* branch: not a release."
+      emit release false
+      return 0
+      ;;
+  esac
+
+  # From here the merge looks like a release, so anything wrong is an error rather than a skip.
+  version=${head_ref#release/}
+  emit pr "$number"
+  emit version "$version"
+  [[ $version =~ $version_re ]] || die "the branch '$head_ref' does not name a v1.0.N release."
+  [ "$head_repo" = "$REPO" ] || die "PR #$number came from '$head_repo', not from a branch of $REPO. A fork does not cut a release."
+  [ "$merged_type" = User ] || die "PR #$number was merged by '${merged_by:-nobody}' ($merged_type), not by a person."
+
+  # Tags are read from the checkout, which fetched them all.
+  newest=$(git tag --list 'v1.0.*' | grep -E "$version_re" | sort -t. -k3 -n | tail -n 1 || true)
+  [ -n "$newest" ] || die "no v1.0.N tag exists to follow; the first release is cut by hand."
+  local resume=false
+  if git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+    [ "$(git rev-parse "refs/tags/$version^{commit}")" = "$SHA" ] \
+      || die "$version already exists at $(git rev-parse "refs/tags/$version^{commit}"), not at $SHA. A tag is never moved."
+    resume=true
+    say "$version already names $SHA: resuming a release that was tagged only in part."
+  else
+    [ "$(patch_of "$version")" -gt "$(patch_of "$newest")" ] \
+      || die "$version is not newer than $newest, the newest tag."
+  fi
+
+  # The tree has to say the same thing as the branch name.
+  git rev-parse -q --verify "$SHA^{commit}" > /dev/null || die "$SHA is not in this checkout."
+  git -C "$here" cat-file -e "$SHA^1" 2> /dev/null || die "the merge commit has no parent in this checkout (shallow clone?)."
+  local pins
+  pins=$(git grep -hoE '^[[:space:]]*(- )?uses:[[:space:]]*ScottCooper92/binge-ci/[^[:space:]]*' "$SHA" -- '.github/workflows/*.yml' '.github/actions/*/action.yml' \
+         | sed 's/.*@//' | sort -u)
+  [ "$pins" = "$version" ] || die "the branch names $version, but the self-references at $SHA pin '$(printf '%s ' $pins)'."
+
+  # A release is the self-reference bump and nothing else. That is what lets a tag be cut without a person reading it.
+  local files
+  files=$(git diff --no-renames --name-only -z "$SHA^1" "$SHA" | tr '\0' '\n')
+  [ -n "$files" ] || die "the merge changes nothing."
+  if grep -qvE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files"; then
+    die "the merge changes more than workflow and action files: $(grep -vE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files" | head -3 | tr '\n' ' ')"
+  fi
+  diff=$(git diff -U0 --no-renames "$SHA^1" "$SHA" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' || true)
+  [ -n "$diff" ] || die "the merge has no changed lines."
+  local removed added
+  removed=$(grep -E '^-' <<< "$diff" | sed 's/^-//' || true)
+  added=$(grep -E '^\+' <<< "$diff" | sed 's/^+//' || true)
+  grep -qvE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$removed" \
+    && die "a removed line is not a self-reference: $(grep -vE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$removed" | head -1)"
+  grep -qvE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$added" \
+    && die "an added line is not a self-reference: $(grep -vE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$added" | head -1)"
+  [ "$(sed -E 's/@v1\.0\.[0-9]+/@V/' <<< "$removed" | sort)" = "$(sed -E 's/@v1\.0\.[0-9]+/@V/' <<< "$added" | sort)" ] \
+    || die "the changed lines differ by more than the release tag."
+  old_refs=$(grep -oE '@v1\.0\.[0-9]+' <<< "$removed" | sort -u | tr -d '@')
+  if [ "$resume" = false ]; then
+    [ "$old_refs" = "$newest" ] || die "the bump moves '$(printf '%s ' $old_refs)', not $newest, the previous release."
+  fi
+  [ "$(grep -oE '@v1\.0\.[0-9]+' <<< "$added" | sort -u | tr -d '@')" = "$version" ] || die "the bump does not move every reference to $version."
+
+  # The rest of the reference rules (no './', one tag, immutable).
+  CHECK_ROOT="$here" bash tools/check-internal-refs.sh > /dev/null || die "tools/check-internal-refs.sh fails at $SHA."
+
+  emit release true
+  emit resume "$resume"
+  say "PR #$number is the $version release. Tagging $SHA."
+}
+
+ref_exists() { gh api "repos/$REPO/git/ref/$1" > /dev/null 2>&1; }
+
+tag() {
+  : "${REPO:?}" "${SHA:?}" "${VERSION:?}"
+  [[ $VERSION =~ $version_re ]] || die "'$VERSION' is not a v1.0.N release."
+  # 1. The release tag, lightweight, at the merge commit. Skipped when a half-finished run already made it.
+  if ref_exists "tags/$VERSION"; then
+    say "$VERSION exists already."
+  else
+    gh api -X POST "repos/$REPO/git/refs" -f "ref=refs/tags/$VERSION" -f "sha=$SHA" > /dev/null || die "could not create $VERSION."
+    say "Created $VERSION at $SHA."
+  fi
+  git fetch -q --force --tags origin
+  PUSHED_REF="$VERSION" PUSHED_SHA="$SHA" bash tools/check-internal-refs.sh --resolve \
+    || die "the tag checks fail for $VERSION. v1 was NOT moved."
+  # 2. Only then the alias consumers follow.
+  if ref_exists tags/v1; then
+    gh api -X PATCH "repos/$REPO/git/refs/tags/v1" -f "sha=$SHA" -F force=true > /dev/null || die "could not move v1. $VERSION is tagged."
+  else
+    gh api -X POST "repos/$REPO/git/refs" -f ref=refs/tags/v1 -f "sha=$SHA" > /dev/null || die "could not create v1. $VERSION is tagged."
+  fi
+  say "Moved v1 to $SHA."
+  git fetch -q --force --tags origin
+  PUSHED_REF=v1 PUSHED_SHA="$SHA" bash tools/check-internal-refs.sh --resolve \
+    || die "the tag checks fail after v1 moved to $SHA. Every consumer on v1 is affected: check the run."
+  # 3. The branch a consumer's submodule follows. A fast-forward only: a releases branch that is not a line is a mistake.
+  if ref_exists heads/stable; then
+    gh api -X PATCH "repos/$REPO/git/refs/heads/stable" -f "sha=$SHA" -F force=false > /dev/null \
+      || die "could not fast-forward the stable branch to $SHA. $VERSION is tagged and v1 has moved."
+  else
+    gh api -X POST "repos/$REPO/git/refs" -f ref=refs/heads/stable -f "sha=$SHA" > /dev/null \
+      || die "could not create the stable branch. $VERSION is tagged and v1 has moved."
+  fi
+  say "stable is at $SHA."
+}
+
+report() {
+  : "${REPO:?}" "${VERSION:?}" "${RUN_URL:?}"
+  local marker="<!-- release-tag:$VERSION -->" body existing
+  body="$marker
+The release workflow could not finish tagging $VERSION. It stopped at the step the run log names: $RUN_URL
+
+State to check by hand: \`git ls-remote --tags origin $VERSION v1\` and the \`stable\` branch. The order is the release tag, then \`v1\`, then \`stable\`; nothing after a failed step ran. Re-running the workflow resumes a release that was tagged in part, and refuses one whose tag names another commit."
+  existing=$(gh issue list --repo "$REPO" --state open --limit 100 --json number,body \
+               --jq "[.[] | select(.body | contains(\"$marker\"))] | .[0].number // empty") \
+    || die "could not look for an existing issue."
+  if [ -n "$existing" ]; then
+    gh issue comment "$existing" --repo "$REPO" --body "Failed again: $RUN_URL" > /dev/null
+  else
+    gh issue create --repo "$REPO" --title "Release $VERSION: tagging failed" --body "$body" > /dev/null
+  fi
+}
+
+case "${1:-}" in
+  decide) decide ;;
+  tag) tag ;;
+  report) report ;;
+  *) echo "usage: release-tag.sh decide|tag|report" >&2; exit 2 ;;
+esac

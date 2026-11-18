@@ -600,12 +600,35 @@ to answer.
 when that update merges. The worked callers write `@v1`, the alias
 they track. `v1.0.0` and friends are immutable tags too.
 
-Releasing is four steps, in this order. Bump every self-reference in `.github/workflows/`
-to the new patch tag: the actions the reusable workflows use and the `self-*.yml` callers
-alike, which `tools/check-internal-refs.sh` requires to agree. Merge that. Tag `vX.Y.Z` at
-that commit. **Then** move `v1`. That order keeps the window safe: a consumer's Renovate
-resolves `v1`, so until it moves no consumer is offered the new commit, and none is offered a
-tag that does not exist yet.
+Releasing is one human step. Bump every self-reference in `.github/workflows/` to the new patch
+tag, in a PR from a branch named `release/vX.Y.Z`: the actions the reusable workflows use and the
+`self-*.yml` callers alike, which `tools/check-internal-refs.sh` requires to agree. Merge it.
+`release-tag.yml` then tags `vX.Y.Z` at the merge commit, runs the tag checks, **then** moves `v1`,
+runs them again, and moves the `stable` branch. That order keeps the window safe: a consumer's
+Renovate resolves `v1`, so until it moves no consumer is offered the new commit, and none is
+offered a tag that does not exist yet.
+
+`release-tag.yml` takes nothing on trust, because the App it uses may create tags the ruleset
+forbids. It acts only on the merge of a `release/v1.0.N` branch of this repository, merged by a person,
+whose whole diff is the self-reference bump from the previous release to that tag, whose tree pins that
+tag, and whose tag does not exist yet (or already names this commit, which makes a re-run resume a
+release that was tagged in part). A merge that is not a release does nothing. A merge that looks like
+one and fails a check fails the run and opens one issue for the release. `stable` is a branch that only
+fast-forwards to each release commit; a consumer's submodule follows it, so the submodule pins exactly
+the tagged commit rather than whatever `main` has reached.
+
+What the maintainer sets up, once, in the repository settings:
+
+1. A GitHub App owned by the maintainer, installed on this repository only, with the repository
+   permission **Contents: read and write** and nothing else (Metadata: read comes with every app).
+   No webhook, no events.
+2. In an Actions environment named `release`, deployable from `main` only: the App's ID as the secret
+   `RELEASE_APP_ID` and its private key as the secret `RELEASE_APP_PRIVATE_KEY`.
+3. In the ruleset that restricts creating, updating and deleting `v*` tags, which must also cover
+   `v1`: the App on the **bypass list**, always. Not on the `main` branch ruleset.
+4. A branch ruleset on `stable`, if there is one, that lets the App update it and refuses everyone else.
+
+Until those are done the workflow runs and fails at the token step, and the issue it opens says so.
 
 One door closes on the release PR itself. A `pull_request` event runs the workflow file
 from the merge ref, so `self-review.yml` on that PR pins the tag the PR is about to create,

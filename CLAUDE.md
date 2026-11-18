@@ -33,8 +33,9 @@ workflow at that tag, so they change in the release bump and never with the work
 The consumers follow `v1`, a moving alias: each pins the commit it names, with a `# v1`
 comment, and moves when Renovate's digest update for it merges. This repository's own actions
 and callers pin the immutable `vX.Y.Z` the release was cut at. Releasing is bumping those
-pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order, by a human.
-`tools/check-internal-refs.sh` and `tag-check.yml` hold the order; nothing else does.
+pins in a PR from a `release/vX.Y.Z` branch and merging it - the one human step. `release-tag.yml` then
+tags `vX.Y.Z` at the merge commit and moves `v1`, in that order, and refuses anything that is not
+exactly that bump. `tools/check-internal-refs.sh` and `tag-check.yml` hold the order.
 
 ## Shell and YAML
 
@@ -70,7 +71,7 @@ repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check
 `tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its
 shared `collect_pr` function against a stubbed `gh`, and `tools/test-download-actionlint.sh`, which runs the actionlint
 action's download-and-verify script against a stubbed `gh`, `tools/test-upstream-watch.sh`, which runs the upstream-watch
-script against a stubbed `gh`, `tools/test-submodule-bump.sh`, which runs the submodule-bump script against scratch repositories and a stubbed `gh`, `tools/test-body-checklist.sh`, which holds the author bot's PR-body edit to a checklist box and one line, `tools/test-rebuttal-cap.sh`, which holds the review bot's cap on reconsidering an unchanged head, `tools/test-agent-limits.sh`, which holds the steps that bound each agent job's network calls and print its last tool calls, `tools/test-claude-code-cache.sh`, which holds the step that lets a self-hosted runner reuse one Claude Code install and runs it against a stubbed installer, `tools/test-rerecord-comment.sh`, which builds the screenshot re-record comment from scratch repositories and holds the prompt's gate and the review rules for it, `tools/test-shard-screenshots.sh`, which holds the screenshot sharding action to putting every class in exactly one shard and to failing closed, `tools/test-changed-files.sh`, which holds the changed-files action to skipping a job only for a path in a closed set and to running everything when it cannot read the diff, and `tools/check-gate-lists.sh`, which fails when a list of these
+script against a stubbed `gh`, `tools/test-submodule-bump.sh`, which runs the submodule-bump script against scratch repositories and a stubbed `gh`, `tools/test-body-checklist.sh`, which holds the author bot's PR-body edit to a checklist box and one line, `tools/test-rebuttal-cap.sh`, which holds the review bot's cap on reconsidering an unchanged head, `tools/test-agent-limits.sh`, which holds the steps that bound each agent job's network calls and print its last tool calls, `tools/test-claude-code-cache.sh`, which holds the step that lets a self-hosted runner reuse one Claude Code install and runs it against a stubbed installer, `tools/test-rerecord-comment.sh`, which builds the screenshot re-record comment from scratch repositories and holds the prompt's gate and the review rules for it, `tools/test-shard-screenshots.sh`, which holds the screenshot sharding action to putting every class in exactly one shard and to failing closed, `tools/test-changed-files.sh`, which holds the changed-files action to skipping a job only for a path in a closed set and to running everything when it cannot read the diff, `tools/test-release-tag.sh`, which holds the release workflow to tagging only an exact self-reference bump, in order, and refusing everything else, and `tools/check-gate-lists.sh`, which fails when a list of these
 gates here does not name one `ci.yml` runs (tested by `tools/test-check-gate-lists.sh`). It also runs `./gradlew build` in `gradle-plugins/`, which
 compiles the gates and runs their unit and TestKit tests. There is no coverage floor, so do
 not look for one and do not report a finding as though one had caught it.
