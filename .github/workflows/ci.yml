@@ -140,6 +140,10 @@ jobs:
       - name: Test the changed-files action
         run: ./tools/test-changed-files.sh
 
+      # The preset must only ever offer a v1.0.N tag, never `v1` or a branch head, and never `hold`.
+      - name: Test the Renovate preset
+        run: ./tools/test-renovate-preset.sh
+
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
         run: ./tools/test-rerecord-comment.sh
