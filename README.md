@@ -533,28 +533,37 @@ lists the plugins and how to configure them.
 
 ### Reusing the design system
 
-App pull requests keep adding UI that the shared design system already provides. `detekt/design-system-bans.yml` is
-a detekt config fragment that bans the raw Material 3 blocks the design system wraps, so the build says what to use
-instead. It covers `TopAppBar` and its variants and `Scaffold` (`BingeScreenScaffold` and the bar wrappers),
-`ModalBottomSheet` (`BingeBottomSheet`, `BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField`
-(`BingeTextField`), `SearchBar` (`BingeSearchField`), `AlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`),
-`TabRow` and its variants, `FilterChip` and `InputChip`, `Button`, `OutlinedButton` and `TextButton`, `Slider` and
-`RangeSlider`, and `SnackbarHost`. Each message points at `design-system/docs/components.md`.
+App pull requests keep adding UI that the shared design system already provides. Two detekt config fragments ban the raw
+Material 3 blocks the design system wraps, so the build says what to use instead. The covered blocks are `TopAppBar` and
+its variants and `Scaffold` (`BingeScreenScaffold` and the bar wrappers), `ModalBottomSheet` (`BingeBottomSheet`,
+`BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField` (`BingeTextField`), `SearchBar`
+(`BingeSearchField`), `AlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`), `TabRow` and its variants,
+`FilterChip` and `InputChip`, `Button`, `OutlinedButton` and `TextButton`, `Slider` and `RangeSlider`, and
+`SnackbarHost`. Each message points at `design-system/docs/components.md`.
 
-A consumer adds it after its own `detekt.yml`, from its `binge-ci` submodule:
+- `detekt/design-system-bans.yml` bans the **import**. It sets one list, `style.ForbiddenImport.forbiddenImports`.
+- `detekt/design-system-call-bans.yml` bans the **call**, under a wildcard import or a fully qualified name. It sets one
+  list, `style.ForbiddenMethodCall.methods`, and turns the rule on with only those entries.
+
+A consumer adds them after its own `detekt.yml`, from its `binge-ci` submodule:
 
 ```kotlin
 detektGate {
-    additionalConfigs.from(layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"))
+    additionalConfigs.from(
+        layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"),
+        layout.settingsDirectory.file("binge-ci/detekt/design-system-call-bans.yml"),
+    )
 }
 ```
 
-- **App code only.** The rules exclude the design system's own path and build output, and the gate reads production
-  source sets only.
-- **The fragment owns two lists.** detekt reads a later file over an earlier one key by key, and a list is replaced,
-  not merged. The fragment sets `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`, so a ban a
-  consumer wants for either rule goes into the fragment here, not into its own `detekt.yml`. It also turns
-  `ForbiddenMethodCall` on, with only these entries (detekt's own default list is inactive).
+- **A list is replaced, not merged, so a clash is refused.** detekt reads a later file over an earlier one, and a list in
+  the later file replaces the earlier one without a word. A consumer that already sets one of these lists in its own
+  `detekt.yml` (a ban on `kotlin.runCatching`, say, under `ForbiddenMethodCall.methods`) would lose it the day a fragment
+  that sets the same list is added. So the gate's `checkDetektConfigClashes` fails the build, naming the list and both
+  files, when two config files set the same list. The fix is one list in one file: leave out the fragment that clashes and
+  copy its entries into the consumer's own list.
+- **App code only.** Both fragments exclude the design system's own path and build output, and the gate reads production
+  source sets only. A file in the gate's `suppressedPaths` stays silent for them too, as for every other rule.
 - **Existing uses.** Code that already uses a raw block goes into the consumer's baseline in the rollout PR, so the gate
   is zero new findings, not zero total.
 - **A reviewed exception** is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that

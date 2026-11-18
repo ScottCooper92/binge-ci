@@ -433,10 +433,54 @@ class GatesFunctionalTest {
         runner("detekt", withKotlin = true).build()
     }
 
-    /** A project that applies the gate with the fragment, the Material functions it bans, a wrapper, a reviewed exception and a file of the design system's. */
-    private fun designSystemProject() {
-        val fragment = File(System.getProperty("user.dir"), "../detekt/design-system-bans.yml").canonicalFile
-        assertTrue(fragment.isFile, "the fragment is at $fragment")
+    // A consumer that already bans a call of its own (a list `ForbiddenMethodCall.methods`) must not have it replaced without
+    // a word by a fragment that sets the same list: detekt replaces a list rather than merging it.
+    @Test
+    fun `a fragment that sets a list the consumer's own detekt yml sets is refused and names the list`() {
+        designSystemProject(own = "style:\n  ForbiddenMethodCall:\n    active: true\n    methods:\n      - value: 'kotlin.runCatching'\n        reason: 'swallows cancellation'\n")
+
+        val result = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(result.output.contains("style.ForbiddenMethodCall.methods"), result.output)
+        assertTrue(result.output.contains("detekt.yml and design-system-call-bans.yml"), result.output)
+    }
+
+    @Test
+    fun `the import fragment alone leaves the consumer's own method bans standing`() {
+        designSystemProject(
+            own = "style:\n  ForbiddenMethodCall:\n    active: true\n    methods:\n      - value: 'kotlin.runCatching'\n        reason: 'swallows cancellation'\n",
+            fragments = listOf("design-system-bans.yml"),
+        )
+        write("src/main/kotlin/app/Catches.kt", "package app\n\nfun catches() = runCatching { 1 }\n")
+        write("src/main/kotlin/app/ImportsRaw.kt", "package app\n\nimport androidx.compose.material3.Scaffold\n\nfun screen() = Scaffold()\n")
+
+        val failing = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertFalse(failing.output.contains("checkDetektConfigClashes FAILED"), failing.output)
+        assertTrue(failing.output.contains("Catches.kt") && failing.output.contains("swallows cancellation"), failing.output)
+        assertTrue(failing.output.contains("ImportsRaw.kt") && failing.output.contains("Use BingeScreenScaffold"), failing.output)
+    }
+
+    // The rules carry their own `excludes`, and the suppressions layer puts `excludes` on the rule set. Both have to keep a
+    // preview-data file out of the bans, or the fragment would report where every other style rule is silent.
+    @Test
+    fun `a suppressed path stays silent for the design-system bans too`() {
+        designSystemProject(suppressed = true)
+        write("src/main/kotlin/app/SamplePreviewData.kt", "package app\n\nimport androidx.compose.material3.Scaffold\n\nfun preview() = Scaffold()\n")
+
+        runner("detekt", withKotlin = true).build()
+    }
+
+    /** A project that applies the gate with the fragments, the Material functions they ban, a wrapper, a reviewed exception and a file of the design system's. */
+    private fun designSystemProject(
+        own: String = "",
+        fragments: List<String> = listOf("design-system-bans.yml", "design-system-call-bans.yml"),
+        suppressed: Boolean = false,
+    ) {
+        val files =
+            fragments.map {
+                File(System.getProperty("user.dir"), "../detekt/$it").canonicalFile.also { file -> assertTrue(file.isFile, "the fragment is at $file") }
+            }
         build(
             """
             plugins {
@@ -444,14 +488,15 @@ class GatesFunctionalTest {
                 id("binge.gates.detekt")
             }
             $REPOSITORIES
-            // Only the fragment's rules, so what the fixture files do for detekt's defaults (naming, empty blocks) is not under test.
+            // Only the fragments' rules, so what the fixture files do for detekt's defaults (naming, empty blocks) is not under test.
             detektGate {
                 buildUponDefaultConfig.set(false)
-                additionalConfigs.from(file("${fragment.invariantSeparatorsPath}"))
+                ${files.joinToString("\n                ") { """additionalConfigs.from(file("${it.invariantSeparatorsPath}"))""" }}
+                ${if (suppressed) """suppressedPaths.set(listOf("**/*PreviewData.kt"))""" else ""}
             }
             """.trimIndent(),
         )
-        write("detekt.yml", "")
+        write("detekt.yml", own)
         write(
             "src/main/kotlin/androidx/compose/material3/Material.kt",
             "@file:Suppress(\"ForbiddenMethodCall\")\npackage androidx.compose.material3\n\n" +

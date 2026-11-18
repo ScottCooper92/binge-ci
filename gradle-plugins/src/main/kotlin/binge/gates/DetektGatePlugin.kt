@@ -121,8 +121,15 @@ class DetektGatePlugin : Plugin<Project> {
         // has set them. The tasks are configured rather than detekt's extension, so that a task registered
         // outside it, such as the baseline-staleness run, gets the same settings.
         val suppressions = DetektSuppressions.register(project, gate)
+        // A fragment that sets a list the consumer's own config sets would replace it without a word, so it is refused.
+        val clashes =
+            project.tasks.register("checkDetektConfigClashes", CheckDetektConfigClashesTask::class.java) {
+                configs.from(gate.configFile, gate.additionalConfigs)
+                onlyIf { !gate.additionalConfigs.isEmpty }
+            }
 
         project.tasks.withType(Detekt::class.java).configureEach {
+            dependsOn(clashes)
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
             config.from(gate.additionalConfigs)
@@ -142,6 +149,7 @@ class DetektGatePlugin : Plugin<Project> {
             }
         }
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
+            dependsOn(clashes)
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
             config.from(gate.additionalConfigs)

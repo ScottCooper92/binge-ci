@@ -1,0 +1,61 @@
+# Bans calls to the raw Material 3 blocks that the design system wraps: the call under a wildcard import or a fully qualified
+# name, which `design-system-bans.yml` does not see. It needs the type resolution the gate wires.
+#
+# A consumer adds this file next to `design-system-bans.yml`. It sets one list, `style.ForbiddenMethodCall.methods`, and turns the
+# rule on with only these entries (detekt's own default list is inactive). A consumer that already sets that list in its own
+# `detekt.yml` (a ban of its own, such as `kotlin.runCatching`) has the build refused until the two are one list: copy these
+# entries into its own list and leave this file out.
+#
+# The bans cover app code only, as in `design-system-bans.yml`. A reviewed exception is
+# `@Suppress("ForbiddenMethodCall")` on the function that calls it, with a one-line comment saying why the wrapper does not fit.
+style:
+  ForbiddenMethodCall:
+    active: true
+    excludes: ['**/design-system/**', '**/build/**']
+    methods:
+      - value: 'androidx.compose.material3.TopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material TopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.CenterAlignedTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material CenterAlignedTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.MediumTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material MediumTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.LargeTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material LargeTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Scaffold'
+        reason: 'Use BingeScreenScaffold instead of the raw Material Scaffold. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.ModalBottomSheet'
+        reason: 'Use BingeBottomSheet or BingeAdaptiveSheet, and BingeChoiceSheet to pick one or several from a list instead of the raw Material ModalBottomSheet. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TextField'
+        reason: 'Use BingeTextField instead of the raw Material TextField. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.OutlinedTextField'
+        reason: 'Use BingeTextField instead of the raw Material OutlinedTextField. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SearchBar'
+        reason: 'Use BingeSearchField instead of the raw Material SearchBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.DockedSearchBar'
+        reason: 'Use BingeSearchField instead of the raw Material DockedSearchBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.AlertDialog'
+        reason: 'Use BingeConfirmDialog or BingeMessageDialog instead of the raw Material AlertDialog. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.BasicAlertDialog'
+        reason: 'Use BingeConfirmDialog or BingeMessageDialog instead of the raw Material BasicAlertDialog. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material TabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.PrimaryTabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material PrimaryTabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SecondaryTabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material SecondaryTabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.FilterChip'
+        reason: 'Use BingeFilterChip, and BingeFilterChipRow for a row of them instead of the raw Material FilterChip. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.InputChip'
+        reason: 'Use BingeFilterChip, and BingeFilterChipRow for a row of them instead of the raw Material InputChip. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Button'
+        reason: 'Use BingeFilledButton instead of the raw Material Button. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.OutlinedButton'
+        reason: 'Use BingeOutlinedButton instead of the raw Material OutlinedButton. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TextButton'
+        reason: 'Use BingeTextButton instead of the raw Material TextButton. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Slider'
+        reason: 'Use BingeNumberSlider or BingeStopSlider instead of the raw Material Slider. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.RangeSlider'
+        reason: 'Use BingeRangeSlider instead of the raw Material RangeSlider. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SnackbarHost'
+        reason: 'Use BingeSnackbarHost instead of the raw Material SnackbarHost. See design-system/docs/components.md.'
