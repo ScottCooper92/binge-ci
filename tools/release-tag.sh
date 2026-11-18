@@ -95,7 +95,9 @@ decide() {
   if grep -qvE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files"; then
     die "the merge changes more than workflow and action files: $(grep -vE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files" | head -3 | tr '\n' ' ')"
   fi
-  diff=$(git diff -U0 --no-renames "$BEFORE" "$SHA" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' || true)
+  # Changed lines only: the file headers (between `diff --git` and the first `@@`) are skipped by position, not by
+  # their `---`/`+++` text, because a deleted line that starts with `-- ` prints as `--- ` and would be dropped.
+  diff=$(git diff -U0 --no-renames "$BEFORE" "$SHA" | awk '/^diff --git /{h=1; next} /^@@/{h=0; next} !h && /^[+-]/' || true)
   [ -n "$diff" ] || die "the merge has no changed lines."
   local removed added
   removed=$(grep -E '^-' <<< "$diff" | sed 's/^-//' || true)

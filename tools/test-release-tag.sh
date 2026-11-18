@@ -71,6 +71,7 @@ git checkout -q -b main
 mkdir -p tools .github/workflows .github/actions/a
 cp "$root/tools/release-tag.sh" "$root/tools/check-internal-refs.sh" tools/
 printf 'jobs:\n  a:\n    steps:\n      - uses: ScottCooper92/binge-ci/.github/actions/a@v1.0.1\n      - run: echo hi\n' > .github/workflows/one.yml
+printf -- '-- a note\n' >> .github/workflows/one.yml
 printf 'jobs:\n  b:\n    steps:\n      - uses: ScottCooper92/binge-ci/.github/actions/a@v1.0.1\n' > .github/workflows/two.yml
 printf 'name: a\nruns:\n  using: composite\n  steps:\n    - uses: ScottCooper92/binge-ci/.github/actions/z@v1.0.1\n' > .github/actions/a/action.yml
 git add -A && git commit -q -m base && git push -q origin main
@@ -151,6 +152,12 @@ echo 'echo extra' > tools/extra.sh && git add -A && git commit -q -m "extra"
 bump v1.0.1 v1.0.2 && git add -A && git commit -q -m "bump"
 prjson release/v1.0.2 o/r User
 if BEFORE_OVERRIDE="$base" run decide; then fail "a rebase merge hiding a file in an earlier commit was tagged"; elif grep -q "more than workflow" "$work/stderr"; then ok "a rebase merge is diffed from the push's previous head, not the last commit"; else fail "wrong reason: $(grep error "$work/stderr" | head -1)"; fi
+
+git checkout -q main && git reset -q --hard "$base"
+git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i '/^-- a note$/d' .github/workflows/one.yml
+git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
+prjson release/v1.0.2 o/r User
+expect_refuses "a release that deletes a line starting with two dashes" "differ by more than\|not a self-reference"
 
 echo "-- a good release is tagged, in order"
 release "$base" v1.0.1 v1.0.2
