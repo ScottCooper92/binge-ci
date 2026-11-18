@@ -531,6 +531,40 @@ includes the build from that checkout and applies the plugins by id. That adds n
 new pin. Each consumer adopts them in a PR of its own. [gradle-plugins/README.md](gradle-plugins/README.md)
 lists the plugins and how to configure them.
 
+### Reusing the design system
+
+App pull requests keep adding UI that the shared design system already provides. `detekt/design-system-bans.yml` is
+a detekt config fragment that bans the raw Material 3 blocks the design system wraps, so the build says what to use
+instead. It covers `TopAppBar` and its variants and `Scaffold` (`BingeScreenScaffold` and the bar wrappers),
+`ModalBottomSheet` (`BingeBottomSheet`, `BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField`
+(`BingeTextField`), `SearchBar` (`BingeSearchField`), `AlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`),
+`TabRow` and its variants, `FilterChip` and `InputChip`, `Button`, `OutlinedButton` and `TextButton`, `Slider` and
+`RangeSlider`, and `SnackbarHost`. Each message points at `design-system/docs/components.md`.
+
+A consumer adds it after its own `detekt.yml`, from its `binge-ci` submodule:
+
+```kotlin
+detektGate {
+    additionalConfigs.from(layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"))
+}
+```
+
+- **App code only.** The rules exclude the design system's own path and build output, and the gate reads production
+  source sets only.
+- **The fragment owns two lists.** detekt reads a later file over an earlier one key by key, and a list is replaced,
+  not merged. The fragment sets `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`, so a ban a
+  consumer wants for either rule goes into the fragment here, not into its own `detekt.yml`. It also turns
+  `ForbiddenMethodCall` on, with only these entries (detekt's own default list is inactive).
+- **Existing uses.** Code that already uses a raw block goes into the consumer's baseline in the rollout PR, so the gate
+  is zero new findings, not zero total.
+- **A reviewed exception** is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that
+  imports it, or `@Suppress("ForbiddenMethodCall")` on the function that calls it, with a one-line comment saying why
+  the wrapper does not fit. A new component belongs in the design system, not in the app.
+- **The `CLAUDE.md` line** every consumer carries: "Before writing UI, read `design-system/docs/components.md`; new
+  components go in the design system, never in the app."
+- **The PR line.** A PR that adds a composable outside the design system carries one line in its body, `Design system:
+  <component> - <why it did not fit>`, naming what it checked. Each consumer adds it to its PR template.
+
 ## Its own gate
 
 This repo ships no product code beyond the Gradle gates, so CI checks the things that can be

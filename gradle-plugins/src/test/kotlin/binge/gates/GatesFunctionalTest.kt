@@ -404,6 +404,71 @@ class GatesFunctionalTest {
         assertTrue(result.output.contains("sets `excludes` on the rule set(s) potential-bugs"), result.output)
     }
 
+    // The shared fragment bans a raw Material block that the design system wraps. The Material functions are declared in
+    // the fixture itself, so a call resolves without the Compose libraries, which is what ForbiddenMethodCall needs.
+    @Test
+    fun `the design-system fragment bans a raw Material import and call, names the wrapper, and leaves wrappers, the escape hatch and the design system alone`() {
+        designSystemProject()
+        write("src/main/kotlin/app/ImportsRaw.kt", "package app\n\nimport androidx.compose.material3.Scaffold\n\nfun screen() = Scaffold()\n")
+        write("src/main/kotlin/app/CallsRaw.kt", "package app\n\nimport androidx.compose.material3.*\n\nfun other() = TextField()\n")
+        write("src/main/kotlin/app/Qualified.kt", "package app\n\nfun third() = androidx.compose.material3.AlertDialog()\n")
+
+        val failing = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(failing.output.contains("ImportsRaw.kt") && failing.output.contains("ForbiddenImport"), failing.output)
+        assertTrue(failing.output.contains("Use BingeScreenScaffold instead of the raw Material Scaffold"), failing.output)
+        assertTrue(failing.output.contains("CallsRaw.kt") && failing.output.contains("ForbiddenMethodCall"), failing.output)
+        assertTrue(failing.output.contains("Use BingeTextField"), failing.output)
+        assertTrue(failing.output.contains("Qualified.kt") && failing.output.contains("Use BingeConfirmDialog or BingeMessageDialog"), failing.output)
+        assertTrue(failing.output.contains("design-system/docs/components.md"), failing.output)
+        // The design system's own file is not reported, and neither is the declaration of the Material function.
+        assertFalse(failing.output.contains("DesignSystemOwn.kt"), failing.output)
+        assertFalse(failing.output.contains("Material.kt"), failing.output)
+        assertFalse(failing.output.contains("Wrapper.kt"), failing.output)
+        assertFalse(failing.output.contains("Reviewed.kt"), failing.output)
+
+        File(root, "src/main/kotlin/app/ImportsRaw.kt").delete()
+        File(root, "src/main/kotlin/app/CallsRaw.kt").delete()
+        File(root, "src/main/kotlin/app/Qualified.kt").delete()
+        runner("detekt", withKotlin = true).build()
+    }
+
+    /** A project that applies the gate with the fragment, the Material functions it bans, a wrapper, a reviewed exception and a file of the design system's. */
+    private fun designSystemProject() {
+        val fragment = File(System.getProperty("user.dir"), "../detekt/design-system-bans.yml").canonicalFile
+        assertTrue(fragment.isFile, "the fragment is at $fragment")
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            // Only the fragment's rules, so what the fixture files do for detekt's defaults (naming, empty blocks) is not under test.
+            detektGate {
+                buildUponDefaultConfig.set(false)
+                additionalConfigs.from(file("${fragment.invariantSeparatorsPath}"))
+            }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "")
+        write(
+            "src/main/kotlin/androidx/compose/material3/Material.kt",
+            "@file:Suppress(\"ForbiddenMethodCall\")\npackage androidx.compose.material3\n\n" +
+                listOf("Scaffold", "TextField", "AlertDialog").joinToString("\n") { "fun $it() {}" } + "\n",
+        )
+        write("src/main/kotlin/app/Wrapper.kt", "package app\n\nfun BingeScreenScaffold() {}\n\nfun usesWrapper() = BingeScreenScaffold()\n")
+        write(
+            "src/main/kotlin/app/Reviewed.kt",
+            "@file:Suppress(\"ForbiddenImport\", \"ForbiddenMethodCall\")\n\npackage app\n\n" +
+                "// A reviewed exception: the wrapper does not take a custom slot here.\nimport androidx.compose.material3.Scaffold\n\nfun reviewed() = Scaffold()\n",
+        )
+        write(
+            "src/main/kotlin/design-system/DesignSystemOwn.kt",
+            "package ds\n\nimport androidx.compose.material3.Scaffold\n\nfun own() = Scaffold()\n",
+        )
+    }
+
     /** Three `internal` fixtures in a preview-data file, a caller that reads each, and a `!!` on each side of the boundary. */
     private fun previewDataProject(suppressed: Boolean = false) {
         build(
