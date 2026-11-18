@@ -188,6 +188,33 @@ Binge's callers are not in `callers/`. They name that repo's self-hosted runner 
 this repository is public — a public staging area has no reason to carry infrastructure
 detail about a private repo. They live in Binge's own `.github/workflows/`.
 
+### A runner-local Claude Code cache
+
+Each agent job installs Claude Code, and Bun for the action's own scripts, from the network: several
+hundred MB a job. On a self-hosted runner with a slow link that is slow, and a job that cannot finish the
+download posts no verdict. A runner can keep one install instead. Set the environment variable
+`BINGE_CI_CLAUDE_CODE_CACHE` on the runner (not in a workflow) to an absolute directory path, and every agent
+job there reuses what is in it. Unset or empty, nothing changes: the action installs as always.
+
+- The versions come from the pinned `claude-code-action`, so a bump of that pin installs the new version into the
+  directory on first use. Each version is a directory, `claude-<version>` and `bun-<version>`, holding the
+  executable and a `sha256` file. The current version and the one other used most recently are kept.
+- The install is built in a temporary directory inside the cache and renamed into place, so a killed job leaves
+  no half-installed version, and a lock makes jobs that start together share one download.
+- Every use checks the executable against the checksum recorded at install. On a mismatch the version is deleted
+  and that job installs it as always, so the next job installs it afresh. If anything else about the cache fails,
+  the job still runs: it just installs as always.
+- The step is capped at 10 minutes (each download at 8, and a wait for another job's install at 8) and is allowed to
+  fail, so the cache can cost a job a bounded amount of time and never a verdict. A download that does not fit in that
+  is left to the action's own install, with no retry here.
+- Put the directory on a volume that outlives the runner's container, or each new container starts cold.
+- Use it on a single-tenant runner only. The directory outlives each job, and every later job on the runner runs
+  what is in it, so an agent job that can write to it can change what later jobs run. The installed files are
+  read-only and checked against the recorded checksum, which catches corruption and not a deliberate change by
+  the user the runner runs as, who could change the checksum too. `fork-review.yml` never uses it.
+- The agent jobs' network limits (`max-time = 120` for curl) are set after this step, so they do not cut the
+  download short. They do apply to the action's own install when the cache is off.
+
 ## Layout
 
 ```

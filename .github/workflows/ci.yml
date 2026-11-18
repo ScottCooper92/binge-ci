@@ -128,6 +128,10 @@ jobs:
       - name: Test the agent jobs' network limits and tool-call dump
         run: ./tools/test-agent-limits.sh
 
+      # The step that lets a self-hosted runner reuse one Claude Code install is copied into each agent job.
+      - name: Test the runner-local Claude Code cache step
+        run: ./tools/test-claude-code-cache.sh
+
       # Each gate test is named by hand in the lists the bots read, and a list that falls behind
       # leaves a bot with guidance CI never complains about.
       - name: Check that every list of gate tests names each one this workflow runs
