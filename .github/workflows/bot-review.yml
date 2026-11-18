@@ -1417,7 +1417,17 @@ jobs:
           #
           # Merge safety is not at stake either way: "Merge if the bar is met" holds on
           # head-moved.
-          printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}" | cat - "$BODY_FILE" > "$BODY_FILE.pinned"
+          #
+          # The trailing marker is what tells THIS run's review from an earlier one on the same head
+          # (a CHANGES_REQUESTED review the author bot answered, or one a maintainer dismissed). After a
+          # failed POST the lookup below needs a review that only this run could have posted: the pin
+          # alone matches the earlier one too, and a POST that never landed would be recorded as
+          # posted. The attempt is in it so a re-run of the same run does not recognise its predecessor.
+          {
+            printf 'Reviewed `%s`.\n\n' "${REVIEWED_SHA:0:7}"
+            cat "$BODY_FILE"
+            printf '\n\n<!-- review-run:%s-%s -->\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          } > "$BODY_FILE.pinned"
 
           # The API's refusal is kept, on the same reasoning as $MERGE_LOG below: this file is
           # written immediately before the POST and nowhere else, so its presence is exactly
@@ -1493,11 +1503,17 @@ jobs:
               echo "refused_status=${status:-none}" >> "$GITHUB_OUTPUT"
               exit 1
             fi
-            # Another bot's pin-shaped review is not this run's, and counting it would record a verdict
-            # whose review never landed. An empty slug matches nothing, so the run retries or reports
-            # the refusal rather than claiming a review it cannot see.
+            # Another bot's pin-shaped review is not this run's, nor is an earlier review of this app on
+            # the head: counting either would record a verdict whose review never landed. An empty slug
+            # matches nothing, so the run retries or reports the refusal rather than claiming a review
+            # it cannot see.
+            # bound:landed-begin
+            landed_filter='[.[] | select(.user.type == "Bot" and .user.login == $login)
+                                | select(.body | startswith($pin))
+                                | select(.body | contains($run))] | length'
+            # bound:landed-end
             if jq -s --arg pin "Reviewed \`${REVIEWED_SHA:0:7}\`" --arg login "${APP_SLUG}[bot]" \
-                 '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))] | length' \
+                 --arg run "<!-- review-run:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->" "$landed_filter" \
                  <<<"$reviews" | grep -qvx 0; then
               echo "Review POST attempt $attempt failed (HTTP ${status:-none}) but the review is on the PR; not posting it again." >&2
               posted=true

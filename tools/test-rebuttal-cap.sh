@@ -82,5 +82,37 @@ else
     || fail "a dismissed review still pins its head"
 fi
 
+# Whether THIS run's review landed after a failed POST. The lookup is read out of the workflow between its
+# markers and run on fixtures: an earlier review on the head (a CHANGES_REQUESTED one, or a dismissed one)
+# is not this run's, and neither is another run's, another attempt's or another app's. Only a review
+# carrying this run's marker counts.
+awk '/# bound:landed-begin/ {on = 1; next} /# bound:landed-end/ {exit} on {sub(/^            /, ""); print}' "$workflow" > "$work/landed.sh"
+if [ "$(grep -c 'bound:landed-begin' "$workflow")" -ne 1 ] || ! grep -q '^landed_filter=' "$work/landed.sh"; then
+  fail "the landed filter is not in the workflow exactly once"
+else
+  landed_filter=""
+  # shellcheck source=/dev/null
+  . "$work/landed.sh"
+  mine() { # $1=login  $2=state  $3=run marker suffix, or empty for none
+    jq -nc --arg l "$1" --arg s "$2" --arg m "${3:+<!-- review-run:$3 -->}" \
+      '{user: {login: $l, type: "Bot"}, state: $s, body: ("Reviewed `abc1234`.\n\nFindings.\n\n" + $m)}'
+  }
+  landed() { jq -s --arg pin 'Reviewed `abc1234`' --arg login 'reviewer[bot]' --arg run '<!-- review-run:42-1 -->' "$landed_filter"; }
+  n=$({ mine 'reviewer[bot]' CHANGES_REQUESTED ""; mine 'reviewer[bot]' DISMISSED 41-1; mine 'reviewer[bot]' APPROVED 42-2
+        mine 'reviewer[bot]' APPROVED 42-10; mine 'reviewer[bot]' APPROVED 4-1; } | landed)
+  [ "$n" -eq 0 ] && pass "an earlier review on the head, or another run's or attempt's, is not this run's" \
+    || fail "the lookup counted $n reviews that this run did not post"
+  n=$({ mine 'reviewer[bot]' CHANGES_REQUESTED ""; mine 'reviewer[bot]' APPROVED 42-1; } | landed)
+  [ "$n" -eq 1 ] && pass "a review carrying this run's marker landed" || fail "this run's own review was not found"
+  n=$(mine 'other-app[bot]' APPROVED 42-1 | landed)
+  [ "$n" -eq 0 ] && pass "another app's review with this run's marker does not count" || fail "another app's review counted"
+fi
+# The marker is written where the review body is built, from the same two variables the lookup reads.
+if grep -q "review-run:%s-%s -->" "$workflow" && grep -q '"\$GITHUB_RUN_ID" "\$GITHUB_RUN_ATTEMPT"' "$workflow"; then
+  pass "the posted review carries the run's marker"
+else
+  fail "the posted review no longer carries the run's marker"
+fi
+
 if [ "$failures" -gt 0 ]; then echo "$failures failure(s)"; exit 1; fi
 echo "all passed"
