@@ -975,6 +975,7 @@ jobs:
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
         run: |
           set -uo pipefail
           f="${EXECUTION_FILE:-}"
@@ -987,11 +988,13 @@ jobs:
             exit 0
           fi
           echo "::group::The agent's last 10 tool calls ($(basename "$f"))"
-          jq -rs '[.[] | (if type == "array" then .[] else . end)
+          jq -rs --arg full "${SHOW_FULL_OUTPUT:-false}" '[.[] | (if type == "array" then .[] else . end)
                    | select(.type == "assistant") | .message.content[]?
                    | select(.type == "tool_use")
-                   | "\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
-                       | tostring | gsub("\\s+"; " ") | .[0:300])"]
+                   | if $full == "true"
+                     then "\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
+                       | tostring | gsub("\\s+"; " ") | .[0:300])"
+                     else .name end]
                   | .[-10:][]' "$f" 2>&1 \
             | sed -E 's/(sk-ant-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]+/\1***/g' || true
           echo "::endgroup::"
@@ -1651,6 +1654,7 @@ jobs:
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
         run: |
           set -uo pipefail
           f="${EXECUTION_FILE:-}"
@@ -1663,11 +1667,13 @@ jobs:
             exit 0
           fi
           echo "::group::The agent's last 10 tool calls ($(basename "$f"))"
-          jq -rs '[.[] | (if type == "array" then .[] else . end)
+          jq -rs --arg full "${SHOW_FULL_OUTPUT:-false}" '[.[] | (if type == "array" then .[] else . end)
                    | select(.type == "assistant") | .message.content[]?
                    | select(.type == "tool_use")
-                   | "\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
-                       | tostring | gsub("\\s+"; " ") | .[0:300])"]
+                   | if $full == "true"
+                     then "\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
+                       | tostring | gsub("\\s+"; " ") | .[0:300])"
+                     else .name end]
                   | .[-10:][]' "$f" 2>&1 \
             | sed -E 's/(sk-ant-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]+/\1***/g' || true
           echo "::endgroup::"

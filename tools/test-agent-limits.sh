@@ -82,7 +82,11 @@ tool() { jq -nc --arg n "$1" --arg c "$2" '{type:"assistant",message:{content:[{
   jq -nc '{type:"result",result:"done"}'; } > "$work/transcript.jsonl"
 jq -s '.' "$work/transcript.jsonl" > "$work/exec.json"
 
-out=$(EXECUTION_FILE="$work/exec.json" HOME="$work/home" bash "$dump")
+# With show_full_output off (the default) only tool names go to a log that may be world-readable.
+out=$(EXECUTION_FILE="$work/exec.json" HOME="$work/home" SHOW_FULL_OUTPUT=false bash "$dump")
+grep -q 'call12\|example.invalid\|ghp_' <<<"$out" && fail "with the flag off, command text was printed" || ok "with the flag off only tool names are printed"
+[ "$(grep -c '^Bash$' <<<"$out")" -eq 10 ] && ok "the flag off still shows the last 10 calls by name" || fail "the names-only output is wrong"
+out=$(SHOW_FULL_OUTPUT=true EXECUTION_FILE="$work/exec.json" HOME="$work/home" bash "$dump")
 grep -q 'call3$' <<<"$out" && fail "an old call was printed" || ok "only the last 10 calls are printed"
 grep -q 'call12' <<<"$out" && ok "the newest call is printed" || fail "the newest call is missing"
 grep -q 'ghp_abc' <<<"$out" && fail "a token was printed" || ok "token shapes are masked"
@@ -90,7 +94,7 @@ grep -q 'ghp_abc' <<<"$out" && fail "a token was printed" || ok "token shapes ar
 
 # A killed step has no execution file: the newest transcript under HOME is read instead.
 mkdir -p "$work/home/.claude/projects/p"; cp "$work/transcript.jsonl" "$work/home/.claude/projects/p/s.jsonl"
-out=$(EXECUTION_FILE="" HOME="$work/home" bash "$dump")
+out=$(SHOW_FULL_OUTPUT=true EXECUTION_FILE="" HOME="$work/home" bash "$dump")
 grep -q 'call12' <<<"$out" && ok "with no execution file the transcript is read" || fail "the transcript fallback failed"
 
 out=$(EXECUTION_FILE="$work/missing.json" HOME="$work/empty" bash "$dump") && rc=0 || rc=$?
