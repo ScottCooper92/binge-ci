@@ -83,4 +83,148 @@ expect with-before-uses fail "permission-issues is not granted to the AUTHOR_APP
 fixture no-mints "      - run: 'true'"
 expect no-mints fail "No create-github-app-token step found"
 
+# The author bots' write token stays the calling repository's. The same steps are judged by the file
+# name, so these fixtures are written under an author workflow's name.
+bot_fixture() {
+  local name=$1 file=$2 steps=$3
+  mkdir -p "$work/$name/.github/workflows"
+  printf 'on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n%s\n' "$steps" \
+    > "$work/$name/.github/workflows/$file"
+}
+widened_write="      - name: Mint author app token
+        uses: actions/create-github-app-token@0000000000000000000000000000000000000000 # v2
+        with:
+          app-id: \${{ secrets.AUTHOR_APP_ID }}
+          private-key: \${{ secrets.KEY }}
+          repositories: \${{ inputs.private_submodules != '' && format('{0},{1}', 'x', inputs.private_submodules) || '' }}"
+plain_write="      - name: Mint author app token
+        uses: actions/create-github-app-token@0000000000000000000000000000000000000000 # v2
+        with:
+          app-id: \${{ secrets.AUTHOR_APP_ID }}
+          private-key: \${{ secrets.KEY }}"
+read_mint="      - name: Mint a read-only token for private submodules
+        uses: actions/create-github-app-token@0000000000000000000000000000000000000000 # v2
+        with:
+          app-id: \${{ secrets.AUTHOR_APP_ID }}
+          private-key: \${{ secrets.KEY }}
+          repositories: \${{ inputs.private_submodules }}
+          permission-contents: read"
+
+bot_fixture write-widened author-comments.yml "$widened_write"
+expect write-widened fail "would reach more than the calling repository"
+
+bot_fixture write-plus-read author-comments.yml "$plain_write
+$read_mint"
+expect write-plus-read pass
+
+bot_fixture read-too-wide author-comments.yml "$plain_write
+$read_mint
+          permission-pull-requests: read"
+expect read-too-wide fail "permission-contents alone"
+
+# submodule-bump.yml widens its token by design, so the rule does not reach it.
+bot_fixture bump-widens submodule-bump.yml "$widened_write"
+expect bump-widens pass
+
+# The submodule fetch step the author bots share. Each of the five copies must be the same, no checkout
+# may fetch submodules itself (that would use the write token), and the step, run against a stubbed
+# `git`, must give the read token to the listed repositories only: never on a broader URL key.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$work/fetch"
+python3 -I - "$root" "$work/fetch" <<'PY' || failures=1
+import sys, yaml
+root, out = sys.argv[1:3]
+n, bad = 0, []
+for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retarget"]:
+    doc = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))
+    for job, body in doc["jobs"].items():
+        steps = body.get("steps", [])
+        for s in steps:
+            if str(s.get("uses", "")).startswith("actions/checkout@"):
+                if "submodules" in s.get("with", {}):
+                    bad.append(f"{wf}/{job}: the checkout fetches submodules itself, with the write token")
+                names = [t.get("name") for t in steps]
+                if names.count("Fetch the submodules") != 1:
+                    bad.append(f"{wf}/{job}: no single 'Fetch the submodules' step beside the checkout")
+        for s in steps:
+            if s.get("name") == "Fetch the submodules":
+                n += 1
+                open(f"{out}/step.{n}", "w").write(s["run"])
+                env = s.get("env", {})
+                if "token" in "".join(env.keys()).lower() and set(env) - {"SUBMODULE_TOKEN", "PRIVATE_SUBMODULES", "OWNER"}:
+                    bad.append(f"{wf}/{job}: the fetch step has an unexpected token in its environment")
+                if "steps.token." in str(env):
+                    bad.append(f"{wf}/{job}: the fetch step is handed the write token")
+for b in bad:
+    print("FAIL  " + b)
+print(f"{n} fetch steps found")
+sys.exit(1 if bad or n != 5 else 0)
+PY
+if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 5 ] && [ "$(cat "$work"/fetch/step.* | sort -u | wc -l)" -eq "$(sort -u "$work/fetch/step.1" | wc -l)" ]; then
+  echo "ok    the fetch step is the same in all five places"
+else
+  echo "FAIL  the fetch step differs between jobs"; failures=1
+fi
+
+mkdir -p "$work/bin"
+cat > "$work/bin/git" <<'STUB'
+#!/usr/bin/env bash
+echo "git $*" >> "$STUB_LOG"
+env | grep '^GIT_CONFIG_' | sort -V >> "$STUB_LOG" || true
+STUB
+chmod +x "$work/bin/git"
+run_fetch() { # the list of repositories, "" for none
+  : > "$work/fetch.log"
+  # Starts from a clean GIT_CONFIG_*, as a runner does, unless the case presets one (second argument).
+  local v args=()
+  while IFS= read -r v; do args+=(-u "$v"); done < <(env | grep -o '^GIT_CONFIG_[^=]*' || true)
+  [ -z "${2:-}" ] || args+=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.x GIT_CONFIG_VALUE_0=kept)
+  env "${args[@]}" PATH="$work/bin:$PATH" STUB_LOG="$work/fetch.log" SUBMODULE_TOKEN=READTOKEN \
+    PRIVATE_SUBMODULES="$1" OWNER=acme bash "$work/fetch/step.1" >/dev/null
+}
+run_fetch ""
+if ! grep -q 'GIT_CONFIG_KEY' "$work/fetch.log" && grep -q '^GIT_CONFIG_COUNT=0' "$work/fetch.log" \
+   && grep -q 'git submodule update --init --recursive' "$work/fetch.log"; then
+  echo "ok    with no private submodules the step adds no credential and still fetches"
+else
+  echo "FAIL  the step added configuration with no private submodules"; failures=1
+fi
+run_fetch "lib-one" preset
+if grep -qx 'GIT_CONFIG_KEY_0=core.x' "$work/fetch.log" && grep -qx 'GIT_CONFIG_VALUE_0=kept' "$work/fetch.log" \
+   && grep -qx 'GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf' "$work/fetch.log"; then
+  echo "ok    configuration already in the environment is kept, and the step's entries come after it"
+else
+  echo "FAIL  the step overwrote GIT_CONFIG entries that were already set"; failures=1
+fi
+run_fetch $'lib-one, lib-two\nlib-three'
+if python3 -I - "$work/fetch.log" <<'PY'
+import base64, re, sys
+entries = {}
+for line in open(sys.argv[1]):
+    m = re.match(r"GIT_CONFIG_(KEY|VALUE)_(\d+)=(.*)$", line.rstrip("\n"))
+    if m:
+        entries.setdefault(int(m.group(2)), {})[m.group(1)] = m.group(3)
+pairs = [(e["KEY"], e["VALUE"]) for _, e in sorted(entries.items())]
+read = "AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:READTOKEN").decode()
+bad = []
+for repo in ("lib-one", "lib-two", "lib-three"):
+    for name in (repo, repo + ".git"):
+        key = f"http.https://github.com/acme/{name}.extraheader"
+        values = [v for k, v in pairs if k == key]
+        if values != ["", read]:
+            bad.append(f"{key}: expected an empty reset then the read header, got {values!r}")
+for k, v in pairs:
+    if k.startswith("http.") and not re.match(r"http\.https://github\.com/acme/lib-(one|two|three)(\.git)?\.extraheader$", k):
+        bad.append(f"{k} is keyed on a broader URL than the listed repositories")
+    if "READTOKEN" in v:
+        bad.append("the token is in the clear")
+print("\n".join("      " + b for b in bad))
+sys.exit(1 if bad else 0)
+PY
+then
+  echo "ok    each listed repository, with and without .git, gets a reset then the read header, and nothing wider"
+else
+  echo "FAIL  the read header is not scoped to the listed repositories"; failures=1
+fi
+
 exit "$failures"

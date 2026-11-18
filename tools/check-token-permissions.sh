@@ -13,6 +13,12 @@
 # the whole installation and is not checked. One that does, from an app not listed here, fails until
 # that app's grant is added.
 #
+# A second rule holds the author bots' write token to the calling repository. With `private_submodules`
+# set, a mint that lists those repositories would give an agent write access to each one, so in the
+# four author workflows a mint that names `private_submodules` in `repositories:` must narrow itself
+# to `permission-contents`, and one that does not narrow itself must not widen its scope at all.
+# `submodule-bump.yml` is left out on purpose: it widens its token by design and says so in the README.
+#
 # CHECK_ROOT names another tree to check, for tools/test-token-permissions.sh's fixtures.
 set -uo pipefail
 cd "${CHECK_ROOT:-$(dirname "$0")/..}" || exit 1
@@ -28,6 +34,10 @@ GRANTS = {
     # read-only submodule mints narrow its token, and they ask for contents alone.
     "REVIEWER_APP_ID": {"contents", "metadata"},
 }
+
+# The workflows whose agent runs with the token a mint here produces.
+AUTHOR_BOTS = {"author-ci-fix.yml", "author-comments.yml", "author-conflicts.yml", "author-retarget.yml"}
+REPOS = re.compile(r'^\s*repositories:(.*)$')
 
 USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')
 APP = re.compile(r'^\s*app-id:\s*\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}')
@@ -50,7 +60,7 @@ for path in files:
         if '-' not in match.group(1):
             while start > 0 and not lines[start].lstrip().startswith('- '):
                 start -= 1
-        app, perms = None, []
+        app, perms, repos = None, [], []
         for j in range(start, len(lines)):
             text = lines[j]
             if j > i and text.strip() and not text.lstrip().startswith('#'):
@@ -62,6 +72,23 @@ for path in files:
             found = PERM.match(text)
             if found:
                 perms.append((j + 1, found.group(1)))
+            found = REPOS.match(text)
+            if found:
+                repos.append((j + 1, found.group(1)))
+        if path.rsplit('/', 1)[-1] in AUTHOR_BOTS and app == "AUTHOR_APP_ID":
+            widened = [n for n, value in repos if value.strip() and not value.strip().startswith('#')]
+            names_submodules = any('private_submodules' in value for _, value in repos)
+            if not any(perm == "contents" for _, perm in perms):
+                # A token that can write must reach the calling repository alone.
+                for n in widened:
+                    print(f"::error file={path},line={n}::This author-app mint can write and sets "
+                          "`repositories:`, so it would reach more than the calling repository. Mint the "
+                          "private submodules' token separately, with permission-contents: read.")
+                    bad += 1
+            elif names_submodules and any(perm != "contents" for _, perm in perms):
+                print(f"::error file={path},line={i + 1}::The private-submodule mint may ask for "
+                      "permission-contents alone.")
+                bad += 1
         if not perms:
             continue
         granted = GRANTS.get(app)

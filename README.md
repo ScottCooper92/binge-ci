@@ -290,10 +290,13 @@ secrets: inherit
   `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
   three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
   secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
-- The author bots check out and push with their one app token, so for them the input widens that
-  token's scope instead. That token has the author app's write access, so with the input set an agent
-  run can write to every listed repository, not only read it. The workflows push only to the pull
-  request's branch in the calling repository. Opt in knowing that.
+- The author bots check out and push with their app token, which reaches the calling repository alone
+  with or without the input. For the listed repositories they mint a second token from the same app
+  with `permission-contents: read` and fetch the submodules with that, so an agent run cannot write to
+  a private submodule's repository. The read token lives in the environment of the fetch step and is
+  never written to a git config, so an agent cannot fetch more of a private submodule than the
+  checkout did. `tools/check-token-permissions.sh` fails if a write mint in these workflows names
+  `private_submodules`.
 - `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
   that a pin is an ancestor of it.
 
