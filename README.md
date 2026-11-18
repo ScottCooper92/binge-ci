@@ -549,12 +549,17 @@ detektGate {
 }
 ```
 
-- **App code only.** The rules exclude the design system's own path and build output, and the gate reads production
-  source sets only.
+- **App code only.** The gate reads production source sets only. The rules also exclude `**/design-system/**` and build
+  output, which matters only where the design system is a directory of the consumer's own tree: it usually arrives as an
+  included build with its own projects.
 - **The fragment owns two lists.** detekt reads a later file over an earlier one key by key, and a list is replaced,
-  not merged. The fragment sets `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`, so a ban a
-  consumer wants for either rule goes into the fragment here, not into its own `detekt.yml`. It also turns
+  not merged. The fragment sets `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`. It also turns
   `ForbiddenMethodCall` on, with only these entries (detekt's own default list is inactive).
+- **A consumer that already sets one of those lists loses it, silently.** `binge-seerr`, `binge-archive` and `ephyra` set
+  `style.ForbiddenMethodCall.methods` (the `kotlin.runCatching` ban) in their `detekt.yml`; adding the fragment as above
+  stops that ban being reported and the gate stays green. Such a consumer adds a second file after the fragment in
+  `additionalConfigs`, holding the fragment's entries and its own for that list, and checks that its own ban still fires.
+  A ban only one consumer wants stays in that consumer; do not add it to the fragment.
 - **Existing uses.** Code that already uses a raw block goes into the consumer's baseline in the rollout PR, so the gate
   is zero new findings, not zero total.
 - **A reviewed exception** is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that

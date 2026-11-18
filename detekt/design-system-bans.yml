@@ -2,11 +2,13 @@
 #
 # A consumer adds this file to `detektGate { additionalConfigs.from(...) }` from its `binge-ci` submodule, after its own
 # `detekt.yml`. detekt reads a later config file over an earlier one, key by key, and a list is replaced, not merged: this file
-# owns `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`. A consumer that needs a ban of its own for either rule adds it
-# here, in binge-ci, rather than in its own `detekt.yml`, where it would be silently dropped or would drop these.
+# owns `ForbiddenImport.forbiddenImports` and `ForbiddenMethodCall.methods`. A consumer whose own `detekt.yml` already sets either
+# list (binge-seerr, binge-archive and ephyra set `ForbiddenMethodCall.methods`) loses its entries when it adds this file, and
+# nothing reports it. It keeps them by listing them, with this file's entries, in a config file of its own placed after this one
+# in `additionalConfigs`. A ban every adopter wants belongs here; one specific to a consumer does not.
 #
-# The bans cover app code only. The design system's own path and build output are excluded, and the gate reads production source
-# sets only. `ForbiddenImport` catches the import; `ForbiddenMethodCall` catches the call under a wildcard import or a fully
+# The bans cover app code only: the gate reads production source sets only. The design system's own path and build output are
+# also excluded, which matters only where it is a directory of the consumer's tree. `ForbiddenImport` catches the import; `ForbiddenMethodCall` catches the call under a wildcard import or a fully
 # qualified name, and needs the type resolution the gate wires.
 #
 # A reviewed exception is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that imports it, or
