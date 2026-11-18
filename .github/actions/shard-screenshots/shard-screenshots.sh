@@ -22,8 +22,13 @@ refs="${4:-app/src/screenshotTestDebug/reference}"
 [[ $shards =~ ^[1-9][0-9]*$ ]] || { echo "shards must be a positive whole number, not '$shards'" >&2; exit 1; }
 [[ $index =~ ^[0-9]+$ ]] && [ "$index" -lt "$shards" ] || { echo "index must be a whole number below $shards, not '$index'" >&2; exit 1; }
 
+# A reference directory that is not there is a mistyped path or a variant that is not debug. Counting
+# it as holding no frames would skip the orphan check too, so it stops here with its name.
+[ -d "$refs" ] || { echo "reference directory '$refs' does not exist; check the reference_dir input (an empty directory is fine for a module with no frames recorded yet)" >&2; exit 1; }
+
 # Fail closed: a frame no shard names is a frame nothing validates, and CI would stay green.
-# A class may carry modifiers; a `@PreviewTest` outside a class, or in a file with no matched class, is an error.
+# A class may carry modifiers; a `@PreviewTest` at the top level of a file, or in a file with no matched class, is an error.
+# A second class in a file that has a matched one is not checked.
 class_re='^[[:space:]]*((public|internal|private|open|final|abstract)[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]*ScreenshotTest\b'
 while IFS= read -r f; do
   # An annotation, not a mention: a doc comment may name `@PreviewTest` without being a frame.
