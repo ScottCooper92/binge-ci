@@ -61,6 +61,7 @@ awk '/# bound:pin-begin/ {on = 1; next} /# bound:pin-end/ {exit} on {sub(/^     
 if [ "$(grep -c 'bound:pin-begin' "$workflow")" -ne 1 ] || ! grep -q '^pinned_filter=' "$work/pin.sh"; then
   fail "the pin filter is not in the workflow exactly once"
 else
+  pinned_filter=""
   # shellcheck source=/dev/null
   . "$work/pin.sh"
   review() { # $1=login  $2=type  $3=state  $4=sha7  $5=submitted_at
