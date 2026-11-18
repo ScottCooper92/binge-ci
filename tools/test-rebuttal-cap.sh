@@ -48,8 +48,8 @@ if grep -q 'review-stalled:' <<<"$capped" && grep -q '"skip=true" >> "$GITHUB_OU
 else
   fail "the capped path no longer posts its note and skips"
 fi
-if grep -q 'Only a push or a dismissal re-opens the review' <<<"$capped"; then
-  pass "the stall note says only a push or a dismissal re-opens the review"
+if grep -q 'Only a push re-opens the review' <<<"$capped"; then
+  pass "the stall note says only a push re-opens the review"
 else
   fail "the stall note does not say what re-opens the review"
 fi
