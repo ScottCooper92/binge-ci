@@ -80,6 +80,13 @@ got="$(PRODUCT_NONE=$'docs/* \r' RELEASE_INPUTS='x' bash "$dir/classify-changes.
 got="$(PRODUCT_NONE='gradle/*' bash "$dir/classify-changes.sh" <(printf 'gradle/wrapper/x.properties\0') | tr '\n' ' ')"
 [ "$got" = "product=false screens=false release=false " ] && ok "a path in both product_none and release_inputs does not reach the release build" || fail "product_none did not win: '$got'"
 
+for bang in '! tools/build-input.sh' $'!\ttools/build-input.sh' '!   tools/build-input.sh'; do
+  got="$(PRODUCT_NONE="$bang"$'\ntools/*' bash "$dir/classify-changes.sh" <(printf 'tools/build-input.sh\0') | tr '\n' ' ')"
+  [ "$got" = "product=true screens=true release=false " ] && ok "a carve-out with whitespace after the ! still carves ($(printf '%q' "$bang"))" || fail "whitespace after the ! dropped the carve-out ($(printf '%q' "$bang")): '$got'"
+done
+got="$(PRODUCT_NONE='!' bash "$dir/classify-changes.sh" <(printf 'a.kt\0') | tr '\n' ' ')"
+[ "$got" = "product=true screens=true release=false " ] && ok "a bare ! matches nothing and skips nothing" || fail "a bare ! changed the answer: '$got'"
+
 echo "-- empty lists"
 : > "$work/list"; printf 'a.kt\0' > "$work/list"
 got="$(PRODUCT_NONE='' NO_FRAMES='' bash "$dir/classify-changes.sh" "$work/list" | tr '\n' ' ')"
