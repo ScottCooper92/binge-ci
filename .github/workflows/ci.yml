@@ -144,6 +144,9 @@ jobs:
       - name: Test the Renovate preset
         run: ./tools/test-renovate-preset.sh
 
+      # A false `true` lets an arbitrary workflow edit through without a human, so what must stay false is held here.
+      - name: Test the pin-only check
+        run: ./tools/test-pin-only.sh
       # The release workflow lets an App create tags a ruleset forbids, so what it refuses is held here.
       - name: Test the release tagging
         run: ./tools/test-release-tag.sh
