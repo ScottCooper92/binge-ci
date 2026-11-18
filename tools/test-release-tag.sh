@@ -203,6 +203,13 @@ if SHA_OVERRIDE="$base" VERSION=v1.0.5 run tag; then fail "a tag that names anot
   && ok "and v1 is not moved" || fail "v1 moved after a failed check"
 git -C "$STUB_ORIGIN" update-ref -d refs/tags/v1.0.5 2> /dev/null || true
 git tag -d v1.0.5 > /dev/null 2>&1 || true
+echo "-- an older release re-run after a newer one does not move v1 back"
+git checkout -q main && git reset -q --hard "$sha3"
+: > "$STUB_LOG"
+if SHA_OVERRIDE="$sha" VERSION=v1.0.2 run tag; then fail "a re-run of v1.0.2 was allowed to move v1 backwards"; else grep -q 'backwards' "$work/stderr" && ok "the re-run is refused and says why" || fail "wrong message: $(grep error "$work/stderr" | head -1)"; fi
+[ "$(git -C "$STUB_ORIGIN" rev-parse refs/tags/v1)" = "$sha3" ] && [ "$(git -C "$STUB_ORIGIN" rev-parse refs/heads/stable)" = "$sha3" ] && ! grep -q 'PATCH' "$STUB_LOG" \
+  && ok "and neither v1 nor stable was written" || fail "an alias moved: $(cat "$STUB_LOG")"
+
 echo "-- stable that cannot fast-forward"
 release "$sha3" v1.0.3 v1.0.4
 prjson release/v1.0.4 o/r User

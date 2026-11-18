@@ -122,6 +122,15 @@ decide() {
   say "PR #$number is the $version release. Tagging $SHA."
 }
 
+# A re-run of an older release must not drag an alias back past a newer one, so v1 and stable have to be
+# behind the commit being tagged, or at it, before anything is moved.
+only_forward() {
+  local name=$1 ref=$2 at
+  at=$(git rev-parse -q --verify "$ref^{commit}" 2> /dev/null) || return 0
+  git merge-base --is-ancestor "$at" "$SHA" \
+    || die "$name is at $at, which is not behind $SHA, so moving it would take it backwards. Nothing was moved."
+}
+
 ref_exists() { gh api "repos/$REPO/git/ref/$1" > /dev/null 2>&1; }
 
 tag() {
@@ -135,6 +144,9 @@ tag() {
     say "Created $VERSION at $SHA."
   fi
   git fetch -q --force --tags origin
+  git fetch -q origin "+refs/heads/stable:refs/remotes/origin/stable" 2> /dev/null || true
+  only_forward v1 refs/tags/v1
+  only_forward stable refs/remotes/origin/stable
   PUSHED_REF="$VERSION" PUSHED_SHA="$SHA" bash tools/check-internal-refs.sh --resolve \
     || die "the tag checks fail for $VERSION. v1 was NOT moved."
   # 2. Only then the alias consumers follow.
@@ -163,6 +175,8 @@ report() {
   local marker="<!-- release-tag:$VERSION -->" body existing
   body="$marker
 The release workflow could not finish tagging $VERSION. It stopped at the step the run log names: $RUN_URL
+
+If the run log stops at the token step, the release App's secrets are not set up in the \`release\` environment.
 
 State to check by hand: \`git ls-remote --tags origin $VERSION v1\` and the \`stable\` branch. The order is the release tag, then \`v1\`, then \`stable\`; nothing after a failed step ran. Re-running the workflow resumes a release that was tagged in part, and refuses one whose tag names another commit."
   existing=$(gh issue list --repo "$REPO" --state open --limit 100 --json number,body \
