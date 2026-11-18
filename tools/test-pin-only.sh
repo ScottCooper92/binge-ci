@@ -121,5 +121,17 @@ echo "-- a pin line in a different shape"
 fresh; printf 'jobs:\n  a:\n    uses: ScottCooper92/binge-ci/.github/workflows/x.yml@%s # v1.0.2 and a note\n' "$c2" > .github/workflows/one.yml; commit_all
 check "a trailing note after the tag" false
 
+echo "-- a changed path it cannot read"
+git checkout -q -B base3 "$base"
+git rm -q --cached .github/workflows/two.yml
+git update-index --add --cacheinfo "160000,$c1,.github/workflows/two.yml"
+git commit -q -m gitlink-base; base=$(git rev-parse HEAD)
+git update-index --add --cacheinfo "160000,$c2,.github/workflows/two.yml"
+wf "$c2" " # v1.0.2" > .github/workflows/one.yml; git add .github/workflows/one.yml; git commit -q -m change
+check "a gitlink at a workflow path moving, next to a real pin" false "regular file\|could not read"
+git checkout -q main 2> /dev/null; base=$(git rev-parse main)
+fresh; wf "$c2" " # v1.0.2 " > .github/workflows/one.yml; commit_all
+check "a pin line that gains trailing space" false
+
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"

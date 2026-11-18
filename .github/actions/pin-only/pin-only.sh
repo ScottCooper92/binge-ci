@@ -33,7 +33,7 @@ no() {
 }
 
 # What a pin looks like: the part before `@` (indent, `- `, `uses:`, the action path), the commit, an optional comment.
-pin_re='^([[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+ScottCooper92/binge-ci/[^@[:space:]]+)@([0-9a-f]{40})([[:space:]]+#[[:space:]]*(v1(\.0\.[0-9]+)?))?[[:space:]]*$'
+pin_re='^([[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+ScottCooper92/binge-ci/[^@[:space:]]+)@([0-9a-f]{40})([[:space:]]+#[[:space:]]*(v1(\.0\.[0-9]+)?))?$'
 file_re='^\.github/(workflows/[^/]+\.ya?ml|actions/[^/]+/action\.ya?ml)$'
 
 mb=$(git merge-base "$BASE" "$HEAD" 2> /dev/null) || no "the pull request has no merge base with its base."
@@ -54,8 +54,12 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
   fi
   [[ $path =~ $file_re ]] || no "$path is not a workflow or action file."
   [ "$old_mode" = "$new_mode" ] && [ "$status" = M ] || no "$path was added, deleted or had its mode changed."
-  mapfile -t old_lines < <(git show "$mb:$path")
-  mapfile -t new_lines < <(git show "$HEAD:$path")
+  [ "$new_mode" = 100644 ] || [ "$new_mode" = 100755 ] || no "$path is not a regular file."
+  # Read into a variable first: a failure inside a process substitution never reaches set -e, and two empty reads would match.
+  old=$(git cat-file blob "$mb:$path" 2> /dev/null) || no "could not read $path at the merge base."
+  new=$(git cat-file blob "$HEAD:$path" 2> /dev/null) || no "could not read $path at the head."
+  mapfile -t old_lines <<< "$old"
+  mapfile -t new_lines <<< "$new"
   [ "${#old_lines[@]}" -eq "${#new_lines[@]}" ] || no "$path gained or lost lines."
   [ "$(git show "$mb:$path" | tail -c1 | od -An -c | tr -d ' ')" = "$(git show "$HEAD:$path" | tail -c1 | od -An -c | tr -d ' ')" ] \
     || no "$path changed how it ends."
