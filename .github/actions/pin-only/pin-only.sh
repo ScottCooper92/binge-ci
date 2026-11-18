@@ -53,6 +53,8 @@ gitlink=""
 changed=0
 
 # -z so a path with any character is one path; --ignore-submodules=none so a consumer's `ignore = all` cannot hide a gitlink; --no-renames so a rename is a delete and an add, which is not a pin.
+# The list is written to a file first, so a git diff that fails partway is a refusal and not a shorter list.
+git diff -z --raw --no-renames --no-abbrev --ignore-submodules=none "$mb" "$HEAD" > "$scratch/changes" 2> /dev/null || no "could not list the changes."
 while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
   changed=$((changed + 1))
   read -r old_mode new_mode _old_sha new_sha status <<< "${meta#:}"
@@ -91,7 +93,7 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
     commits+=("${BASH_REMATCH[3]}")
     versions+=("${BASH_REMATCH[5]}")
   done
-done < <(git diff -z --raw --no-renames --no-abbrev --ignore-submodules=none "$mb" "$HEAD")
+done < "$scratch/changes"
 
 [ "$changed" -gt 0 ] || no "the pull request changes nothing."
 
