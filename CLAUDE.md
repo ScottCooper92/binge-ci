@@ -63,8 +63,8 @@ pins, merging, tagging `vX.Y.Z` at that commit, then moving `v1` - in that order
 CI runs actionlint (with shellcheck) over the workflows and callers, shellcheck over the
 scripts, `tools/check-callers.sh`, `tools/check-action-shell.sh`, `tools/check-action-env.sh`
 and `tools/check-internal-refs.sh`, with `tools/test-internal-refs.sh` testing the last against
-fixtures, `tools/check-token-permissions.sh`, which holds each app-token mint to its app's grant
-(tested by `tools/test-token-permissions.sh`), `tools/test-check-callers.sh`, which runs the caller check against fixture callers for each shape of `permissions:` grant, `tools/test-merge-guards.sh`, which runs the
+fixtures, `tools/check-token-permissions.sh`, which holds each app-token mint to its app's grant and the author bots' write token to the calling repository
+(tested by `tools/test-token-permissions.sh`, which also runs the submodule fetch step against a stubbed `git`), `tools/test-check-callers.sh`, which runs the caller check against fixture callers for each shape of `permissions:` grant, `tools/test-merge-guards.sh`, which runs the
 merge guards' offline checks against fixed inputs, `tools/test-governed-paths.sh`, which runs the governed-paths script against scratch
 repositories, `tools/test-submodule-pins.sh`, which runs the submodule-pin check's step the same way,
 `tools/test-fork-review.sh`, which holds `fork-review.yml` to the properties its safety rests on and runs its

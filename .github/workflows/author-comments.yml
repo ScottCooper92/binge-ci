@@ -17,9 +17,9 @@ on:
       private_submodules:
         description: >
           Names of private repositories, comma- or newline-separated and under the caller's owner, that the
-          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
-          uses a GitHub App token that can read the caller and these repositories, so the app must be
-          installed on every one of them.
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the submodules
+          are fetched with a second, read-only token from the author app, so the app must be installed on
+          every one of them. The token that pushes still reaches the calling repository alone.
         type: string
         default: ''
       runner:
@@ -173,24 +173,12 @@ jobs:
     # before the agent's first task. Raise this WITH the turn cap, not instead of it.
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
-      - name: Name the calling repository
-        id: repo
-        if: inputs.private_submodules != ''
-        env:
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
-          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
-
       - name: Mint author app token
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
-          # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
-          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
 
       - name: Gather PR context
         id: ctx
@@ -295,15 +283,59 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # A separate, read-only token for the submodule fetch, so the write token below reaches the calling
+      # repository alone: an agent run here must not be able to write to a private submodule's repository.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true' && inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          repositories: ${{ inputs.private_submodules }}
+          permission-contents: read
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
         with:
           ref: ${{ steps.ctx.outputs.branch }}
           fetch-depth: 0
-          # A consumer may build from a git submodule (binge-seerr includes binge-companions
-          # as one), and an agent that cannot build the checkout cannot fix or judge it.
-          submodules: recursive
           token: ${{ steps.token.outputs.token }}
+
+      # Not `submodules: recursive` on the checkout: that would fetch them with the write token, and
+      # persist it into each submodule. The read-only token is passed through the environment of this
+      # step alone, never written to a git config. A consumer may build from a git submodule
+      # (binge-seerr includes binge-companions as one), and an agent that cannot build the checkout
+      # cannot fix or judge it.
+      - name: Fetch the submodules
+        if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
+        env:
+          SUBMODULE_TOKEN: ${{ steps.submodule_token.outputs.token }}
+          PRIVATE_SUBMODULES: ${{ inputs.private_submodules }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          n=${GIT_CONFIG_COUNT:-0}
+          add() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+          # As actions/checkout did for submodules: an ssh-form URL is fetched over https.
+          add url.https://github.com/.insteadOf git@github.com:
+          if [ -n "$PRIVATE_SUBMODULES" ]; then
+            basic=$(printf 'x-access-token:%s' "$SUBMODULE_TOKEN" | base64 -w0)
+            echo "::add-mask::$basic"
+            mapfile -t repos < <(sed -e 's/[, ]/\n/g' <<<"$PRIVATE_SUBMODULES" | sed '/^$/d')
+            for repo in "${repos[@]}"; do
+              # `<repo>` and `<repo>.git` both: git matches the URL path on whole segments, so a
+              # `.gitmodules` URL that ends in .git is not matched by the bare name. The empty value
+              # first clears any header a broader key left for this URL, so exactly one goes out.
+              for name in "$repo" "$repo.git"; do
+                add "http.https://github.com/$OWNER/$name.extraheader" ""
+                add "http.https://github.com/$OWNER/$name.extraheader" "AUTHORIZATION: basic $basic"
+              done
+            done
+          fi
+          export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       # Recorded now, before the agent runs. Read later from origin/<branch>, it would move with any
       # `git fetch` or push the agent makes, and the undo and the "did it commit" check would then
