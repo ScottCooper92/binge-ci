@@ -188,6 +188,37 @@ Binge's callers are not in `callers/`. They name that repo's self-hosted runner 
 this repository is public — a public staging area has no reason to carry infrastructure
 detail about a private repo. They live in Binge's own `.github/workflows/`.
 
+### Re-recording screenshot frames
+
+By default a failing screenshot test is a stop: re-recording the reference frames turns CI green on
+whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a PR itself changed. Set
+`rerecord_screenshots: true` on the caller. It is off by default, and nothing changes without it.
+
+- **The gate.** The agent re-records only when nothing else is red, there are at most 40 failing frames,
+  and every failing frame renders a component whose source the PR (or a submodule bump in it) changed.
+  How large the difference is does not matter when the screen is the PR's own: an intended redesign
+  moves most of its pixels. A frame outside the gate stops the run, and so does anything that is not a
+  difference: an out-of-memory failure, a render or compose error, a frame that is missing or new.
+- **What it changes.** Only the reference PNGs of the failing frames, scoped to those test classes. It
+  runs the update task and then the validate task, and looks at the old and new image of each frame.
+- **The record.** After the push, the comment on the PR lists every re-recorded frame with its before (the
+  frame at the merge base with the PR's base branch) and after (the frame at the pushed commit) as
+  images, and the difference the agent reported. The workflow builds the list from the commit's own
+  diff, so the agent cannot add or hide a frame, and it flags a commit that adds or deletes one. The
+  comment carries `<!-- ci-fix-rerecord:<sha> -->`. The images are links to the files on GitHub, so
+  they show for a viewer with access to the repository.
+- **The review.** `bot-review.yml` sees the comment, looks at each frame and judges it against what the
+  PR says it changes. A frame that differs somewhere the change does not explain is a finding. The
+  rules for this are in the workflow's own prompt, so a consumer's review guide needs no change: the
+  guide is the consumer's own file, and a rule kept there would be missing for every other repository.
+- **The consumer's half.** The caller's `gate_rules` and the triage table of its
+  `.ai/agents/ci-triage.md` must stop forbidding the re-record, or they win and the agent stops. A row
+  that fits:
+
+  | A screenshot test fails | The rendering changed | If `rerecord_screenshots` is on and every failing frame is a screen this PR changed, re-record only those frames, as the prompt says. Otherwise stop and name the frames. Never re-record on a render error or an out-of-memory failure |
+
+  Drop "Do not touch any screenshot baseline PNG, and never run the update task" from `gate_rules`.
+
 ### A runner-local Claude Code cache
 
 Each agent job installs Claude Code, and Bun for the action's own scripts, from the network: several

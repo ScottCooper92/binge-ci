@@ -136,6 +136,10 @@ jobs:
       - name: Test the screenshot sharding
         run: ./tools/test-shard-screenshots.sh
 
+      # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
+      - name: Test the screenshot re-record comment and its gate
+        run: ./tools/test-rerecord-comment.sh
+
       # Each gate test is named by hand in the lists the bots read, and a list that falls behind
       # leaves a bot with guidance CI never complains about.
       - name: Check that every list of gate tests names each one this workflow runs
