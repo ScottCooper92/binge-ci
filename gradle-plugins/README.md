@@ -74,7 +74,10 @@ detektGate {
 }
 ```
 
-`configFile` defaults to `detekt.yml` in the settings directory. `sourceDirectory`, `excludes`,
+`configFile` defaults to `detekt.yml` in the settings directory. `additionalConfigs` adds files read after it, such as a
+shared fragment from the `binge-ci` submodule (`additionalConfigs.from(layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"))`).
+detekt reads a later file over an earlier one key by key and replaces a list rather than merging it, so a fragment owns the
+lists it sets. The gate refuses a build in which two config files set the same list (`checkDetektConfigClashes`), naming the list and the files, since the earlier file's entries would otherwise be dropped silently. Empty by default, which changes nothing. `sourceDirectory`, `excludes`,
 `jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (true) and
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.

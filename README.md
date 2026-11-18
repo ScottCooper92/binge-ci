@@ -532,6 +532,49 @@ includes the build from that checkout and applies the plugins by id. That adds n
 new pin. Each consumer adopts them in a PR of its own. [gradle-plugins/README.md](gradle-plugins/README.md)
 lists the plugins and how to configure them.
 
+### Reusing the design system
+
+App pull requests keep adding UI that the shared design system already provides. Two detekt config fragments ban the raw
+Material 3 blocks the design system wraps, so the build says what to use instead. The covered blocks are `TopAppBar` and
+its variants and `Scaffold` (`BingeScreenScaffold` and the bar wrappers), `ModalBottomSheet` (`BingeBottomSheet`,
+`BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField` (`BingeTextField`), `SearchBar` and `DockedSearchBar`
+(`BingeSearchField`), `AlertDialog` and `BasicAlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`), `TabRow` and its variants,
+`FilterChip` and `InputChip`, `Button`, `OutlinedButton` and `TextButton`, `Slider` and `RangeSlider`, and
+`SnackbarHost`. Each message points at `design-system/docs/components.md`.
+
+- `detekt/design-system-bans.yml` bans the **import**. It sets one list, `style.ForbiddenImport.forbiddenImports`.
+- `detekt/design-system-call-bans.yml` bans the **call**, under a wildcard import or a fully qualified name. It sets one
+  list, `style.ForbiddenMethodCall.methods`, and turns the rule on with only those entries.
+
+A consumer adds them after its own `detekt.yml`, from its `binge-ci` submodule:
+
+```kotlin
+detektGate {
+    additionalConfigs.from(
+        layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"),
+        layout.settingsDirectory.file("binge-ci/detekt/design-system-call-bans.yml"),
+    )
+}
+```
+
+- **A list is replaced, not merged, so a clash is refused.** detekt reads a later file over an earlier one, and a list in
+  the later file replaces the earlier one without a word. A consumer that already sets one of these lists in its own
+  `detekt.yml` (a ban on `kotlin.runCatching`, say, under `ForbiddenMethodCall.methods`) would lose it the day a fragment
+  that sets the same list is added. So the gate's `checkDetektConfigClashes` fails the build, naming the list and both
+  files, when two config files set the same list. The fix is one list in one file: leave out the fragment that clashes and
+  copy its entries into the consumer's own list.
+- **App code only.** Both fragments exclude the design system's own path and build output, and the gate reads production
+  source sets only. A file in the gate's `suppressedPaths` stays silent for them too, as for every other rule.
+- **Existing uses.** Code that already uses a raw block goes into the consumer's baseline in the rollout PR, so the gate
+  is zero new findings, not zero total.
+- **A reviewed exception** is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that
+  imports it, or `@Suppress("ForbiddenMethodCall")` on the function that calls it, with a one-line comment saying why
+  the wrapper does not fit. A new component belongs in the design system, not in the app.
+- **The `CLAUDE.md` line** every consumer carries: "Before writing UI, read `design-system/docs/components.md`; new
+  components go in the design system, never in the app."
+- **The PR line.** A PR that adds a composable outside the design system carries one line in its body, `Design system:
+  <component> - <why it did not fit>`, naming what it checked. Each consumer adds it to its PR template.
+
 ## Its own gate
 
 This repo ships no product code beyond the Gradle gates, so CI checks the things that can be

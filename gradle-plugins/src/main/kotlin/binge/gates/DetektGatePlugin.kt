@@ -6,6 +6,7 @@ import dev.detekt.gradle.plugin.DetektPlugin
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.FileTree
 import org.gradle.api.file.RegularFile
 import org.gradle.api.file.RegularFileProperty
@@ -19,6 +20,13 @@ internal const val DETEKT_WITHOUT_BASELINE = "detektWithoutBaseline"
 abstract class DetektGateExtension {
     /** The detekt config. Defaults to `detekt.yml` in the settings directory. */
     abstract val configFile: RegularFileProperty
+
+    /**
+     * Config files read after [configFile], such as a shared fragment a consumer extends from its `binge-ci` submodule.
+     * detekt reads a later file over an earlier one key by key, and a list is replaced rather than merged, so a fragment owns
+     * the lists it sets. Empty by default, which changes nothing.
+     */
+    abstract val additionalConfigs: ConfigurableFileCollection
 
     /** The baseline. Unset means no baseline; a set file that does not exist yet is ignored until it does. */
     abstract val baselineFile: RegularFileProperty
@@ -113,10 +121,19 @@ class DetektGatePlugin : Plugin<Project> {
         // has set them. The tasks are configured rather than detekt's extension, so that a task registered
         // outside it, such as the baseline-staleness run, gets the same settings.
         val suppressions = DetektSuppressions.register(project, gate)
+        // A fragment that sets a list the consumer's own config sets would replace it without a word, so it is refused.
+        val clashes =
+            project.tasks.register("checkDetektConfigClashes", CheckDetektConfigClashesTask::class.java) {
+                val extra = gate.additionalConfigs
+                configs.from(gate.configFile, extra)
+                onlyIf { !extra.isEmpty }
+            }
 
         project.tasks.withType(Detekt::class.java).configureEach {
+            dependsOn(clashes)
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
+            config.from(gate.additionalConfigs)
             // After the consumer's own file: detekt reads a later config file over an earlier one, so the layer's `excludes`
             // would replace a rule set's own. The task refuses that clash rather than let it through.
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
@@ -133,8 +150,10 @@ class DetektGatePlugin : Plugin<Project> {
             }
         }
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
+            dependsOn(clashes)
             setSource(project.productionSource(gate))
             config.setFrom(gate.configFile)
+            config.from(gate.additionalConfigs)
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
             parallel.set(gate.parallel)
