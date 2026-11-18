@@ -240,7 +240,8 @@ perms = {k for k in mint[0]["with"] if k.startswith("permission-")}
 assert perms == {"permission-contents"} and mint[0]["with"]["permission-contents"] == "write"
 assert "repositories" in mint[0]["with"]
 assert j["report"]["permissions"] == {"contents": "read", "issues": "write"}
-assert w["concurrency"]["cancel-in-progress"] is False
+assert "concurrency" not in w, "a workflow-level group lets an ordinary merge cancel a pending release run"
+assert j["tag"]["concurrency"] == {"group": "release-tag", "cancel-in-progress": False}
 PY
 
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }

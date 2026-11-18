@@ -14,15 +14,13 @@ name: Release tag
 # tag-check.yml has to run on the tag and on the `v1` move as it always has. The secrets exist only in the
 # `release` environment, which only `main` can deploy to, and only the `tag` job asks for it.
 #
+# A failure that happens before `decide` knows the version (an API error reading the pull request) is not reported
+# as an issue, since the issue is per release; the red run on `main` and `tag-check.yml` show it.
+#
 # What the maintainer sets up is in README.md, "Releasing".
 on:
   push:
     branches: [main]
-
-# Two merges close together must not race to move `v1`.
-concurrency:
-  group: release-tag
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -60,6 +58,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
+    # Two release merges close together must not race to move `v1`. The group is on this job, not the workflow: a
+    # group holds one running and one pending run and cancels the older pending one, so on the workflow every
+    # ordinary merge to `main` could push a waiting release run out of the queue before any of its jobs started.
+    concurrency:
+      group: release-tag
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
