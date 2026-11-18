@@ -656,16 +656,7 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        run: |
-          set -euo pipefail
-          home="$RUNNER_TEMP/agent-curl-home"
-          mkdir -p "$home"
-          printf '%s\n' 'connect-timeout = 10' 'max-time = 120' > "$home/.curlrc"
-          {
-            echo "CURL_HOME=$home"
-            echo 'GIT_HTTP_LOW_SPEED_LIMIT=1000'
-            echo 'GIT_HTTP_LOW_SPEED_TIME=60'
-          } >> "$GITHUB_ENV"
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.48
 
       - name: Address it with Claude
         id: claude
@@ -781,38 +772,10 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        env:
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-          SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
-        run: |
-          set -uo pipefail
-          f="${EXECUTION_FILE:-}"
-          if [ -z "$f" ] || [ ! -s "$f" ]; then
-            f=$(find "$HOME/.claude/projects" -name '*.jsonl' -type f -printf '%T@ %p\n' 2>/dev/null \
-              | sort -rn | head -n 1 | cut -d' ' -f2-) || f=""
-          fi
-          if [ -z "$f" ] || [ ! -s "$f" ]; then
-            echo "No execution file or transcript to read."
-            exit 0
-          fi
-          echo "::group::The agent's last 10 tool calls ($(basename "$f"))"
-          # The commands are what show_full_output: false keeps out of a public log, so without it
-          # only the tool names are printed. A killed CLI can leave a half-written last line, which
-          # makes a whole-file read fail; the line-by-line read below skips it.
-          if [ "${SHOW_FULL_OUTPUT:-false}" = true ]; then
-            show='"\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
-                       | tostring | gsub("\\s+"; " ") | .[0:300])"'
-          else
-            show='.name'
-          fi
-          docs=$(jq -s '.' "$f" 2>/dev/null) \
-            || docs=$(jq -R 'fromjson? // empty' "$f" 2>/dev/null | jq -s '.') || docs='[]'
-          jq -r "[.[] | (if type == \"array\" then .[] else . end)
-                   | select(.type == \"assistant\") | .message.content[]?
-                   | select(.type == \"tool_use\") | $show]
-                  | .[-10:][]" <<<"$docs" 2>&1 \
-            | sed -E 's/(sk-ant-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]+/\1***/g' || true
-          echo "::endgroup::"
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.48
+        with:
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          show_full_output: ${{ inputs.show_full_output }}
 
       - name: Push and reply
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'

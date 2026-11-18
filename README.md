@@ -224,8 +224,10 @@ job there reuses what is in it. Unset or empty, nothing changes: the action inst
                       and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
-                      restore-avd-cache / save-avd-cache, nightly-report
-                      upstream-watch, submodule-bump and actionlint (all below)
+                      restore-avd-cache / save-avd-cache, nightly-report,
+                      agent-network-limits and agent-tool-calls (every agent
+                      job uses both), upstream-watch, submodule-bump and
+                      actionlint (all below)
 callers/              Worked callers for the public repos
                       and a generic pair for fork-review in example/
 docs/                 fork-review.md

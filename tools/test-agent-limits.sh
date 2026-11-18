@@ -2,10 +2,8 @@
 #
 # Holds the two steps that every agent job carries: the one that bounds the agent's network calls,
 # and the one that prints its last tool calls when the agent step does not succeed. Each is a
-# composite action under .github/actions/ with its script, and the script is run here against
-# fixtures. Until the jobs `uses:` the actions (they cannot pin a tag that holds them before a
-# release), each job carries an inline copy; those must equal the action's script, so they cannot
-# drift in the meantime.
+# composite action under .github/actions/ with its script. Every agent job uses the actions, with no
+# inline copy left, and the scripts are run here against fixtures.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,11 +13,13 @@ failures=0
 fail() { echo "FAIL $1"; failures=$((failures + 1)); }
 ok() { echo "ok   $1"; }
 
-# Writes each copy of both steps to $work/<kind>.<workflow>.<n>.
-python3 -I - "$root" "$work" <<'PY' || failures=$((failures + 1))
-import sys, yaml
-root, work = sys.argv[1:3]
-bad = []
+# Every agent job uses both actions and carries no inline copy of either.
+python3 -I - "$root" <<'PY' || failures=$((failures + 1))
+import re, sys, yaml
+root = sys.argv[1]
+bad, jobs = [], 0
+LIMITS = re.compile(r"^ScottCooper92/binge-ci/\.github/actions/agent-network-limits@v\d+\.\d+\.\d+$")
+DUMP = re.compile(r"^ScottCooper92/binge-ci/\.github/actions/agent-tool-calls@v\d+\.\d+\.\d+$")
 for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]:
     doc = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))
     n = 0
@@ -29,46 +29,44 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
             if not str(s.get("uses", "")).startswith("anthropics/claude-code-action@"):
                 continue
             n += 1
+            jobs += 1
             where = f"{wf}/{job}"
             if s.get("id") != "claude":
                 bad.append(f"{where}: the agent step has no `id: claude`")
-            lim = [k for k, t in enumerate(steps) if t.get("name") == "Bound the agent's network calls"]
-            dump = [k for k, t in enumerate(steps) if t.get("name") == "Show the agent's last tool calls"]
+            lim = [k for k, t in enumerate(steps) if LIMITS.match(str(t.get("uses", "")))]
+            dump = [k for k, t in enumerate(steps) if DUMP.match(str(t.get("uses", "")))]
             if len(lim) != 1 or lim[0] > i:
-                bad.append(f"{where}: no single limits step before the agent step")
-                continue
+                bad.append(f"{where}: no single use of agent-network-limits before the agent step")
             if len(dump) != 1 or dump[0] < i:
-                bad.append(f"{where}: no single tool-call dump after the agent step")
+                bad.append(f"{where}: no single use of agent-tool-calls after the agent step")
                 continue
-            open(f"{work}/limits.{wf}.{n}", "w").write(steps[lim[0]]["run"])
-            open(f"{work}/dump.{wf}.{n}", "w").write(steps[dump[0]]["run"])
-            cond = steps[dump[0]].get("if", "")
+            d = steps[dump[0]]
+            cond = d.get("if", "")
             if "always()" not in cond or "steps.claude.outcome" not in cond:
                 bad.append(f"{where}: the dump step must run after a failed agent step")
+            w = d.get("with", {})
+            if "steps.claude.outputs.execution_file" not in str(w.get("execution_file", "")):
+                bad.append(f"{where}: the dump step is not given the agent step's execution file")
+            if "inputs.show_full_output" not in str(w.get("show_full_output", "")):
+                bad.append(f"{where}: the dump step is not given show_full_output")
+            copies = [t.get("name") for t in steps if "run" in t and t.get("name") in
+                      ("Bound the agent's network calls", "Show the agent's last tool calls")]
+            if copies:
+                bad.append(f"{where}: an inline copy is left: {copies}")
     if n == 0:
         bad.append(f"{wf}: no agent step found")
 for b in bad:
     print("FAIL " + b)
+if not bad:
+    print(f"ok   all {jobs} agent jobs use both actions and carry no inline copy")
 sys.exit(1 if bad else 0)
 PY
 
 limits="$root/.github/actions/agent-network-limits/limits.sh"
 dump="$root/.github/actions/agent-tool-calls/tool-calls.sh"
 
-# The script without its shebang and leading comment block: what an inline copy holds.
-body() { awk 'body || !/^(#|[[:space:]]*$)/ { body = 1; print }' "$1"; }
-for kind in limits dump; do
-  script=$limits; [ "$kind" = dump ] && script=$dump
-  [ -x "$script" ] && ok "the $kind script is executable" || fail "the $kind script is not executable"
-  mapfile -t copies < <(ls "$work/$kind".* 2>/dev/null)
-  if [ "${#copies[@]}" -eq 0 ]; then fail "no $kind steps found"; continue; fi
-  differs=false
-  for c in "${copies[@]}"; do body "$script" | diff -q - "$c" >/dev/null || differs=true; done
-  if [ "$differs" = true ]; then
-    fail "the $kind step in a job differs from its action's script"
-  else
-    ok "the $kind step in all ${#copies[@]} agent jobs equals its action's script"
-  fi
+for script in "$limits" "$dump"; do
+  [ -x "$script" ] && ok "$(basename "$script") is executable" || fail "$(basename "$script") is not executable"
 done
 
 # Each action runs its script, and passes the dump step what it reads.
