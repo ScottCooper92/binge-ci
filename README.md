@@ -625,6 +625,42 @@ moment the tag is pushed. It detects rather than prevents: by the time a tag pus
 there, `v1` has moved and consumers are already broken, so it turns a silent breakage into a
 loud one rather than stopping it.
 
+### A Renovate preset for the pins
+
+`renovate/binge-ci-pins.json` is the preset a consumer extends to receive each release as one pull request.
+Consumers keep exact SHA pins, because they stop one bad release reaching every consumer at once; the preset
+only automates the update.
+
+```json
+{ "extends": ["github>ScottCooper92/binge-ci//renovate/binge-ci-pins"] }
+```
+
+- **One PR per consumer.** The `binge-ci` `uses:` digest pins (github-actions manager, keeping the trailing
+  `# v1.0.N` comment) and the `binge-ci` submodule (git-submodules manager) share one group, so they arrive
+  together on the same commit. The PR is labelled `agent` and never `hold`.
+- **Tags only.** `allowedVersions` admits `v1.0.N` and nothing else, so `v1` is never a target, and the
+  digest in each pin is the tag's own commit.
+- **The submodule follows `stable`.** Renovate's submodule manager follows a branch's head, not a tag, and
+  `main` can be ahead of the newest tag. The release workflow moves the `stable` branch to each release
+  commit, fast-forward only, so a consumer sets `branch = stable` for the `binge-ci` submodule in
+  `.gitmodules` and the submodule pins exactly the commit the `uses:` pins name.
+- **As soon as Renovate runs.** The rules carry `schedule: at any time`, `prCreation: immediate` and no
+  release-age wait. With the hosted Renovate app that is within the hour, not within the minute; nothing here
+  wakes it on a tag. The preset sets no schedule, label or automerge at the top level, so a consumer's own
+  settings for its other dependencies are untouched.
+- **Only the `binge-ci` submodule.** The preset turns the submodule manager on, then disables it for every
+  submodule but `binge-ci`, so a consumer's other submodules are left to its own tooling. A consumer that sets
+  `enabledManagers` replaces the preset's value and must include `git-submodules` in it, or the pin PR moves
+  the `uses:` pins without the submodule.
+
+`tools/test-renovate-preset.sh` holds the version restriction (it accepts `v1.0.0` and `v1.0.51`, and refuses
+`v1`, `v1.1.0`, `v2.0.0` and prereleases), the group, the label and the absence of `hold`, and runs Renovate's
+own validator when it is installed (`npx --package renovate renovate-config-validator --strict
+renovate/binge-ci-pins.json`). CI does not install Renovate, so there it skips the validator.
+
+The preset is read from `main`, so an edit to it reaches every consumer that extends it when it merges, ahead of
+any release. A consumer that wants it fixed to a release extends `...binge-ci-pins#v1.0.N` instead.
+
 ## Licence
 
 Apache License 2.0. See `LICENSE`.

@@ -140,6 +140,10 @@ jobs:
       - name: Test the changed-files action
         run: ./tools/test-changed-files.sh
 
+      # The preset must only ever offer a v1.0.N tag, never `v1` or a branch head, and never `hold`.
+      - name: Test the Renovate preset
+        run: ./tools/test-renovate-preset.sh
+
       # A false `true` lets an arbitrary workflow edit through without a human, so what must stay false is held here.
       - name: Test the pin-only check
         run: ./tools/test-pin-only.sh
