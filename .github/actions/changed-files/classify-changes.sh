@@ -17,7 +17,8 @@
 # Each list is read from the environment, one bash glob per line. A `*` matches across `/`. The first
 # line that matches a path decides: a `!` in front of a pattern puts the path OUT of the set, so a
 # narrow exception goes above the broad pattern it carves out of. Blank lines and lines starting with `#`
-# are ignored.
+# are ignored, and so is whitespace around a pattern. A path in both PRODUCT_NONE and RELEASE_INPUTS does not
+# reach the release build: PRODUCT_NONE says nothing is built from it, and it wins.
 set -euo pipefail
 
 list="${1:?usage: classify-changes.sh <file listing the changed paths, NUL-terminated>}"
@@ -27,6 +28,11 @@ list="${1:?usage: classify-changes.sh <file listing the changed paths, NUL-termi
 in_set() {
   local path="$1" patterns="${2:-}" line pattern
   while IFS= read -r line; do
+    # A trailing space, a CRLF or the indent of a YAML block would otherwise make a pattern match nothing,
+    # and for the release allow-list that silently drops the rule.
+    line="${line//$'\r'/}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
     case "$line" in '' | '#'*) continue ;; esac
     pattern="${line#!}"
     # Stripping the longest prefix the glob matches leaves nothing exactly when it matches the whole
