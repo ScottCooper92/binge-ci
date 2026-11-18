@@ -657,6 +657,9 @@ only automates the update.
 own validator when it is installed (`npx --package renovate renovate-config-validator --strict
 renovate/binge-ci-pins.json`). CI does not install Renovate, so there it skips the validator.
 
+The preset is read from `main`, so an edit to it reaches every consumer that extends it when it merges, ahead of
+any release. A consumer that wants it fixed to a release extends `...binge-ci-pins#v1.0.N` instead.
+
 ## Licence
 
 Apache License 2.0. See `LICENSE`.

@@ -3,7 +3,8 @@
 # Holds renovate/binge-ci-pins.json, the preset each consumer extends to get its binge-ci pins as one pull request.
 # What it must never do is reach a consumer's `v1` or a branch head: the exact SHA pins are what stop a bad release
 # reaching every consumer at once, so the preset may only ever offer a v1.0.N tag. It checks the file's own rules
-# (the version restriction, the one group, the label, no `hold`, no schedule that would override the consumer's) and
+# (the version restriction, the one group, the label, no `hold`, no schedule that would override the consumer's, and the
+# submodule manager left on for binge-ci alone) and
 # runs Renovate's own validator when it is installed.
 set -euo pipefail
 
@@ -16,11 +17,15 @@ ok() { echo "ok    $1"; }
 if python3 -I - "$preset" <<'PY'
 import json, re, sys
 p = json.load(open(sys.argv[1]))
-assert len(p["packageRules"]) == 3, len(p["packageRules"])
-actions, off, sub = p["packageRules"]
-assert actions["matchManagers"] == ["github-actions"] and sub["matchManagers"] == ["git-submodules"]
-# Every other submodule is off: the disable rule matches the whole manager and comes before binge-ci's, which wins.
-assert off["matchManagers"] == ["git-submodules"] and off["enabled"] is False and "matchPackageNames" not in off, off
+actions_rules = [r for r in p["packageRules"] if r["matchManagers"] == ["github-actions"]]
+sub_rules = [r for r in p["packageRules"] if r["matchManagers"] == ["git-submodules"]]
+assert len(actions_rules) == 1 and len(sub_rules) == 2 and len(p["packageRules"]) == 3, [r["matchManagers"] for r in p["packageRules"]]
+actions = actions_rules[0]
+# The manager is on for the whole repository, so a rule has to turn it off for every submodule but binge-ci's, and
+# it has to come first: of the rules that match a dependency, the later one wins.
+off, sub = sub_rules
+assert p["packageRules"].index(off) < p["packageRules"].index(sub)
+assert off["enabled"] is False and "matchPackageNames" not in off
 assert sub["enabled"] is True
 
 def js_regex(text):
@@ -43,6 +48,18 @@ for good in ("binge-ci", "https://github.com/ScottCooper92/binge-ci", "https://g
 for bad in ("binge-ci-fork", "not-binge-ci2", "binge-ci/sub", "other/binge-cix"):
     assert not name.search(bad), bad
 assert p["git-submodules"] == {"enabled": True}
+# Which submodules end up with the manager on: binge-ci's only. Renovate applies the matching rules in order.
+def enabled_for(dep):
+    on = p["git-submodules"]["enabled"]
+    for r in sub_rules:
+        pats = r.get("matchPackageNames")
+        if pats is None or any(js_regex(x).search(dep) for x in pats):
+            on = r.get("enabled", on)
+    return on
+for dep in ("binge-ci", "https://github.com/ScottCooper92/binge-ci.git"):
+    assert enabled_for(dep) is True, dep
+for dep in ("homelab-core", "design-system", "binge-companions", "https://github.com/ScottCooper92/homelab-core.git", "binge-ci-fork"):
+    assert enabled_for(dep) is False, dep
 
 # One pull request: the same group, the same slug, the agent label, never hold.
 assert actions["groupName"] == sub["groupName"] == "binge-ci" and actions["groupSlug"] == sub["groupSlug"] == "binge-ci"
