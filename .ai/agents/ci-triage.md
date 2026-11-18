@@ -27,6 +27,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the author bot's PR body check | `tools/test-body-checklist.sh` - the body-edit function in `author-comments.yml` against fixture bodies: a box un-ticked, the "Left to CI" line reworded, and every other change (a box ticked, a line added or removed, prose edited) refused |
 | Test the review bot's rebuttal cap | `tools/test-rebuttal-cap.sh` - the cap function in `bot-review.yml` on fixed counts (the first rebuttal reconsidered at the default, later ones not, `0` never), and the input's default |
 | Test the agent jobs' limits | `tools/test-agent-limits.sh` - the inline network-limit and tool-call steps are the same in every agent job and behave on fixtures |
+| Test the runner-local Claude Code cache step | `tools/test-claude-code-cache.sh` - the cache step is the same in every agent job, tied to the agent step's pin, and installs once, reuses, and falls back on fixtures |
 | Check the gate lists | `tools/check-gate-lists.sh` - every list of gate tests (CLAUDE.md, the review guide, this file's three parts, the PR template, `gated_checks` and `verify_guidance`) names each `tools/test-*.sh` and `tools/check-*.sh` that `ci.yml` runs |
 | Test the gate-lists check | `tools/test-check-gate-lists.sh` - `check-gate-lists.sh` against fixture trees: a complete set passes, a script missing from each list fails naming that list, and a longer name does not stand in for a shorter one |
 | shellcheck the action scripts and the tools | shellcheck on every `.github/actions/*/*.sh` (`restore-agent-governed-paths.sh`, `merge-guards.sh`, `download-actionlint.sh`, `upstream-watch.sh`) and `tools/*.sh` |
@@ -68,6 +69,7 @@ to improvise.
 | `test-body-checklist.sh`: a case FAILs | The body-edit check in `author-comments.yml` allows or refuses a body it should not | Fix the function if this PR changed it. It guards a write-token edit of the PR author's own text: never loosen it to pass a case, and never delete one |
 | `test-rebuttal-cap.sh`: a case FAILs | The cap in `bot-review.yml` reconsiders a head more or fewer times than `max_rebuttals` allows, or its input default moved | Fix the function if this PR changed it. A cap that never holds restores the review loop on every consumer; one that is too tight leaves a disputed verdict with no way back. Never delete a case or loosen what it expects |
 | `test-agent-limits.sh`: a case FAILs | An agent job lost, or changed in one place, the step that bounds the agent's network calls or the step that prints its last tool calls, or the review prompt lost its URL rule | Make the copies agree again; the same step is in every agent job on purpose. Never raise a limit to get past a slow call or delete a case |
+| `test-claude-code-cache.sh`: a case FAILs | A copy of the cache step differs, its `ACTION_REF` is not the pin of the claude-code-action step beside it, it moved after the curl-limits step, or it no longer installs once, reuses a warm cache, or falls back to the action's own install | Make the copies agree and re-point `ACTION_REF` at the pin; the step must never fail the job. Never delete a case or make a failed install fail the run |
 | `check-gate-lists.sh`: `does not name tools/X.sh` | A list of gate tests was not updated when `ci.yml` gained or renamed a script | Add `X.sh` to the list the line names, in that list's own style. Never remove the script from `ci.yml`, or the check, to make it pass. The exception is a line naming `CLAUDE.md` in your own run: it is reset to the base branch's copy before you start, so an edit there is undone before it is committed and the failure is expected on a PR that adds a gate. Say so in your reply, leave `CLAUDE.md` alone, and leave that check to CI, which reads the PR's own copy. Every other list keeps the PR's copy, so a failure naming one is real |
 | `test-check-gate-lists.sh`: a case FAILs | `check-gate-lists.sh` no longer reads the lists the way that case expects | Fix the check if this PR changed it. Never delete a case or loosen what it expects |
 | `test-merge-guards.sh`: a case FAILs | `buildable` no longer separates the paths CI builds from the ones it ignores the way that case expects | Fix `merge-guards.sh` if this PR changed it. A path wrongly read as unbuilt lets the review bot merge code no build vouched for. Never delete a case or loosen what it expects |
@@ -108,6 +110,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-body-checklist.sh
 ./tools/test-rebuttal-cap.sh
 ./tools/test-agent-limits.sh
+./tools/test-claude-code-cache.sh
 ./tools/check-gate-lists.sh
 ./tools/test-check-gate-lists.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml
