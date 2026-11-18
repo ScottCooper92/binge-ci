@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Decides which CI jobs a diff can affect, from the changed paths, one per line, in the file given as $1.
+# Decides which CI jobs a diff can affect, from the changed paths, each ending in a NUL, in the file given as
+# $1 (`git diff -z --name-only`: without it git quotes a path with a non-ASCII character, a quote or a tab,
+# and a quoted path matches no pattern, which for the release allow-list means a wrongly skipped build).
 # Prints `product=`, `screens=` and `release=`, each true or false, one per line.
 #
 # A job is skipped only when EVERY changed path is in a closed, finite set that provably cannot affect
@@ -18,7 +20,7 @@
 # are ignored.
 set -euo pipefail
 
-list="${1:?usage: classify-changes.sh <file listing the changed paths>}"
+list="${1:?usage: classify-changes.sh <file listing the changed paths, NUL-terminated>}"
 : "${RELEASE_INPUTS:?RELEASE_INPUTS is empty: an empty allow-list would skip the release build for every pull request}"
 
 # in_set <path> <patterns>: succeeds when the first matching pattern is not negated.
@@ -38,7 +40,7 @@ in_set() {
 }
 
 paths=()
-while IFS= read -r path; do
+while IFS= read -r -d '' path; do
   [ -n "$path" ] && paths+=("$path")
 done < "$list"
 

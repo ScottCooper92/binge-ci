@@ -42,7 +42,7 @@ check() {
   shift 2
   file="$work/list"
   : > "$file"
-  [ "$#" -eq 0 ] || printf '%s\n' "$@" > "$file"
+  [ "$#" -eq 0 ] || printf '%s\0' "$@" > "$file"
   got="$(bash "$dir/classify-changes.sh" "$file" 2>/dev/null | cut -d= -f2 | tr '\n' ' ' | sed 's/ $//')"
   if [ "$got" = "$expected" ]; then ok "$name"; else fail "$name: expected '$expected', got '$got'"; fi
 }
@@ -66,9 +66,11 @@ check "a submodule pin" "true false true" some-submodule
 check "docs beside a screen" "true true false" CLAUDE.md app/src/main/kotlin/ui/HubScreen.kt
 check "one frame-moving path among tests" "true true false" app/src/test/kotlin/x/YTest.kt app/src/main/res/values/strings.xml
 check "a UI change skips R8" "true true false" app/src/main/kotlin/ui/HubScreen.kt app/src/main/res/values/strings.xml
+check "a path with a non-ASCII character is matched as it is" "true false true" $'app/src/main/keepRules/r\u00e8gles.pro'
+check "a path with a newline in it is one path" "true true true" $'a\nb.gradle.kts'
 
 echo "-- empty lists"
-: > "$work/list"; printf 'a.kt\n' > "$work/list"
+: > "$work/list"; printf 'a.kt\0' > "$work/list"
 got="$(PRODUCT_NONE='' NO_FRAMES='' bash "$dir/classify-changes.sh" "$work/list" | tr '\n' ' ')"
 [ "$got" = "product=true screens=true release=false " ] && ok "empty skip lists skip nothing" || fail "empty skip lists gave '$got'"
 if RELEASE_INPUTS='' bash "$dir/classify-changes.sh" "$work/list" > /dev/null 2>&1; then fail "an empty release allow-list was accepted"; else ok "an empty release allow-list is an error, not a release build that never runs"; fi
@@ -127,7 +129,8 @@ grep -q "the merge base" "$work/summary" && ok "and the summary says which basel
 printf '%s 11\n' "$green" > "$work/runs.txt"; echo 1 > "$work/jobs-11"
 got="$(run pull_request)"
 [ "$got" = "product=true screens=true release=false" ] && grep -q "its last green run" "$work/summary" && ok "a green run that is an ancestor is the baseline" || fail "green baseline gave '$got'"
-grep -qx "app/src/main/A.kt" "$work/changed.txt" && ! grep -q "docs/one.md" "$work/changed.txt" && ok "and only what changed since it is read" || fail "the diff since the green run was wrong"
+paths() { tr '\0' '\n' < "$work/changed.txt"; }
+paths | grep -qx "app/src/main/A.kt" && ! paths | grep -q "docs/one.md" && ok "and only what changed since it is read" || fail "the diff since the green run was wrong"
 
 echo 0 > "$work/jobs-11"
 run pull_request > /dev/null
@@ -166,13 +169,22 @@ git commit -q -m "move Foo into docs"
 : > "$work/runs.txt"
 got="$(run pull_request PRODUCT_NONE='docs/*' HEAD_REF=renamer)"
 [ "$got" = "product=true screens=true release=false" ] && ok "a source file moved into the documentation set still runs the Gradle jobs" || fail "a rename hid its source path: '$got'"
-grep -qx "app/src/main/Foo.kt" "$work/changed.txt" && grep -qx "docs/Foo.kt" "$work/changed.txt" && ok "and the diff lists both sides of the rename" || fail "the diff lists only one side of a rename"
+paths | grep -qx "app/src/main/Foo.kt" && paths | grep -qx "docs/Foo.kt" && ok "and the diff lists both sides of the rename" || fail "the diff lists only one side of a rename"
 git checkout -q main
 git checkout -q -b frames
 git mv app/src/main/Foo.kt app/src/test/Foo.kt
 git commit -q -m "move Foo into tests"
 got="$(run pull_request NO_FRAMES='app/src/test/*' HEAD_REF=frames)"
 [ "$got" = "product=true screens=true release=false" ] && ok "a source file moved into a test directory still moves the frames" || fail "a rename into the tests skipped the frames: '$got'"
+# git prints a path with a non-ASCII character in quotes unless it is asked for NUL-terminated output, and a
+# quoted path matches no pattern: the allow-list would then skip the release build for a keep rule so named.
+git checkout -q main
+git checkout -q -b accent
+mkdir -p keep
+echo rule > "keep/règles.pro"
+git add -A && git commit -q -m "add a keep rule with an accent"
+got="$(run pull_request RELEASE_INPUTS='*.pro' HEAD_REF=accent)"
+[ "$got" = "product=true screens=true release=true" ] && ok "a keep rule with a non-ASCII name still runs the release build" || fail "a non-ASCII path was not matched: '$got'"
 cd "$root"
 
 mkdir "$work/notgit" && cd "$work/notgit"

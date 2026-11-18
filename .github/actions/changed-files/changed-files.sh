@@ -8,7 +8,9 @@
 # `HEAD` on a pull request is GitHub's merge commit, so the delta also holds what the base branch gained
 # since the fork point. That covers a semantic merge conflict; do not switch to the PR head SHA to save runs.
 #
-# A rename is listed as a deletion and an addition (`--no-renames`), since `--name-only` alone prints only
+# The paths are NUL-terminated (`-z`): git otherwise prints a path with a non-ASCII character, a quote or a
+# tab C-quoted, and a quoted path matches no pattern, so a keep rule named with an accent would skip the
+# release build. A rename is listed as a deletion and an addition (`--no-renames`), since `--name-only` alone prints only
 # the new path and a source file moved into a set that cannot reach a job would hide the path it left.
 #
 # This runs with `-e` off around everything that can fail for a reason outside the diff (a run list that
@@ -44,6 +46,8 @@ if [ "${SAME_REPO:-false}" = true ] && [ -n "${HEAD_REF:-}" ]; then
     built="$(gh api "repos/${REPOSITORY:?}/actions/runs/$run_id/jobs?per_page=100" \
       -q "[.jobs[] | select(.name == \"${GREEN_JOB:-build}\" and .conclusion == \"success\")] | length" 2>/dev/null || echo 0)"
     [ "${built:-0}" -gt 0 ] 2>/dev/null || continue
+    # The exclusion only fires when the checkout is the pull request's own head; the default checkout of a
+    # pull_request run is the merge commit, and a green run of the head is then a sound baseline.
     if [ "$sha" != "$head" ] && git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
       base="$sha"
       label="its last green run ($sha)"
@@ -58,13 +62,13 @@ if [ -z "$base" ]; then
 fi
 [ -n "$base" ] || all "No baseline to diff against"
 
-git diff --no-renames --name-only "$base" "$head" > "$tmp/changed.txt" 2>/dev/null || all "The diff could not be read"
+git diff -z --no-renames --name-only "$base" "$head" > "$tmp/changed.txt" 2>/dev/null || all "The diff could not be read"
 
 set -e
 bash "$here/classify-changes.sh" "$tmp/changed.txt" | tee -a "$OUT"
 {
   echo "Diff against $label:"
   echo '```'
-  cat "$tmp/changed.txt"
+  tr '\0' '\n' < "$tmp/changed.txt"
   echo '```'
 } >> "$summary"
