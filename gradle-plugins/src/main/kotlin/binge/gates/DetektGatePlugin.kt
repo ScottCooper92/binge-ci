@@ -124,8 +124,9 @@ class DetektGatePlugin : Plugin<Project> {
         // A fragment that sets a list the consumer's own config sets would replace it without a word, so it is refused.
         val clashes =
             project.tasks.register("checkDetektConfigClashes", CheckDetektConfigClashesTask::class.java) {
-                configs.from(gate.configFile, gate.additionalConfigs)
-                onlyIf { !gate.additionalConfigs.isEmpty }
+                val extra = gate.additionalConfigs
+                configs.from(gate.configFile, extra)
+                onlyIf { !extra.isEmpty }
             }
 
         project.tasks.withType(Detekt::class.java).configureEach {

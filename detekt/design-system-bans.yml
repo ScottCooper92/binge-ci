@@ -10,7 +10,7 @@
 # source sets only.
 #
 # A reviewed exception is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that imports it,
-# with a one-line comment saying why the wrapper does not fit. The review bot asks for that line. A new component belongs in the
+# with a one-line comment saying why the wrapper does not fit. The review rule asks for that line. A new component belongs in the
 # design system, not in the app.
 style:
   ForbiddenImport:
