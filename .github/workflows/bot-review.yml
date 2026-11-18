@@ -1151,10 +1151,6 @@ jobs:
           } > "$HISTORY_FILE"
           cat "$HISTORY_FILE"
 
-      # A hung request in the agent's shell otherwise holds the step until agent_timeout_minutes and
-      # the PR gets no answer. CURL_HOME points at a file in RUNNER_TEMP, not ~/.curlrc, because a
-      # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
-      # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       # For a self-hosted runner that sets BINGE_CI_CLAUDE_CODE_CACHE (see the README): Claude Code and
       # Bun are installed into that directory once per version and reused, instead of being downloaded by
       # every job. Unset, this does nothing and the action installs them as always. Before the step that
@@ -1225,11 +1221,11 @@ jobs:
             for attempt in 1 2; do
               case "$name" in
                 claude)
-                  HOME="$tmp/home" timeout --foreground --kill-after=10 600 \
+                  HOME="$tmp/home" timeout --kill-after=10 600 \
                     bash -c 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s -- "$1"' _ "$version" \
                     > "$tmp/log" 2>&1 && break ;;
                 bun)
-                  HOME="$tmp/home" BUN_INSTALL="$tmp/home/.bun" timeout --foreground --kill-after=10 600 \
+                  HOME="$tmp/home" BUN_INSTALL="$tmp/home/.bun" timeout --kill-after=10 600 \
                     bash -c 'set -o pipefail; curl -fsSL https://bun.sh/install | bash -s -- "bun-v$1"' _ "$version" \
                     > "$tmp/log" 2>&1 && break ;;
               esac
@@ -1281,6 +1277,10 @@ jobs:
           echo "Claude Code ${claude_path:-(the action installs it)}"
           echo "Bun ${bun_path:-(the action installs it)}"
 
+      # A hung request in the agent's shell otherwise holds the step until agent_timeout_minutes and
+      # the PR gets no answer. CURL_HOME points at a file in RUNNER_TEMP, not ~/.curlrc, because a
+      # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
+      # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
         run: |
           set -euo pipefail
