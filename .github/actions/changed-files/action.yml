@@ -33,7 +33,8 @@ inputs:
   release_inputs:
     description: >
       The allow-list for the release build: the paths that decide whether R8 can build the app (build files,
-      the version catalog, keep rules, a submodule pin), in the same syntax. The release build runs on a pull
+      the version catalog, keep rules, a submodule pin), in the same syntax. A path that is also in
+      `product_none` never reaches the release build: `product_none` wins. The release build runs on a pull
       request only for a path in this list. Required.
     required: true
   workflow:

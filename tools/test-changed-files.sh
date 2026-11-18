@@ -69,6 +69,17 @@ check "a UI change skips R8" "true true false" app/src/main/kotlin/ui/HubScreen.
 check "a path with a non-ASCII character is matched as it is" "true false true" $'app/src/main/keepRules/r\u00e8gles.pro'
 check "a path with a newline in it is one path" "true true true" $'a\nb.gradle.kts'
 
+echo "-- whitespace around a pattern"
+printf 'app/proguard-rules.pro\0' > "$work/list"
+for variant in $'*.pro \n*.gradle.kts' $'*.pro\r\n*.gradle.kts\r' $'  *.pro\n    *.gradle.kts' $'\t*.pro\t'; do
+  got="$(RELEASE_INPUTS="$variant" bash "$dir/classify-changes.sh" "$work/list" | tr '\n' ' ')"
+  [ "$got" = "product=true screens=true release=true " ] && ok "a release pattern with stray whitespace still matches ($(printf '%q' "$variant"))" || fail "stray whitespace dropped a release rule ($(printf '%q' "$variant")): '$got'"
+done
+got="$(PRODUCT_NONE=$'docs/* \r' RELEASE_INPUTS='x' bash "$dir/classify-changes.sh" <(printf 'docs/a.md\0') | tr '\n' ' ')"
+[ "$got" = "product=false screens=false release=false " ] && ok "and so does a skip pattern" || fail "a skip pattern with stray whitespace was dropped: '$got'"
+got="$(PRODUCT_NONE='gradle/*' bash "$dir/classify-changes.sh" <(printf 'gradle/wrapper/x.properties\0') | tr '\n' ' ')"
+[ "$got" = "product=false screens=false release=false " ] && ok "a path in both product_none and release_inputs does not reach the release build" || fail "product_none did not win: '$got'"
+
 echo "-- empty lists"
 : > "$work/list"; printf 'a.kt\0' > "$work/list"
 got="$(PRODUCT_NONE='' NO_FRAMES='' bash "$dir/classify-changes.sh" "$work/list" | tr '\n' ' ')"
