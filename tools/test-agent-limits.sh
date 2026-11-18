@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Holds the two inline steps that every agent job carries: the one that bounds the agent's network
-# calls, and the one that prints its last tool calls when the agent step does not succeed. They are
-# copied into each job, since a shared action has no release tag to pin until a release, so this
-# requires the copies to agree and runs one against fixtures.
+# Holds the two steps that every agent job carries: the one that bounds the agent's network calls,
+# and the one that prints its last tool calls when the agent step does not succeed. Each is a
+# composite action under .github/actions/ with its script, and the script is run here against
+# fixtures. Until the jobs `uses:` the actions (they cannot pin a tag that holds them before a
+# release), each job carries an inline copy; those must equal the action's script, so they cannot
+# drift in the meantime.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,20 +52,32 @@ for b in bad:
 sys.exit(1 if bad else 0)
 PY
 
+limits="$root/.github/actions/agent-network-limits/limits.sh"
+dump="$root/.github/actions/agent-tool-calls/tool-calls.sh"
+
+# The script without its shebang and leading comment block: what an inline copy holds.
+body() { awk 'body || !/^(#|[[:space:]]*$)/ { body = 1; print }' "$1"; }
 for kind in limits dump; do
+  script=$limits; [ "$kind" = dump ] && script=$dump
+  [ -x "$script" ] && ok "the $kind script is executable" || fail "the $kind script is not executable"
   mapfile -t copies < <(ls "$work/$kind".* 2>/dev/null)
   if [ "${#copies[@]}" -eq 0 ]; then fail "no $kind steps found"; continue; fi
   differs=false
-  for c in "${copies[@]}"; do cmp -s "${copies[0]}" "$c" || differs=true; done
+  for c in "${copies[@]}"; do body "$script" | diff -q - "$c" >/dev/null || differs=true; done
   if [ "$differs" = true ]; then
-    fail "the $kind step differs between jobs"
+    fail "the $kind step in a job differs from its action's script"
   else
-    ok "the $kind step is the same in all ${#copies[@]} agent jobs"
+    ok "the $kind step in all ${#copies[@]} agent jobs equals its action's script"
   fi
 done
 
-limits=$(ls "$work"/limits.* | head -n 1)
-dump=$(ls "$work"/dump.* | head -n 1)
+# Each action runs its script, and passes the dump step what it reads.
+grep -q 'limits.sh' "$root/.github/actions/agent-network-limits/action.yml" \
+  && ok "the limits action runs its script" || fail "the limits action does not run limits.sh"
+grep -q 'tool-calls.sh' "$root/.github/actions/agent-tool-calls/action.yml" \
+  && grep -q 'EXECUTION_FILE: ${{ inputs.execution_file }}' "$root/.github/actions/agent-tool-calls/action.yml" \
+  && grep -q 'SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}' "$root/.github/actions/agent-tool-calls/action.yml" \
+  && ok "the tool-calls action runs its script with both inputs" || fail "the tool-calls action is not wired to its script"
 
 # The limits step: the curl config lands under RUNNER_TEMP, and the env file carries the rest.
 tmp="$work/runner"; mkdir -p "$tmp"; : > "$work/env"

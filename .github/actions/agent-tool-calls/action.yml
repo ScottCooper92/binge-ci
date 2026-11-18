@@ -1,0 +1,30 @@
+name: Show the agent's last tool calls
+description: >
+  Prints the last 10 tool calls of an agent step that did not succeed. Put it after the agent step
+  with `if: always() && steps.<id>.outcome != 'success' && steps.<id>.outcome != 'skipped'`.
+
+# An action for the same reason as agent-network-limits. The condition stays on the caller's step:
+# a composite action cannot read the outcome of a step in its caller's job.
+
+inputs:
+  execution_file:
+    description: The agent step's `execution_file` output. Empty when the step was killed before it wrote one.
+    required: false
+    default: ''
+  show_full_output:
+    description: When `true`, print each call's command. Otherwise only tool names reach the log.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Show the agent's last tool calls
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        EXECUTION_FILE: ${{ inputs.execution_file }}
+        SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
+      run: |
+        set -uo pipefail
+        bash "${ACTION_PATH}/tool-calls.sh"
