@@ -252,17 +252,20 @@ on:
         default: 100
       timeout_minutes:
         description: >
-          The review job's bound. 25, not 20: measured across every Binge review that has
-          ever completed, the agent step's worst case is 12.0 minutes, against ~4 minutes
-          of setup before it and the submit/merge/report steps after — so 20 was the
-          observed worst case with nothing spare, and agent_timeout_minutes could not be
-          set clear of real reviews inside it.
+          The review job's bound. 35: measured across every Binge review that has ever
+          completed, the agent step's worst case is 12.0 minutes, against ~4 minutes of
+          setup before it and the submit/merge/report steps after, so 20 was the observed
+          worst case with nothing spare and 25 left agent_timeout_minutes clear of real
+          reviews. The other 10 are for a runner that sets BINGE_CI_CLAUDE_CODE_CACHE (see
+          the README): the first job per version there can spend up to 10 minutes filling
+          the cache. A caller that passes its own value and sets the variable adds 10.
         type: number
-        default: 25
+        default: 35
       agent_timeout_minutes:
         description: >
           A bound on the agent step alone, BELOW the job's. Keep the arithmetic
-          ~4 minutes of setup + this + ~4 downstream, inside timeout_minutes.
+          ~4 minutes of setup (+ up to 10 for a cold runner-local cache) + this + ~4
+          downstream, inside timeout_minutes.
         type: number
         default: 15
       resolve_timeout_minutes:
@@ -1157,7 +1160,7 @@ jobs:
       # bounds the agent's network calls, whose curl limits would cut a large download short. ACTION_REF
       # is the pin of the claude-code-action step below, and tools/test-claude-code-cache.sh keeps them equal.
       # Capped at 10 minutes and allowed to fail: a download that does not fit is left to the agent step's own
-      # install, so the cache can cost a job a bounded amount of time and never a verdict.
+      # install. The first job per version can spend those 10 minutes, so the default timeout_minutes includes them.
       - name: Reuse a runner-local Claude Code install
         id: cc_cache
         timeout-minutes: 10

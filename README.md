@@ -205,8 +205,9 @@ job there reuses what is in it. Unset or empty, nothing changes: the action inst
   and that job installs it as always, so the next job installs it afresh. If anything else about the cache fails,
   the job still runs: it just installs as always.
 - The step is capped at 10 minutes (each download at 8, and a wait for another job's install at 8) and is allowed to
-  fail, so the cache can cost a job a bounded amount of time and never a verdict. A download that does not fit in that
-  is left to the action's own install, with no retry here.
+  fail. The first job per version on a runner can spend those 10 minutes, so the default `timeout_minutes` of each
+  agent workflow includes them (and a caller that passes its own `timeout_minutes` and sets the variable should add
+  10). A download that does not fit is left to the action's own install, with no retry here.
 - Put the directory on a volume that outlives the runner's container, or each new container starts cold.
 - Use it on a single-tenant runner only. The directory outlives each job, and every later job on the runner runs
   what is in it, so an agent job that can write to it can change what later jobs run. The installed files are
