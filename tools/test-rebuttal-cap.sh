@@ -40,10 +40,18 @@ if grep -A8 '^      max_rebuttals:' "$workflow" | grep -q '^        default: 1$'
 else
   fail "max_rebuttals does not default to 1"
 fi
-if grep -q 'review-stalled:' "$workflow" && grep -q '"skip=true" >> "$GITHUB_OUTPUT"' "$workflow"; then
+# Only the lines from the marker to the capped branch's `exit 0`: `skip=true` is written elsewhere in
+# the step too, so a grep over the whole file would pass if this branch stopped skipping.
+capped=$(awk '/review-stalled:/ { on = 1 } on { print } on && /exit 0/ { exit }' "$workflow")
+if grep -q 'review-stalled:' <<<"$capped" && grep -q '"skip=true" >> "$GITHUB_OUTPUT"' <<<"$capped"; then
   pass "a capped head posts its marked note and skips the review"
 else
   fail "the capped path no longer posts its note and skips"
+fi
+if grep -q 'Only a push re-opens the review' <<<"$capped"; then
+  pass "the stall note says only a push re-opens the review"
+else
+  fail "the stall note does not say what re-opens the review"
 fi
 
 if [ "$failures" -gt 0 ]; then echo "$failures failure(s)"; exit 1; fi
