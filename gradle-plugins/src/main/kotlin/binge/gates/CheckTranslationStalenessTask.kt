@@ -62,7 +62,19 @@ abstract class CheckTranslationStalenessTask : DefaultTask() {
             return
         }
 
-        val committed = parseHashes(if (file.exists()) file.readText() else "")
+        val committedText = if (file.exists()) file.readText() else ""
+        // A union merge keeps both lines when two PRs re-stamp one key; parseHashes would keep the last.
+        val duplicated = duplicateKeys(committedText)
+        if (duplicated.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    append("${file.name} lists a key more than once, so one of its hashes is being ignored.\n\n")
+                    appendSection("Duplicated keys", duplicated)
+                    append("Run ./gradlew updateTranslationHashes and commit ${file.name} alongside the change.")
+                },
+            )
+        }
+        val committed = parseHashes(committedText)
         if (committed == expected) return
 
         val changed = expected.keys.filter { it in committed && committed[it] != expected[it] }
@@ -99,7 +111,7 @@ private fun render(hashes: Map<String, String>): String =
         hashes.toSortedMap().forEach { (key, hash) -> append(key).append("  ").append(hash).append("\n") }
     }
 
-internal fun parseHashes(text: String): Map<String, String> =
+private fun hashEntries(text: String): List<Pair<String, String>> =
     text
         .lineSequence()
         .map { it.substringBefore('#').trim() }
@@ -107,7 +119,18 @@ internal fun parseHashes(text: String): Map<String, String> =
         .mapNotNull { line ->
             val parts = line.split(Regex("\\s+"))
             if (parts.size == 2) parts[0] to parts[1] else null
-        }.toMap()
+        }.toList()
+
+internal fun parseHashes(text: String): Map<String, String> = hashEntries(text).toMap()
+
+/** Keys on more than one line, whether or not the hashes agree. */
+internal fun duplicateKeys(text: String): List<String> =
+    hashEntries(text)
+        .groupingBy { it.first }
+        .eachCount()
+        .filterValues { it > 1 }
+        .keys
+        .sorted()
 
 /**
  * Why the files cannot be what the gate was meant to read, or null when they can. A gate that reads

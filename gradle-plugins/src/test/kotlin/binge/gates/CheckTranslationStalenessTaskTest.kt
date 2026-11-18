@@ -47,6 +47,45 @@ class CheckTranslationStalenessTaskTest {
     }
 
     @Test
+    fun `fails and names a key that appears twice with the same hash`() {
+        val file = File(root, "translation-hashes.txt")
+        val line = file.readLines().first { it.startsWith("app:greeting") }
+        file.appendText("$line\n")
+
+        val message = duplicateFailure()
+
+        assertTrue(message.contains("app:greeting"), message)
+        assertFalse(message.contains("app:farewell"), message)
+        assertTrue(message.contains("updateTranslationHashes"), message)
+    }
+
+    @Test
+    fun `fails and names a key that appears twice with different hashes`() {
+        File(root, "translation-hashes.txt").appendText("app:farewell  000000000000\n")
+
+        val message = duplicateFailure()
+
+        assertTrue(message.contains("app:farewell"), message)
+        assertFalse(message.contains("app:greeting"), message)
+    }
+
+    @Test
+    fun `updating rewrites a duplicated key to one line`() {
+        val file = File(root, "translation-hashes.txt")
+        file.appendText("app:farewell  000000000000\n")
+
+        task("restamp", rewrite = true).check()
+
+        assertEquals(1, file.readLines().count { it.startsWith("app:farewell") })
+        task("checkTranslationStaleness", rewrite = false).check()
+    }
+
+    private fun duplicateFailure(): String =
+        assertThrows(GradleException::class.java) {
+            task("checkTranslationStaleness", rewrite = false).check()
+        }.message.orEmpty()
+
+    @Test
     fun `hashes only strings some locale translates, and skips untranslatable ones`() {
         File(root, "app/src/main/res/values/strings.xml").writeText(
             """
