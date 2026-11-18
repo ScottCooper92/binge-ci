@@ -58,7 +58,7 @@ def enabled_for(dep):
     return on
 for dep in ("binge-ci", "https://github.com/ScottCooper92/binge-ci.git"):
     assert enabled_for(dep) is True, dep
-for dep in ("homelab-core", "design-system", "binge-companions", "https://github.com/ScottCooper92/homelab-core.git", "binge-ci-fork"):
+for dep in ("other-library", "shared-ui", "other-module", "https://github.com/ScottCooper92/other-library.git", "binge-ci-fork"):
     assert enabled_for(dep) is False, dep
 
 # One pull request: the same group, the same slug, the agent label, never hold.
