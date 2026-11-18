@@ -124,7 +124,7 @@ jobs:
       - name: Test the review bot's rebuttal cap
         run: ./tools/test-rebuttal-cap.sh
 
-      # Every agent job carries the same two inline steps, since a new action has no release tag to pin.
+      # Every agent job uses the two shared actions that bound its network calls and print its last tool calls.
       - name: Test the agent jobs' network limits and tool-call dump
         run: ./tools/test-agent-limits.sh
 
