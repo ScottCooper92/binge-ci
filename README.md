@@ -503,6 +503,24 @@ is why the in-repo copies ran for months and the first caller could not start.
 `tools/check-callers.sh` checks this now. Nothing else can: actionlint cannot see across a
 remote reference, and the called workflow's own CI is not the caller.
 
+### Skip coordinator status comments
+
+An agent session that works on a PR can post status notes for a coordinator under the
+maintainer's account. Such a note starts with the line `<!-- to-coordinator`. It passes the
+commenter gate, because the maintainer is an OWNER, and it would start a full run with
+nothing to answer.
+
+Add this clause to the job `if` in the caller's `author-comments.yml` and `bot-review.yml`:
+
+```yaml
+!startsWith(github.event.comment.body, '<!-- to-coordinator') &&
+```
+
+On an event with no comment the body is null, so the clause is true and filters nothing else.
+The filter belongs on the caller's job, not in the called workflow: a job whose `if` is false
+never joins the concurrency group, so it cannot cancel a pending run that has a real comment
+to answer.
+
 ## Versioning
 
 `v1` is a moving alias, and the consumers follow it. Each pins the commit `v1` names, with a
