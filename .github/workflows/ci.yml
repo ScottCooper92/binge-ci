@@ -140,6 +140,10 @@ jobs:
       - name: Test the changed-files action
         run: ./tools/test-changed-files.sh
 
+      # The preset must only ever offer a v1.0.N tag, never `v1` or a branch head, and never `hold`.
+      - name: Test the Renovate preset
+        run: ./tools/test-renovate-preset.sh
+
       # The release workflow lets an App create tags a ruleset forbids, so what it refuses is held here.
       - name: Test the release tagging
         run: ./tools/test-release-tag.sh

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Pins a repository to binge-ci's release tags: the `uses:` digest pins and the `binge-ci` submodule, in one pull request labelled `agent`.",
+  "git-submodules": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "The binge-ci actions and workflows, pinned by digest with the release tag in the trailing comment. Only v1.0.N tags are ever a target, never the moving `v1`.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["ScottCooper92/binge-ci"],
+      "pinDigests": true,
+      "allowedVersions": "/^v1\\.0\\.\\d+$/",
+      "groupName": "binge-ci",
+      "groupSlug": "binge-ci",
+      "addLabels": ["agent"],
+      "schedule": ["at any time"],
+      "prCreation": "immediate",
+      "minimumReleaseAge": null,
+      "separateMajorMinor": false,
+      "separateMinorPatch": false,
+      "automerge": false
+    },
+    {
+      "description": "Every other submodule stays off: a consumer moves its own with its own tooling, and the manager is on only for binge-ci. This rule must come before the binge-ci one, because the later matching rule wins.",
+      "matchManagers": ["git-submodules"],
+      "enabled": false
+    },
+    {
+      "description": "The binge-ci submodule, in the same pull request. It follows the branch its .gitmodules names, which must be `stable`: that branch only ever moves to a tagged release commit.",
+      "matchManagers": ["git-submodules"],
+      "matchPackageNames": ["/(^|\\/)binge-ci(\\.git)?$/"],
+      "enabled": true,
+      "groupName": "binge-ci",
+      "groupSlug": "binge-ci",
+      "addLabels": ["agent"],
+      "schedule": ["at any time"],
+      "prCreation": "immediate",
+      "minimumReleaseAge": null,
+      "automerge": false
+    }
+  ]
+}
