@@ -227,7 +227,7 @@ job there reuses what is in it. Unset or empty, nothing changes: the action inst
                       suppression-files, pr-check-run,
                       restore-avd-cache / save-avd-cache, nightly-report,
                       agent-network-limits and agent-tool-calls (every agent
-                      job uses both), upstream-watch, submodule-bump and
+                      job uses both), shard-screenshots, upstream-watch, submodule-bump and
                       actionlint (all below)
 callers/              Worked callers for the public repos
                       and a generic pair for fork-review in example/
@@ -290,6 +290,7 @@ drifted a word at a time, so they live here too:
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
 | `submodule-bump.yml` | reusable workflow | Moves one submodule's pin to the head of its default branch, in a PR of its own that carries the `agent` label, and keeps that PR current on later runs. Does nothing while the pin is at the head. Give it a weekly schedule. Grant `contents: read`, and pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`. See "Submodule bump" below. |
 | `nightly-report` | composite action | Keeps one issue open while a run is red and closes it on the next green one. Pass the gate job's result, a title of its own, and a note on what to suspect. Optional `labels` tag the issue and narrow the lookup for the open one; optional `assignees` assign it; optional `run-kind` is what the issue's text calls the run (default `scheduled`; when the job also runs on a push, pass a name that fits both, such as `main`, since the text reads "The <run-kind> run failed"). The job needs `issues: write`. |
+| `shard-screenshots` | composite action | Splits a module's screenshot test classes into shards and prints the `--tests` filters for one, so each shard of a matrix renders in a JVM of its own. Weighs a class by its reference PNGs and places the heaviest first, so the split is stable. Fails on a `@PreviewTest` outside a `*ScreenshotTest` class and on reference PNGs no class owns, since either would leave a frame nothing validates. Its `empty` output is `true` for a shard with no class: skip Gradle then, because a validate task given no filter runs everything. Run it after `actions/checkout`, in the job of one matrix shard. |
 | `actionlint` | composite action | Runs a pinned, checksum-verified actionlint over the caller's workflows, with shellcheck at warning severity. Run it after `actions/checkout`. |
 
 The worked callers under `callers/` show each workflow in use, and `tools/check-callers.sh` checks
