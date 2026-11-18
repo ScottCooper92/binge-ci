@@ -35,7 +35,8 @@ case "$1" in
       esac
     done
     case "$method $path" in
-      "GET repos/"*"/commits/"*"/pulls") cat "$STUB_PRS" ;;
+      "GET repos/"*"/commits/"*"/pulls") jq 'map(del(.merged_by))' "$STUB_PRS" ;;
+      "GET repos/"*"/pulls/"*) jq '.[0]' "$STUB_PRS" ;;
       "GET repos/"*"/git/ref/"*) git -C "$STUB_ORIGIN" show-ref --verify -q "refs/${path#*/git/ref/}" ;;
       "POST repos/"*"/git/refs")
         [ -z "${STUB_FAIL_POST:-}" ] || [[ $ref != *"$STUB_FAIL_POST"* ]] || exit 1
@@ -96,7 +97,7 @@ prjson() { # $1=head ref  $2=head repo  $3=merger type  [$4=merge sha]
 }
 run() { # prints the outputs, exits with the script's status
   : > "$work/out"
-  REPO=o/r SHA="${SHA_OVERRIDE:-$(git rev-parse HEAD)}" OUT="$work/out" bash tools/release-tag.sh "$@" > "$work/stdout" 2> "$work/stderr"
+  REPO=o/r SHA="${SHA_OVERRIDE:-$(git rev-parse HEAD)}" BEFORE="${BEFORE_OVERRIDE:-$(git rev-parse "${SHA_OVERRIDE:-HEAD}^1" 2> /dev/null || true)}" OUT="$work/out" bash tools/release-tag.sh "$@" > "$work/stdout" 2> "$work/stderr"
 }
 out_of() { sed -n "s/^$1=//p" "$work/out"; }
 expect_refuses() { # $1=description  $2=expected message fragment
@@ -143,6 +144,13 @@ git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i 's#a@v1.0.2#b@v1.0.2#' .g
 git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
 prjson release/v1.0.2 o/r User
 expect_refuses "a release that changes which action a line names" "differ by more than"
+
+echo "-- a rebase merge is checked as a whole"
+git checkout -q main && git reset -q --hard "$base"
+echo 'echo extra' > tools/extra.sh && git add -A && git commit -q -m "extra"
+bump v1.0.1 v1.0.2 && git add -A && git commit -q -m "bump"
+prjson release/v1.0.2 o/r User
+if BEFORE_OVERRIDE="$base" run decide; then fail "a rebase merge hiding a file in an earlier commit was tagged"; elif grep -q "more than workflow" "$work/stderr"; then ok "a rebase merge is diffed from the push's previous head, not the last commit"; else fail "wrong reason: $(grep error "$work/stderr" | head -1)"; fi
 
 echo "-- a good release is tagged, in order"
 release "$base" v1.0.1 v1.0.2

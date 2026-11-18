@@ -12,7 +12,7 @@
 #                           `stable` branch that consumers' submodules follow. In that order, as CLAUDE.md says.
 #   release-tag.sh report   Opens (or updates) one issue for a release whose tagging failed.
 #
-# Environment: REPO (owner/name), SHA, GH_TOKEN, OUT, and for `tag` and `report` VERSION. Tags and branches are
+# Environment: REPO (owner/name), SHA, BEFORE (the push's previous main), GH_TOKEN, OUT, and for `tag` and `report` VERSION. Tags and branches are
 # written through the API, so this needs no push credentials and no git identity.
 set -euo pipefail
 
@@ -29,7 +29,7 @@ emit() { printf '%s=%s\n' "$1" "$2" >> "$out"; }
 patch_of() { printf '%s' "${1##*.}"; }
 
 decide() {
-  : "${REPO:?}" "${SHA:?}"
+  : "${REPO:?}" "${SHA:?}" "${BEFORE:?}"
   local prs pr head_ref head_repo merged_by merged_type number version newest old_refs diff
 
   # The pull request this commit is the merge of. A direct push to main, or a squash of something else, has none.
@@ -40,11 +40,13 @@ decide() {
     emit release false
     return 0
   fi
+  number=$(jq -r '.number' <<< "$pr")
+  # The list above is the simple pull request schema, which has no merged_by. Only the single-PR read does.
+  pr=$(gh api "repos/$REPO/pulls/$number") || die "could not read PR #$number"
   head_ref=$(jq -r '.head.ref' <<< "$pr")
   head_repo=$(jq -r '.head.repo.full_name // ""' <<< "$pr")
   merged_by=$(jq -r '.merged_by.login // ""' <<< "$pr")
   merged_type=$(jq -r '.merged_by.type // ""' <<< "$pr")
-  number=$(jq -r '.number' <<< "$pr")
   case "$head_ref" in
     release/v*) ;;
     *)
@@ -78,7 +80,9 @@ decide() {
 
   # The tree has to say the same thing as the branch name.
   git rev-parse -q --verify "$SHA^{commit}" > /dev/null || die "$SHA is not in this checkout."
-  git -C "$here" cat-file -e "$SHA^1" 2> /dev/null || die "the merge commit has no parent in this checkout (shallow clone?)."
+  # A rebase merge lands several commits in one push, so the diff is everything the push brought, not the last commit.
+  git rev-parse -q --verify "$BEFORE^{commit}" > /dev/null 2>&1 || die "the push's previous head $BEFORE is not in this checkout."
+  git merge-base --is-ancestor "$BEFORE" "$SHA" || die "$BEFORE is not an ancestor of $SHA: main was not fast-forwarded to the merge."
   local pins
   pins=$(git grep -hoE '^[[:space:]]*(- )?uses:[[:space:]]*ScottCooper92/binge-ci/[^[:space:]]*' "$SHA" -- '.github/workflows/*.yml' '.github/actions/*/action.yml' \
          | sed 's/.*@//' | sort -u)
@@ -86,12 +90,12 @@ decide() {
 
   # A release is the self-reference bump and nothing else. That is what lets a tag be cut without a person reading it.
   local files
-  files=$(git diff --no-renames --name-only -z "$SHA^1" "$SHA" | tr '\0' '\n')
+  files=$(git diff --no-renames --name-only -z "$BEFORE" "$SHA" | tr '\0' '\n')
   [ -n "$files" ] || die "the merge changes nothing."
   if grep -qvE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files"; then
     die "the merge changes more than workflow and action files: $(grep -vE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files" | head -3 | tr '\n' ' ')"
   fi
-  diff=$(git diff -U0 --no-renames "$SHA^1" "$SHA" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' || true)
+  diff=$(git diff -U0 --no-renames "$BEFORE" "$SHA" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' || true)
   [ -n "$diff" ] || die "the merge has no changed lines."
   local removed added
   removed=$(grep -E '^-' <<< "$diff" | sed 's/^-//' || true)

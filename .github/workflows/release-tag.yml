@@ -51,6 +51,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
         run: OUT="$GITHUB_OUTPUT" ./tools/release-tag.sh decide
 
   tag:
@@ -87,7 +88,7 @@ jobs:
   report:
     needs: [decide, tag]
     # A release that failed anywhere has to say so: a silent half release is the state the check exists to catch.
-    if: always() && needs.decide.outputs.version != '' && (needs.decide.result == 'failure' || needs.tag.result == 'failure')
+    if: always() && needs.decide.outputs.version != '' && (needs.decide.result != 'success' || (needs.tag.result != 'success' && needs.tag.result != 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
