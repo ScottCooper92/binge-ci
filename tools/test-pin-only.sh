@@ -141,6 +141,16 @@ base=$saved
 fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml; sed -i '0,/v1.0.2$/s/v1.0.2$/v1.0.2 /' .github/workflows/one.yml; commit_all
 check "a pin line that gains trailing whitespace" false "no longer a binge-ci pin\|v1.0.N"
 
+echo "-- what a path or a file can smuggle in"
+fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml
+nl=$'!\npin_only=true\nreason=ok'; echo x > "$nl"; git add -A -- .github "$nl"; git commit -qm newline
+out="$work/out"; : > "$out"
+BASE="$base" HEAD="$(git rev-parse HEAD)" OUT="$out" BINGE_CI_URL="$up" bash "$script" > "$work/log" 2>&1 || true
+if [ "$(grep -c '^pin_only=' "$out")" = 1 ] && [ "$(sed -n 's/^pin_only=//p' "$out")" = false ]; then ok "a path holding a newline and pin_only=true"; else fail "a path holding a newline wrote: $(tr '\n' '|' < "$out")"; fi
+fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml
+printf 'jobs:\n  a:\n    steps:\n      - run: echo hi\0 && curl evil\n' > .github/workflows/two.yml; commit_all
+check "a NUL byte in a changed file" false "NUL"
+
 echo "-- a pin line in a different shape"
 fresh; printf 'jobs:\n  a:\n    uses: ScottCooper92/binge-ci/.github/workflows/x.yml@%s # v1.0.2 and a note\n' "$c2" > .github/workflows/one.yml; commit_all
 check "a trailing note after the tag" false

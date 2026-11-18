@@ -25,11 +25,14 @@ url=${BINGE_CI_URL:-https://github.com/ScottCooper92/binge-ci.git}
 sub=${SUBMODULE_PATH:-binge-ci}
 out=${OUT:-/dev/null}
 
-emit() { printf '%s=%s\n' "$1" "$2" >> "$out"; }
+# A path can hold a newline, so a value is stripped of line breaks and control characters before it is written: left
+# in, it could end its own line and add a `pin_only=true` after the real answer.
+clean() { printf '%s' "$*" | tr -d '\000-\037\177'; }
+emit() { printf '%s=%s\n' "$1" "$(clean "$2")" >> "$out"; }
 no() {
-  emit pin_only false
   emit reason "$*"
-  echo "Not a pin-only change: $*"
+  emit pin_only false
+  echo "Not a pin-only change: $(clean "$*")"
   exit 0
 }
 
@@ -49,7 +52,7 @@ olds=()
 gitlink=""
 changed=0
 
-# -z so a path with any character is one path; --no-renames so a rename is a delete and an add, which is not a pin.
+# -z so a path with any character is one path; --ignore-submodules=none so a consumer's `ignore = all` cannot hide a gitlink; --no-renames so a rename is a delete and an add, which is not a pin.
 while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
   changed=$((changed + 1))
   read -r old_mode new_mode _old_sha new_sha status <<< "${meta#:}"
@@ -67,6 +70,10 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
   # silently, and two empty sides compare equal.
   git cat-file blob "$mb:$path" > "$scratch/old" 2> /dev/null || no "could not read $path at the merge base."
   git cat-file blob "$HEAD:$path" > "$scratch/new" 2> /dev/null || no "could not read $path at the head."
+  # mapfile cuts a line at a NUL, which would hide the rest of it from the comparison.
+  for side in old new; do
+    [ "$(tr -d '\000' < "$scratch/$side" | wc -c)" -eq "$(wc -c < "$scratch/$side")" ] || no "$path holds a NUL byte."
+  done
   mapfile -t old_lines < "$scratch/old"
   mapfile -t new_lines < "$scratch/new"
   [ "${#old_lines[@]}" -eq "${#new_lines[@]}" ] || no "$path gained or lost lines."
@@ -84,7 +91,7 @@ while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
     commits+=("${BASH_REMATCH[3]}")
     versions+=("${BASH_REMATCH[5]}")
   done
-done < <(git diff -z --raw --no-renames --no-abbrev "$mb" "$HEAD")
+done < <(git diff -z --raw --no-renames --no-abbrev --ignore-submodules=none "$mb" "$HEAD")
 
 [ "$changed" -gt 0 ] || no "the pull request changes nothing."
 
