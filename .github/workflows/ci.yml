@@ -136,6 +136,10 @@ jobs:
       - name: Test the screenshot sharding
         run: ./tools/test-shard-screenshots.sh
 
+      # A path in no set must run the jobs, and a baseline that cannot be read must run everything: a skipped job cannot fail.
+      - name: Test the changed-files action
+        run: ./tools/test-changed-files.sh
+
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
         run: ./tools/test-rerecord-comment.sh

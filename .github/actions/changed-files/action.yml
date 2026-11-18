@@ -1,0 +1,82 @@
+name: Changed files
+description: >
+  Decides which of a CI run's jobs a pull request can affect, from the paths it changed, and prints
+  `product`, `screens` and `release` as booleans. Everything is true on any event that is not a pull
+  request, and whenever no baseline can be found.
+
+# An action for the same reason as the others here: a reusable workflow runs against the CALLER's
+# checkout, and a composite action is the only way to hand it scripts that travel with it.
+#
+# Run it after `actions/checkout` with `fetch-depth: 0`: the diff needs the merge base. The job needs
+# `contents: read` and `actions: read` (the last green run of the pull request is read from the Actions
+# API; without it the baseline is the merge base, which is sound and runs more). A caller's job cannot
+# hold more than its caller grants, so a reusable workflow that calls this says so in its permissions.
+#
+# The path lists are the caller's. Nothing here knows a layout: a list left empty puts nothing in its set,
+# so the safe default for `product_none` and `no_frames` is to run the job, and `release_inputs` is
+# required because an empty allow-list would skip the release build for every pull request.
+
+inputs:
+  product_none:
+    description: >
+      Paths no Gradle task reads (documentation, tooling), one bash glob per line. A pull request whose
+      every path is in this set sets `product` false. A `*` matches across `/`. The first matching line
+      decides, and a `!` in front of a pattern puts the path out of the set. Lines starting `#` are comments.
+    required: false
+    default: ''
+  no_frames:
+    description: >
+      Paths of product code that cannot move a screenshot frame (tests, a service with no UI), in the same
+      syntax. A pull request sets `screens` false when every path is in `product_none` or here.
+    required: false
+    default: ''
+  release_inputs:
+    description: >
+      The allow-list for the release build: the paths that decide whether R8 can build the app (build files,
+      the version catalog, keep rules, a submodule pin), in the same syntax. The release build runs on a pull
+      request only for a path in this list. Required.
+    required: true
+  workflow:
+    description: The file name of the workflow whose earlier runs vouch for a commit.
+    required: false
+    default: ci.yml
+  green_job:
+    description: The name of the job that only succeeds when the whole run did. A run vouches for its commit only if this job succeeded in it.
+    required: false
+    default: build
+  token:
+    description: "A token that can read the repository's Actions runs (`actions: read`)."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  product:
+    description: "`true` when the Gradle jobs (checks and tests) have to run."
+    value: ${{ steps.classify.outputs.product }}
+  screens:
+    description: "`true` when the screenshot frames have to be validated."
+    value: ${{ steps.classify.outputs.screens }}
+  release:
+    description: "`true` when the release build has to run."
+    value: ${{ steps.classify.outputs.release }}
+
+runs:
+  using: composite
+  steps:
+    - name: Classify the diff
+      id: classify
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GH_TOKEN: ${{ inputs.token }}
+        EVENT: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+        HEAD_REF: ${{ github.head_ref }}
+        SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        REPOSITORY: ${{ github.repository }}
+        WORKFLOW: ${{ inputs.workflow }}
+        GREEN_JOB: ${{ inputs.green_job }}
+        PRODUCT_NONE: ${{ inputs.product_none }}
+        NO_FRAMES: ${{ inputs.no_frames }}
+        RELEASE_INPUTS: ${{ inputs.release_inputs }}
+      run: OUT="$GITHUB_OUTPUT" SUMMARY="$GITHUB_STEP_SUMMARY" bash "${ACTION_PATH}/changed-files.sh"
