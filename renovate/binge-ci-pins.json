@@ -22,9 +22,15 @@
       "automerge": false
     },
     {
+      "description": "Every other submodule stays off: a consumer moves its own with its own tooling, and the manager is on only for binge-ci. This rule must come before the binge-ci one, because the later matching rule wins.",
+      "matchManagers": ["git-submodules"],
+      "enabled": false
+    },
+    {
       "description": "The binge-ci submodule, in the same pull request. It follows the branch its .gitmodules names, which must be `stable`: that branch only ever moves to a tagged release commit.",
       "matchManagers": ["git-submodules"],
       "matchPackageNames": ["/(^|\\/)binge-ci(\\.git)?$/"],
+      "enabled": true,
       "groupName": "binge-ci",
       "groupSlug": "binge-ci",
       "addLabels": ["agent"],

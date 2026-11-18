@@ -647,6 +647,10 @@ only automates the update.
   release-age wait. With the hosted Renovate app that is within the hour, not within the minute; nothing here
   wakes it on a tag. The preset sets no schedule, label or automerge at the top level, so a consumer's own
   settings for its other dependencies are untouched.
+- **Only the `binge-ci` submodule.** The preset turns the submodule manager on, then disables it for every
+  submodule but `binge-ci`, so a consumer's other submodules are left to its own tooling. A consumer that sets
+  `enabledManagers` replaces the preset's value and must include `git-submodules` in it, or the pin PR moves
+  the `uses:` pins without the submodule.
 
 `tools/test-renovate-preset.sh` holds the version restriction (it accepts `v1.0.0` and `v1.0.51`, and refuses
 `v1`, `v1.1.0`, `v2.0.0` and prereleases), the group, the label and the absence of `hold`, and runs Renovate's

@@ -16,9 +16,12 @@ ok() { echo "ok    $1"; }
 if python3 -I - "$preset" <<'PY'
 import json, re, sys
 p = json.load(open(sys.argv[1]))
-rules = {tuple(r["matchManagers"]): r for r in p["packageRules"]}
-assert set(rules) == {("github-actions",), ("git-submodules",)}, list(rules)
-actions, sub = rules[("github-actions",)], rules[("git-submodules",)]
+assert len(p["packageRules"]) == 3, len(p["packageRules"])
+actions, off, sub = p["packageRules"]
+assert actions["matchManagers"] == ["github-actions"] and sub["matchManagers"] == ["git-submodules"]
+# Every other submodule is off: the disable rule matches the whole manager and comes before binge-ci's, which wins.
+assert off["matchManagers"] == ["git-submodules"] and off["enabled"] is False and "matchPackageNames" not in off, off
+assert sub["enabled"] is True
 
 def js_regex(text):
     assert text.startswith("/") and text.endswith("/"), text
