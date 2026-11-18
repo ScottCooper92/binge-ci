@@ -536,8 +536,8 @@ lists the plugins and how to configure them.
 App pull requests keep adding UI that the shared design system already provides. Two detekt config fragments ban the raw
 Material 3 blocks the design system wraps, so the build says what to use instead. The covered blocks are `TopAppBar` and
 its variants and `Scaffold` (`BingeScreenScaffold` and the bar wrappers), `ModalBottomSheet` (`BingeBottomSheet`,
-`BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField` (`BingeTextField`), `SearchBar`
-(`BingeSearchField`), `AlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`), `TabRow` and its variants,
+`BingeAdaptiveSheet`, `BingeChoiceSheet`), `TextField` and `OutlinedTextField` (`BingeTextField`), `SearchBar` and `DockedSearchBar`
+(`BingeSearchField`), `AlertDialog` and `BasicAlertDialog` (`BingeConfirmDialog`, `BingeMessageDialog`), `TabRow` and its variants,
 `FilterChip` and `InputChip`, `Button`, `OutlinedButton` and `TextButton`, `Slider` and `RangeSlider`, and
 `SnackbarHost`. Each message points at `design-system/docs/components.md`.
 
