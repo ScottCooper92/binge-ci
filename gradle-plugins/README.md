@@ -26,6 +26,7 @@ of every translated source string is committed, and the check fails when one mov
 
 The fix is to read the translation it names, then run `./gradlew updateTranslationHashes` and
 commit the hash file. There is no allowlist: re-stamping is the record that someone looked.
+The hash file can be union-merged (`merge=union`); a key left on two lines fails the check, so re-stamp.
 
 Apply it to the project at the repository root, or to the one module that holds the strings.
 
