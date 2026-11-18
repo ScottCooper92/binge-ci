@@ -48,10 +48,38 @@ if grep -q 'review-stalled:' <<<"$capped" && grep -q '"skip=true" >> "$GITHUB_OU
 else
   fail "the capped path no longer posts its note and skips"
 fi
-if grep -q 'Only a push re-opens the review' <<<"$capped"; then
-  pass "the stall note says only a push re-opens the review"
+if grep -q 'Only a push, or a dismissal followed by a new run, re-opens it' <<<"$capped"; then
+  pass "the stall note says what re-opens the review: a push, or a dismissal and a new run"
 else
   fail "the stall note does not say what re-opens the review"
+fi
+
+# Which reviews pin a head. The filter is read out of the workflow between its own markers, and run on
+# fixture reviews: a live one counts, a dismissed one does not, and neither does another app's, a
+# human's, or one for another commit.
+awk '/# bound:pin-begin/ {on = 1; next} /# bound:pin-end/ {exit} on {sub(/^          /, ""); print}' "$workflow" > "$work/pin.sh"
+if [ "$(grep -c 'bound:pin-begin' "$workflow")" -ne 1 ] || ! grep -q '^pinned_filter=' "$work/pin.sh"; then
+  fail "the pin filter is not in the workflow exactly once"
+else
+  pinned_filter=""
+  # shellcheck source=/dev/null
+  . "$work/pin.sh"
+  review() { # $1=login  $2=type  $3=state  $4=sha7  $5=submitted_at
+    jq -nc --arg l "$1" --arg t "$2" --arg s "$3" --arg h "$4" --arg at "$5" \
+      '{user: {login: $l, type: $t}, state: $s, body: ("Reviewed `" + $h + "`. Findings."), submitted_at: $at}'
+  }
+  count() { jq -s --arg pin 'Reviewed `abc1234`' --arg login 'reviewer[bot]' "$pinned_filter" | jq 'length'; }
+  n=$({ review 'reviewer[bot]' Bot CHANGES_REQUESTED abc1234 2026-01-01T00:00:01Z
+        review 'reviewer[bot]' Bot DISMISSED abc1234 2026-01-01T00:00:02Z
+        review 'reviewer[bot]' Bot APPROVED abc1234 2026-01-01T00:00:03Z
+        review 'other-app[bot]' Bot APPROVED abc1234 2026-01-01T00:00:04Z
+        review 'someone' User APPROVED abc1234 2026-01-01T00:00:05Z
+        review 'reviewer[bot]' Bot APPROVED fffffff 2026-01-01T00:00:06Z; } | count)
+  [ "$n" -eq 2 ] && pass "a dismissed review, another app's, a human's and another commit's pin nothing" \
+    || fail "the pin filter counted $n reviews, expected the 2 live ones"
+  n=$(review 'reviewer[bot]' Bot DISMISSED abc1234 2026-01-01T00:00:01Z | count)
+  [ "$n" -eq 0 ] && pass "a head whose only review was dismissed is not pinned, so it is reviewed again" \
+    || fail "a dismissed review still pins its head"
 fi
 
 if [ "$failures" -gt 0 ]; then echo "$failures failure(s)"; exit 1; fi

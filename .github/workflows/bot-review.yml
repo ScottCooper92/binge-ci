@@ -917,10 +917,17 @@ jobs:
           # filter would match nothing and the head would be reviewed again, so it stops instead.
           [ -n "$APP_SLUG" ] || { echo "::error::The reviewer token step reported no app-slug."; exit 1; }
           # Latest last, because a rebuttal can put a second verdict on the same head.
+          # A dismissed review is not counted. Someone decided against it, and it is not in flight, so
+          # it pins nothing: dismissing and running the review again is how a maintainer asks for a
+          # second look at an unchanged head (#363). A dismissal itself starts no run.
+          # bound:pin-begin
+          pinned_filter='[.[] | select(.user.type == "Bot" and .user.login == $login)
+                              | select(.state != "DISMISSED")
+                              | select(.body | startswith($pin))]
+                         | sort_by(.submitted_at)'
+          # bound:pin-end
           pinned=$(gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate --jq '.[]' \
-            | jq -s --arg pin "Reviewed \`${SHA:0:7}\`" --arg login "${APP_SLUG}[bot]" \
-                '[.[] | select(.user.type == "Bot" and .user.login == $login) | select(.body | startswith($pin))]
-                 | sort_by(.submitted_at)')
+            | jq -s --arg pin "Reviewed \`${SHA:0:7}\`" --arg login "${APP_SLUG}[bot]" "$pinned_filter")
           reviewed=$(jq 'length' <<<"$pinned")
           if [ "$REBUTTAL" = "true" ]; then
             latest=$(jq -r '.[-1].state // empty' <<<"$pinned")
@@ -931,7 +938,7 @@ jobs:
                 marker="<!-- review-stalled:${SHA} -->"
                 existing=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate --jq '.[].body' || true)
                 if ! grep -qF -- "$marker" <<<"$existing"; then
-                  printf '%s\nThe author bot has answered the review of `%s` and the head has not changed, so I am not reviewing it again. The verdict stands, and a comment will not change it. A maintainer needs to decide: push a fix, or dismiss the review and merge by hand if it is wrong. Only a push re-opens the review.\n' \
+                  printf '%s\nThe author bot has answered the review of `%s` and the head has not changed, so I am not reviewing it again. The verdict stands, and a comment will not change it. A maintainer needs to decide: push a fix, or dismiss the review and run the review again if it is wrong. Only a push, or a dismissal followed by a new run, re-opens it.\n' \
                     "$marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file - \
                     || echo "::warning::Could not post the note that this head is waiting for a human."
                 fi
