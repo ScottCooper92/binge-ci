@@ -208,7 +208,9 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
   comment carries `<!-- ci-fix-rerecord:<sha> -->`. The images are links to the files on GitHub, so
   they show for a viewer with access to the repository.
 - **The review.** `bot-review.yml` sees the comment, looks at each frame and judges it against what the
-  PR says it changes. A frame that differs somewhere the change does not explain is a finding.
+  PR says it changes. A frame that differs somewhere the change does not explain is a finding. The
+  rules for this are in the workflow's own prompt, so a consumer's review guide needs no change: the
+  guide is the consumer's own file, and a rule kept there would be missing for every other repository.
 - **The consumer's half.** The caller's `gate_rules` and the triage table of its
   `.ai/agents/ci-triage.md` must stop forbidding the re-record, or they win and the agent stops. A row
   that fits:

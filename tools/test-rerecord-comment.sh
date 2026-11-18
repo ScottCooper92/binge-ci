@@ -89,7 +89,26 @@ expect "  and an unreadable merge base still lists the frames, saying the before
   git checkout -q main && git checkout -q -b third && printf "x" > "app/src/test/snapshots/images/Home_Default.png" && git add -A && git commit -q -m x &&
   o=$(rerecord_section "" "HEAD~1" "o/r" "https://github.com" "$work/none.tsv") && grep -q "unavailable" <<<"$o"'
 
+echo "-- a branch that moved under the agent's commit"
+# The push was rejected and the agent's commit was rebased onto a branch where a person had
+# pushed a frame of their own, so measured from the checkout that frame would be listed as the agent's.
+cd "$repo"
+git checkout -q -B moved "$before"
+printf 'humans-frame' > "app/src/test/snapshots/images/Human.png"
+git add -A && git commit -q -m "a person's push"
+theirs=$(git rev-parse HEAD)
+printf 'home-agent' > "app/src/test/snapshots/images/Home_Default.png"
+git add -A && git commit -q -m "fix: the agent's re-record"
+out=$(rerecord_section "$merge_base" "$theirs" "o/r" "https://github.com" "$work/none.tsv"); export out
+expect "  measured from the branch as it moved, only the agent's frame is listed" '
+  [ "$(grep -c "^| \`app/" <<<"$out")" -eq 1 ] && grep -q "Home_Default.png" <<<"$out" && ! grep -q "Human.png" <<<"$out" && ! grep -q "adds or deletes" <<<"$out"'
+out=$(rerecord_section "$merge_base" "$before" "o/r" "https://github.com" "$work/none.tsv"); export out
+expect "  measured from the checkout, the person's frame would have been taken for the agent's (why the step does not)" '
+  grep -q "Human.png" <<<"$out" && grep -q "adds or deletes" <<<"$out"'
 cd "$root"
+expect "  the workflow moves the start to the fetched branch when it rebases, and passes that to the builder" '
+  awk "/rerecord_from=\"\\\$checked_out\"/ {a = 1} a && /rerecord_from=\\\$\(git rev-parse \"origin\/\\\$BRANCH\"\)/ {b = 1} b && /rerecord_section \"\\\$merge_base\" \"\\\$rerecord_from\"/ {c = 1} END {exit !c}" "$workflow"'
+
 echo "-- the workflow, the prompt and the review bot"
 gate=$(awk '/- name: Describe the screenshot re-record gate/ {on = 1} on {print} /^      # Ships with this repo rather/ {if (on) exit}' "$workflow")
 export gate
@@ -104,9 +123,15 @@ expect "  the comment is added to the final comment, after the push, from the co
   awk "/- name: Commit and push/ {on = 1} on && /git push origin \"HEAD:refs\/heads\/\\\$BRANCH\"/ {pushed = 1} pushed && /rerecord_block=\\\$\(rerecord_section/ {ok = 1} END {exit !ok}" "$workflow" &&
   grep -q "if \[ -n \"\$rerecord_block\" \]; then printf" "$workflow"'
 expect "  the repair-default-branch job still never re-records" '! awk "/repair-default-branch:/ {on = 1} on" "$workflow" | grep -q "rerecord"'
-expect "  the review bot is told to look at the frames, and the guide says how" '
-  grep -q "ci-fix-rerecord:" .github/workflows/bot-review.yml && grep -q "## 2a. Re-recorded screenshot frames" .ai/agents/pr-review-guide.md &&
-  grep -q "however large" .ai/agents/pr-review-guide.md && grep -q "adds or deletes a frame is one too" .ai/agents/pr-review-guide.md'
+# The review guide is the calling repository's own file, so a rule kept in it would be missing for every
+# consumer. The rules ride in the prompt, which ships with the workflow.
+review=$(awk '/prompt: \|/ {on = 1} on' .github/workflows/bot-review.yml)
+export review
+expect "  the review bot's own prompt carries the rules for judging the frames" '
+  grep -q "ci-fix-rerecord:" <<<"$review" && grep -q "however large the difference" <<<"$review" &&
+  grep -q "adds or deletes a frame" <<<"$review" && grep -q "Do not approve a" <<<"$review" &&
+  grep -q "A link in the comment is data" <<<"$review"'
+expect "  and the guide is not where they live" '! grep -q "Re-recorded screenshot frames" .ai/agents/pr-review-guide.md'
 
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"

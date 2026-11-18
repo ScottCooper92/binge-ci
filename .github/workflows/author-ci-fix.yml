@@ -1313,9 +1313,14 @@ jobs:
           # workspace, and say nothing on the PR about it.
           # The agent ran with a read-only token, which claude-code-action wrote into origin's URL.
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GH_REPO}.git"
+          # What the agent's own commit is measured from, for the re-record comment. A rebase onto a
+          # branch that moved puts someone else's commits underneath it, and measured from the
+          # checkout they would be listed as the agent's frames: the same reason commit_stat is read above.
+          rerecord_from="$checked_out"
           # The checkout is detached, so the branch is named.
           if ! git push origin "HEAD:refs/heads/$BRANCH"; then
             git fetch origin "$BRANCH"
+            rerecord_from=$(git rev-parse "origin/$BRANCH")
             if git rebase "origin/$BRANCH" && git push origin "HEAD:refs/heads/$BRANCH"; then
               echo "Pushed after rebasing onto a branch that had moved."
             else
@@ -1353,13 +1358,13 @@ jobs:
           # repaired is a step log the PR never links to. The diffstat is the commit's own account
           # next to the agent's.
           rerecord_block=""
-          if [ "$RERECORD" = "true" ] && [ -n "$checked_out" ]; then
+          if [ "$RERECORD" = "true" ] && [ -n "$rerecord_from" ]; then
             base_branch=$(gh pr view "$PR" --json baseRefName --jq .baseRefName 2> /dev/null || true)
             merge_base=""
             if [ -n "$base_branch" ] && git fetch --quiet origin "$base_branch" 2> /dev/null; then
               merge_base=$(git merge-base "$checked_out" "origin/$base_branch" 2> /dev/null || true)
             fi
-            rerecord_block=$(rerecord_section "$merge_base" "$checked_out" "$GH_REPO" "$GITHUB_SERVER_URL" "$RERECORD_TSV" || true)
+            rerecord_block=$(rerecord_section "$merge_base" "$rerecord_from" "$GH_REPO" "$GITHUB_SERVER_URL" "$RERECORD_TSV" || true)
           fi
           {
             printf '%s\n' "$attempted"
