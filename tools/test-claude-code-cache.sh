@@ -44,6 +44,10 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
             bad.append(f"{where}: ACTION_REF is not the pin of the claude-code-action step ({pin})")
         if not c < a:
             bad.append(f"{where}: the cache step must come before the agent step")
+        if s.get("timeout-minutes") != 10 or s.get("continue-on-error") is not True:
+            bad.append(f"{where}: the cache step must be capped at 10 minutes and allowed to fail, so it can never cost a verdict")
+        if "timeout --foreground" in s["run"]:
+            bad.append(f"{where}: `timeout --foreground` signals only its direct child, and the pipeline's curl would outlive it")
         if limits and not c < limits[0]:
             bad.append(f"{where}: the cache step must come before the step that sets curl's limits, which would cut the download short")
         if s.get("if") != steps[a].get("if"):
