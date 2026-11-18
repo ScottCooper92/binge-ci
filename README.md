@@ -284,18 +284,20 @@ secrets: inherit
   `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules; see
   "Private consumers" below for those.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.
-- The token is scoped by `repositories:`, which replaces the default of the caller alone. The workflows
-  add the caller to the list themselves; a hand-written mint has to do the same.
+- A token is scoped by `repositories:`, which replaces the default of the caller alone. The read-only
+  workflows list the caller as well as the private repositories, because their checkout of the caller
+  uses the same token; a hand-written mint has to do the same. The author bots' read token lists the
+  private repositories only, since their write token fetches the caller.
 - The read-only workflows (`bot-review.yml`, `submodule-pins.yml`, `device-smoke.yml`,
   `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
   three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
   secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
-- The author bots check out and push with their app token, which reaches the calling repository alone
-  with or without the input. For the listed repositories they mint a second token from the same app
-  with `permission-contents: read` and fetch the submodules with that, so an agent run cannot write to
-  a private submodule's repository. The read token lives in the environment of the fetch step and is
-  never written to a git config, so an agent cannot fetch more of a private submodule than the
-  checkout did. `tools/check-token-permissions.sh` fails if a write mint in these workflows names
+- The author bots and `submodule-bump.yml` check out and push with their app token, which reaches the
+  calling repository alone with or without the input. For the listed repositories they mint a second
+  token from the same app with `permission-contents: read` and fetch the submodules with that, so a run
+  cannot write to a private submodule's repository. The read token lives in the environment of the
+  fetch and is never written to a git config, so an agent cannot fetch more of a private submodule than
+  the checkout did. `tools/check-token-permissions.sh` fails if a write mint in these workflows names
   `private_submodules`.
 - `submodule-pins.yml` reads each private submodule's default branch with the same token, to check
   that a pin is an ancestor of it.
@@ -370,8 +372,9 @@ What a run does:
 
 It pushes and opens the PR as the author app, not `GITHUB_TOKEN`, because a PR opened with that token
 starts no workflow run and nothing would check it. For a private submodule, name it in
-`private_submodules`, as in "Private submodules" above; the app then needs read access to it, and the
-token it mints has the author app's write access to every repository listed. When the caller is public,
+`private_submodules`, as in "Private submodules" above; the app then needs read access to it. The
+submodule is fetched with a second, read-only token, and the token that pushes reaches the calling
+repository alone. When the caller is public,
 the PR for a listed submodule carries short shas only: no commit subject and no migration text is quoted,
 because the PR is world-readable. The workflow reads whether the caller is private with the app token,
 and treats the caller as public when it cannot tell. Name the submodule by its repository name, as its

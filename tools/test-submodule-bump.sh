@@ -95,7 +95,7 @@ new_world() { # $1=case name
 run() { # extra env assignments as arguments
   rm -rf "${case_dir:?}/run"
   git clone -q "$case_dir/caller.git" "$case_dir/run" 2> /dev/null
-  git -C "$case_dir/run" submodule update -q --init
+  [ -n "${no_init:-}" ] || git -C "$case_dir/run" submodule update -q --init
   : > "$case_dir/out"; : > "$case_dir/summary"
   rc=0
   export rc
@@ -397,9 +397,48 @@ expect "  fails for a path that is not a submodule" '[ $rc -ne 0 ]'
 run SUBMODULE_PATH=../outside
 expect "  fails for a path that leaves the repository" '[ $rc -ne 0 ]'
 
+echo "-- the private submodule's credential"
+# The checkout no longer initialises the submodule: the script does, and it is the only place the read
+# token is used. A wrapper around git records the configuration each `submodule update` is given.
+real_git=$(command -v git)
+mkdir "$work/gitbin"
+cat > "$work/gitbin/git" <<STUB
+#!/usr/bin/env bash
+case "\$*" in *"submodule update"*) env | grep '^GIT_CONFIG_' | sort >> "\$GITENV_LOG" ;; esac
+exec "$real_git" "\$@"
+STUB
+chmod +x "$work/gitbin/git"
+new_world priv
+GITENV_LOG="$case_dir/gitenv"; export GITENV_LOG; : > "$GITENV_LOG"
+no_init=1 run PATH="$work/gitbin:$work/bin:$PATH" SUBMODULE_TOKEN=SECRETTOKEN PRIVATE_SUBMODULES=$'shared, lib-a'
+basic=$(printf 'x-access-token:SECRETTOKEN' | base64 -w0)
+export basic
+expect "  initialises the submodule itself and bumps it" '[ $rc -eq 0 ] && [ -e "$case_dir/run/libs/shared/.git" ] && grep -q "^status=opened$" "$case_dir/out"'
+keys() { grep -o '^GIT_CONFIG_KEY_[0-9]*=http\..*' "$GITENV_LOG" | cut -d= -f2- | sort | uniq -c; }
+expect "  each listed repository, with and without .git, is keyed under the caller's owner" '
+  [ "$(keys | wc -l)" -eq 4 ]
+  keys | grep -q "2 http.https://github.com/o/shared.extraheader"
+  keys | grep -q "2 http.https://github.com/o/shared.git.extraheader"
+  keys | grep -q "2 http.https://github.com/o/lib-a.extraheader"
+  keys | grep -q "2 http.https://github.com/o/lib-a.git.extraheader"'
+expect "  nothing is keyed on a broader URL" '! keys | grep -vq "http.https://github.com/o/\(shared\|lib-a\)\(.git\)\?.extraheader"'
+expect "  an empty value resets each key before the read header" '
+  grep -q "^GIT_CONFIG_VALUE_[0-9]*=AUTHORIZATION: basic $basic$" "$GITENV_LOG"
+  [ "$(grep -c "^GIT_CONFIG_VALUE_[0-9]*=$" "$GITENV_LOG")" -ge 4 ]'
+expect "  the token is masked and never in the log in the clear" 'grep -q "::add-mask::$basic" "$case_dir/log" && ! grep -rq SECRETTOKEN "$case_dir/log" "$case_dir/summary" "$case_dir/out" "$FAKE"'
+expect "  no credential is left in the caller's git config or the submodule's" '! grep -rqE "extraheader|$basic" "$case_dir/run/.git/config" "$case_dir/run/.git/modules"'
+
+new_world priv_none
+GITENV_LOG="$case_dir/gitenv"; : > "$GITENV_LOG"
+no_init=1 run PATH="$work/gitbin:$work/bin:$PATH"
+expect "  with no private submodules it still initialises it, and sets no credential" '[ $rc -eq 0 ] && [ -e "$case_dir/run/libs/shared/.git" ] && ! grep -q "extraheader" "$GITENV_LOG"'
+unset no_init
+
 echo "-- the workflow"
 expect "  pushes with the author app token, not GITHUB_TOKEN" 'grep -q "AUTHOR_APP_ID" "$workflow" && ! grep -qE "github\.token|secrets\.GITHUB_TOKEN" "$workflow"'
 expect "  never cancels a run in progress" 'grep -q "cancel-in-progress: false" "$workflow"'
+expect "  the checkout takes no submodules, so its write token never reaches one" '! grep -qE "^\s+submodules:" "$workflow"'
+expect "  the read-only token reaches the action, and the write mint lists no repositories" 'grep -q "submodule_token: \${{ steps.submodule_token.outputs.token }}" "$workflow" && ! grep -n "repositories:" "$workflow" | grep -v "inputs.private_submodules }}"'
 expect "  keeps its logic in the action: two small run: steps at most" '[ "$(grep -cE "^\s+run:" "$workflow")" -le 2 ]'
 
 if [ "$failures" -gt 0 ]; then echo "$failures failure(s)"; exit 1; fi

@@ -5,7 +5,8 @@ description: >
 
 # An action for the same reason as upstream-watch: a reusable workflow runs against the CALLER's
 # checkout, and a composite action is the only way to hand it a script that travels with it. The
-# caller must have checked out its own repository, with submodules, as the app that will push.
+# caller must have checked out its own repository, WITHOUT submodules, as the app that will push:
+# the script initialises the one it moves, with `submodule_token` for the private ones.
 #
 # The token must be able to push a branch and write pull requests. It cannot be the default
 # GITHUB_TOKEN: a pull request opened with that starts no workflow run, so the PR would never be
@@ -39,6 +40,12 @@ inputs:
   token:
     description: Token that pushes the branch and writes the pull request.
     required: true
+  submodule_token:
+    description: >
+      Read-only token for the repositories in `private_submodules`, used to fetch them and nothing else.
+      Empty when none is private.
+    required: false
+    default: ''
 
 outputs:
   status:
@@ -63,6 +70,7 @@ runs:
         AGENT_LABEL: ${{ inputs.agent_label }}
         DRY_RUN: ${{ inputs.dry_run }}
         GH_TOKEN: ${{ inputs.token }}
+        SUBMODULE_TOKEN: ${{ inputs.submodule_token }}
         REPO: ${{ github.repository }}
       run: |
         set -euo pipefail

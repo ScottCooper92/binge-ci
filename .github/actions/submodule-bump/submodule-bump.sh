@@ -3,10 +3,12 @@
 # Moves one submodule's pin in the calling repository to the head of that submodule's default
 # branch, in a pull request that holds one commit changing nothing else.
 #
-# Run from the root of the caller's checkout, on its default branch, with the submodules initialised
-# and the checkout's credentials able to push. Environment: SUBMODULE_PATH, BASE_BRANCH, REPO,
-# GH_TOKEN; optional PRIVATE_SUBMODULES (the caller's `private_submodules`), BRANCH (the submodule's branch; empty means its remote's default), AGENT_LABEL,
-# DRY_RUN, BOT_NAME, BOT_EMAIL. GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are written when set.
+# Run from the root of the caller's checkout, on its default branch, with the checkout's credentials
+# able to push. The submodule is initialised here, not by the checkout: the checkout's credential is
+# the write token, and that must not reach a private submodule. Environment: SUBMODULE_PATH,
+# BASE_BRANCH, REPO, GH_TOKEN; optional PRIVATE_SUBMODULES (the caller's `private_submodules`) with
+# SUBMODULE_TOKEN (a read-only token for those repositories), BRANCH (the submodule's branch; empty
+# means its remote's default), AGENT_LABEL, DRY_RUN, BOT_NAME, BOT_EMAIL. GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are written when set.
 #
 # What it does, by what it finds:
 #   pin is the head                 nothing: status `current`
@@ -83,7 +85,29 @@ if ! [[ $path =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || [[ $path == *..* ]]; then
 fi
 pinned=$(git ls-tree HEAD -- "$path" | awk '$2 == "commit" {print $3}')
 [ -n "$pinned" ] || die "$path is not a submodule of the checked-out commit"
-git -C "$path" rev-parse --git-dir > /dev/null 2>&1 || die "$path is not checked out: initialise the submodule first"
+
+# The read token reaches the listed repositories and nothing else, through this process's environment
+# alone: never a git config on disk, and never a URL the write token is used for. `<repo>` and
+# `<repo>.git` both, because git matches the URL path on whole segments; the empty value first clears
+# any header a broader key left for that URL, so exactly one goes out. Everything after this point,
+# the fetches below included, inherits it.
+n=${GIT_CONFIG_COUNT:-0}
+add() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+add url.https://github.com/.insteadOf git@github.com:
+if [ -n "${SUBMODULE_TOKEN:-}" ] && [ -n "$PRIVATE_SUBMODULES" ]; then
+  basic=$(printf 'x-access-token:%s' "$SUBMODULE_TOKEN" | base64 -w0)
+  echo "::add-mask::$basic"
+  mapfile -t readable < <(sed -e 's/[, ]/\n/g' <<< "$PRIVATE_SUBMODULES" | sed '/^$/d')
+  for private_repo in "${readable[@]}"; do
+    for url_form in "$private_repo" "$private_repo.git"; do
+      add "http.https://github.com/${REPO%%/*}/$url_form.extraheader" ""
+      add "http.https://github.com/${REPO%%/*}/$url_form.extraheader" "AUTHORIZATION: basic $basic"
+    done
+  done
+fi
+export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
+git submodule update --init -- "$path" > /dev/null || die "could not fetch the submodule $path"
+git -C "$path" rev-parse --git-dir > /dev/null 2>&1 || die "$path is not checked out"
 
 branch=$BRANCH
 if [ -z "$branch" ]; then
