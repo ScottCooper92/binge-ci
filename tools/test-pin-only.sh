@@ -151,6 +151,15 @@ fresh; wf "$c2" " # v1.0.2" > .github/workflows/one.yml
 printf 'jobs:\n  a:\n    steps:\n      - run: echo hi\0 && curl evil\n' > .github/workflows/two.yml; commit_all
 check "a NUL byte in a changed file" false "NUL"
 
+# A consumer that sets `ignore = all` hides a gitlink move from a plain diff, so a pin move could ride with a move of the
+# submodule to any commit. The check has to see it anyway.
+git checkout -q -B ign "$base"; printf '[submodule "binge-ci"]\n\tpath = binge-ci\n\turl = %s\n\tignore = all\n' "$up" > .gitmodules
+git add .gitmodules; git commit -q -m "ignore all"; igbase=$(git rev-parse HEAD)
+wf "$c2" " # v1.0.2" > .github/workflows/one.yml; git add -A -- .github; setgit "$c3"; git commit -q -m "pin and a submodule on another commit"
+saved=$base; base=$igbase
+check "a gitlink moved to another commit, in a repository that sets ignore = all" false "different commit"
+base=$saved
+
 echo "-- a pin line in a different shape"
 fresh; printf 'jobs:\n  a:\n    uses: ScottCooper92/binge-ci/.github/workflows/x.yml@%s # v1.0.2 and a note\n' "$c2" > .github/workflows/one.yml; commit_all
 check "a trailing note after the tag" false
