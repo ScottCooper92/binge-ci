@@ -82,7 +82,7 @@ tool() { jq -nc --arg n "$1" --arg c "$2" '{type:"assistant",message:{content:[{
   jq -nc '{type:"result",result:"done"}'; } > "$work/transcript.jsonl"
 jq -s '.' "$work/transcript.jsonl" > "$work/exec.json"
 
-out=$(EXECUTION_FILE="$work/exec.json" HOME="$work/home" bash "$dump")
+out=$(SHOW_FULL_OUTPUT=true EXECUTION_FILE="$work/exec.json" HOME="$work/home" bash "$dump")
 grep -q 'call3$' <<<"$out" && fail "an old call was printed" || ok "only the last 10 calls are printed"
 grep -q 'call12' <<<"$out" && ok "the newest call is printed" || fail "the newest call is missing"
 grep -q 'ghp_abc' <<<"$out" && fail "a token was printed" || ok "token shapes are masked"
@@ -90,8 +90,24 @@ grep -q 'ghp_abc' <<<"$out" && fail "a token was printed" || ok "token shapes ar
 
 # A killed step has no execution file: the newest transcript under HOME is read instead.
 mkdir -p "$work/home/.claude/projects/p"; cp "$work/transcript.jsonl" "$work/home/.claude/projects/p/s.jsonl"
-out=$(EXECUTION_FILE="" HOME="$work/home" bash "$dump")
+out=$(SHOW_FULL_OUTPUT=true EXECUTION_FILE="" HOME="$work/home" bash "$dump")
 grep -q 'call12' <<<"$out" && ok "with no execution file the transcript is read" || fail "the transcript fallback failed"
+
+# A killed CLI can leave a half-written last line: the complete lines still print.
+{ cat "$work/transcript.jsonl"; printf '{"type":"assistant","message":{"content":[{"type":"tool_use","na'; } > "$work/home/.claude/projects/p/s.jsonl"
+out=$(SHOW_FULL_OUTPUT=true EXECUTION_FILE="" HOME="$work/home" bash "$dump")
+grep -qi 'parse error' <<<"$out" && fail "a half-written last line broke the read" \
+  || { grep -q 'Bash: ' <<<"$out" && ok "a half-written last line is skipped"; } || fail "a half-written last line broke the read"
+
+# show_full_output off, the default: tool names only, no command text, in a log anyone can read.
+for flag in false ""; do
+  out=$(SHOW_FULL_OUTPUT="$flag" EXECUTION_FILE="$work/exec.json" HOME="$work/home" bash "$dump")
+  if grep -q 'Bash' <<<"$out" && ! grep -qE 'echo call|curl|example\.invalid|export T=' <<<"$out"; then
+    ok "with show_full_output '${flag:-unset}' only tool names are printed"
+  else
+    fail "with show_full_output '${flag:-unset}' command text reached the log"
+  fi
+done
 
 out=$(EXECUTION_FILE="$work/missing.json" HOME="$work/empty" bash "$dump") && rc=0 || rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'No execution file' <<<"$out"; } && ok "nothing to read is reported, not failed" || fail "a missing file broke the step"

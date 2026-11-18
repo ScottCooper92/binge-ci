@@ -615,6 +615,7 @@ jobs:
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
         run: |
           set -uo pipefail
           f="${EXECUTION_FILE:-}"
@@ -627,12 +628,21 @@ jobs:
             exit 0
           fi
           echo "::group::The agent's last 10 tool calls ($(basename "$f"))"
-          jq -rs '[.[] | (if type == "array" then .[] else . end)
-                   | select(.type == "assistant") | .message.content[]?
-                   | select(.type == "tool_use")
-                   | "\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
-                       | tostring | gsub("\\s+"; " ") | .[0:300])"]
-                  | .[-10:][]' "$f" 2>&1 \
+          # The commands are what show_full_output: false keeps out of a public log, so without it
+          # only the tool names are printed. A killed CLI can leave a half-written last line, which
+          # makes a whole-file read fail; the line-by-line read below skips it.
+          if [ "${SHOW_FULL_OUTPUT:-false}" = true ]; then
+            show='"\(.name): \((.input.command // .input.file_path // .input.pattern // (.input | tostring))
+                       | tostring | gsub("\\s+"; " ") | .[0:300])"'
+          else
+            show='.name'
+          fi
+          docs=$(jq -s '.' "$f" 2>/dev/null) \
+            || docs=$(jq -R 'fromjson? // empty' "$f" 2>/dev/null | jq -s '.') || docs='[]'
+          jq -r "[.[] | (if type == \"array\" then .[] else . end)
+                   | select(.type == \"assistant\") | .message.content[]?
+                   | select(.type == \"tool_use\") | $show]
+                  | .[-10:][]" <<<"$docs" 2>&1 \
             | sed -E 's/(sk-ant-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]+/\1***/g' || true
           echo "::endgroup::"
 
