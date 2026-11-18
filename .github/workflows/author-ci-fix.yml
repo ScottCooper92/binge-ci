@@ -192,13 +192,17 @@ on:
           A run here has no persistent GRADLE_USER_HOME, so it pays a full dependency resolve
           and configure before the agent's first Gradle task. Raise this with the turn cap
           rather than instead of it: the proxy getting raised while the wall clock did not
-          only moves where a long run dies.
+          only moves where a long run dies. 10 of the minutes are for a runner that sets
+          BINGE_CI_CLAUDE_CODE_CACHE (see the README): the first job per version there can
+          spend up to that filling the cache. A caller that passes its own value and sets the
+          variable adds 10.
         type: number
-        default: 45
+        default: 55
       agent_timeout_minutes:
         description: >
           A bound on the agent step alone, BELOW the job's. Keep the arithmetic ~5 minutes of
-          setup (a fetch-depth: 0 checkout alone can take over three minutes) + this + ~4 for
+          setup (a fetch-depth: 0 checkout alone can take over three minutes, and a cold
+          runner-local cache up to 10 more) + this + ~4 for
           the push, the reporter and the upload, inside timeout_minutes. A step that hits this
           bound fails, and the push step is skipped with it: nothing half-done is pushed, and the
           reporter says nothing was.
@@ -880,7 +884,7 @@ jobs:
       # bounds the agent's network calls, whose curl limits would cut a large download short. ACTION_REF
       # is the pin of the claude-code-action step below, and tools/test-claude-code-cache.sh keeps them equal.
       # Capped at 10 minutes and allowed to fail: a download that does not fit is left to the agent step's own
-      # install, so the cache can cost a job a bounded amount of time and never a verdict.
+      # install. The first job per version can spend those 10 minutes, so the default timeout_minutes includes them.
       - name: Reuse a runner-local Claude Code install
         id: cc_cache
         timeout-minutes: 10
@@ -1748,7 +1752,7 @@ jobs:
       # bounds the agent's network calls, whose curl limits would cut a large download short. ACTION_REF
       # is the pin of the claude-code-action step below, and tools/test-claude-code-cache.sh keeps them equal.
       # Capped at 10 minutes and allowed to fail: a download that does not fit is left to the agent step's own
-      # install, so the cache can cost a job a bounded amount of time and never a verdict.
+      # install. The first job per version can spend those 10 minutes, so the default timeout_minutes includes them.
       - name: Reuse a runner-local Claude Code install
         id: cc_cache
         timeout-minutes: 10

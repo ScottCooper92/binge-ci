@@ -113,8 +113,13 @@ on:
         type: number
         default: 25
       timeout_minutes:
+        description: >
+          The job's bound: the agent's bound below, ~8 minutes of setup and downstream steps,
+          and 10 for a runner that sets BINGE_CI_CLAUDE_CODE_CACHE (see the README), where the
+          first job per version can spend up to that filling the cache. A caller that passes
+          its own value and sets the variable adds 10.
         type: number
-        default: 25
+        default: 35
       agent_timeout_minutes:
         description: >
           A bound on the agent step alone, BELOW the job's. A step that hits it fails, and
@@ -554,7 +559,7 @@ jobs:
       # bounds the agent's network calls, whose curl limits would cut a large download short. ACTION_REF
       # is the pin of the claude-code-action step below, and tools/test-claude-code-cache.sh keeps them equal.
       # Capped at 10 minutes and allowed to fail: a download that does not fit is left to the agent step's own
-      # install, so the cache can cost a job a bounded amount of time and never a verdict.
+      # install. The first job per version can spend those 10 minutes, so the default timeout_minutes includes them.
       - name: Reuse a runner-local Claude Code install
         id: cc_cache
         timeout-minutes: 10

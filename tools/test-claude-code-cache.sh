@@ -45,7 +45,7 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
         if not c < a:
             bad.append(f"{where}: the cache step must come before the agent step")
         if s.get("timeout-minutes") != 10 or s.get("continue-on-error") is not True:
-            bad.append(f"{where}: the cache step must be capped at 10 minutes and allowed to fail, so it can never cost a verdict")
+            bad.append(f"{where}: the cache step must be capped at 10 minutes and allowed to fail, so a slow download is left to the agent step's own install")
         if "timeout --foreground" in s["run"]:
             bad.append(f"{where}: `timeout --foreground` signals only its direct child, and the pipeline's curl would outlive it")
         if limits and not c < limits[0]:
@@ -57,6 +57,14 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
             bad.append(f"{where}: the agent step is not given the cached Claude Code path")
         if "steps.cc_cache.outputs.bun_path" not in str(w.get("path_to_bun_executable", "")):
             bad.append(f"{where}: the agent step is not given the cached Bun path")
+# The first job per version can spend the step's whole cap, so each job's default bound has to leave
+# room for it after the agent's bound and the ~5 minutes of setup and ~4 of downstream steps the
+# workflows describe: otherwise a cold runner cancels a job that would have posted its verdict.
+for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]:
+    inputs = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))[True]["workflow_call"]["inputs"]
+    total, agent = inputs["timeout_minutes"]["default"], inputs["agent_timeout_minutes"]["default"]
+    if total - agent < 19:
+        bad.append(f"{wf}: timeout_minutes ({total}) leaves {total - agent} minutes beyond agent_timeout_minutes ({agent}); a cold cache install needs 10 on top of ~9 for setup and downstream steps")
 # A fork PR's text reaches the agent there, and the cache outlives the job.
 fork = open(f"{root}/.github/workflows/fork-review.yml").read()
 if "BINGE_CI_CLAUDE_CODE_CACHE" in fork or "cc_cache" in fork:
