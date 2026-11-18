@@ -381,7 +381,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.48
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.49
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -392,7 +392,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.48
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.49
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -693,7 +693,7 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.48
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.49
 
       - name: Resolve with Claude
         id: claude
@@ -784,7 +784,7 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.48
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.49
         with:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           show_full_output: ${{ inputs.show_full_output }}
