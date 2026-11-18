@@ -931,7 +931,7 @@ jobs:
                 marker="<!-- review-stalled:${SHA} -->"
                 existing=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate --jq '.[].body' || true)
                 if ! grep -qF -- "$marker" <<<"$existing"; then
-                  printf '%s\nThe author bot has answered the review of `%s` and the head has not changed, so I am not reviewing it again. The verdict stands and a human needs to decide: fix it, or say why it is wrong.\n' \
+                  printf '%s\nThe author bot has answered the review of `%s` and the head has not changed, so I am not reviewing it again. The verdict stands, and a comment will not change it. A maintainer needs to decide: push a fix, or dismiss the review if it is wrong. Only a push or a dismissal re-opens the review.\n' \
                     "$marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file - \
                     || echo "::warning::Could not post the note that this head is waiting for a human."
                 fi
