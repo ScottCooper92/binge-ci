@@ -1,0 +1,18 @@
+name: Bound the agent's network calls
+description: >
+  Gives curl a connect and a total timeout and git a low-speed limit for the steps after it, so a
+  stalled call in an agent job fails instead of holding the job to its timeout.
+
+# An action so the five agent jobs share one copy. A reusable workflow cannot take a script from
+# its own repository any other way: it runs against the CALLER's checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Bound the agent's network calls
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        bash "${ACTION_PATH}/limits.sh"
