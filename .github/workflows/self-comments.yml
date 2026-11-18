@@ -26,7 +26,10 @@ jobs:
     # holds the app token), everyone else has to be OWNER, MEMBER or COLLABORATOR. On a
     # public repo this gate is the control, not a formality - anyone can comment, and the
     # comment body becomes the agent's instructions.
+    # A coordinator's status note (first line `<!-- to-coordinator`) is posted under the maintainer's
+    # account and would otherwise pass the gate below and start a run with nothing to answer.
     if: >
+      !startsWith(github.event.comment.body, '<!-- to-coordinator') &&
       github.event.sender.login != 'binge-pr-author[bot]' &&
       (github.event_name != 'issue_comment' ||
        (github.event.issue.pull_request &&
