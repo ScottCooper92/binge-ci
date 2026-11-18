@@ -136,9 +136,13 @@ bot_fixture write-mint-other-repos author-comments.yml "      - name: Mint autho
           permission-contents: write"
 expect write-mint-other-repos fail "would reach more than the calling repository"
 
-# submodule-bump.yml widens its token by design, so the rule does not reach it.
+# submodule-bump.yml is held to the same rule: its write token reaches the calling repository alone.
 bot_fixture bump-widens submodule-bump.yml "$widened_write"
-expect bump-widens pass
+expect bump-widens fail "would reach more than the calling repository"
+
+bot_fixture bump-split submodule-bump.yml "$plain_write
+$read_mint"
+expect bump-split pass
 
 # The submodule fetch step the author bots share. Each of the five copies must be the same, no checkout
 # may fetch submodules itself (that would use the write token), and the step, run against a stubbed
@@ -174,7 +178,9 @@ for b in bad:
 print(f"{n} fetch steps found")
 sys.exit(1 if bad or n != 5 else 0)
 PY
-if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 5 ] && [ "$(cat "$work"/fetch/step.* | sort -u | wc -l)" -eq "$(sort -u "$work/fetch/step.1" | wc -l)" ]; then
+same=true
+for copy in "$work"/fetch/step.*; do cmp -s "$work/fetch/step.1" "$copy" || same=false; done
+if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 5 ] && [ "$same" = true ]; then
   echo "ok    the fetch step is the same in all five places"
 else
   echo "FAIL  the fetch step differs between jobs"; failures=1

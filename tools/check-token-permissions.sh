@@ -13,11 +13,10 @@
 # the whole installation and is not checked. One that does, from an app not listed here, fails until
 # that app's grant is added.
 #
-# A second rule holds the author bots' write token to the calling repository. With `private_submodules`
-# set, a mint that lists those repositories would give an agent write access to each one, so in the
-# four author workflows a mint that names `private_submodules` in `repositories:` must narrow itself
-# to `permission-contents`, and one that does not narrow itself must not widen its scope at all.
-# `submodule-bump.yml` is left out on purpose: it widens its token by design and says so in the README.
+# A second rule holds the write token of the author bots and of the submodule bump to the calling
+# repository. With `private_submodules` set, a mint that lists those repositories would give an agent
+# write access to each one, so in those workflows a mint that can write must not set `repositories:`,
+# and the mint that names `private_submodules` must ask for exactly `permission-contents: read`.
 #
 # CHECK_ROOT names another tree to check, for tools/test-token-permissions.sh's fixtures.
 set -uo pipefail
@@ -35,8 +34,9 @@ GRANTS = {
     "REVIEWER_APP_ID": {"contents", "metadata"},
 }
 
-# The workflows whose agent runs with the token a mint here produces.
-AUTHOR_BOTS = {"author-ci-fix.yml", "author-comments.yml", "author-conflicts.yml", "author-retarget.yml"}
+# The workflows whose write token must reach the calling repository alone.
+AUTHOR_BOTS = {"author-ci-fix.yml", "author-comments.yml", "author-conflicts.yml", "author-retarget.yml",
+               "submodule-bump.yml"}
 REPOS = re.compile(r'^\s*repositories:(.*)$')
 
 USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')

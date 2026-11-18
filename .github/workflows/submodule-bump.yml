@@ -27,8 +27,9 @@ on:
       private_submodules:
         description: >
           Names of private repositories, comma- or newline-separated and under the caller's owner, that the
-          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the author app
-          token can read the caller and these repositories, so the app must be installed on every one of them.
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the submodule is
+          fetched with a second, read-only token from the author app, so the app must be installed on every
+          one of them. The token that pushes reaches the calling repository alone.
           Name the bumped submodule here when it is private. In a public caller the PR then lists short
           shas only and quotes no commit subject or migration note from it.
         type: string
@@ -84,24 +85,12 @@ jobs:
       status: ${{ steps.bump.outputs.status }}
       pull_request: ${{ steps.bump.outputs.pull_request }}
     steps:
-      - name: Name the calling repository
-        id: repo
-        if: inputs.private_submodules != ''
-        env:
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
-          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
-
       - name: Mint author app token
         id: token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
           private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
-          # The caller itself has to be listed: `repositories` replaces the default scope of the caller alone.
-          repositories: ${{ inputs.private_submodules != '' && format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) || '' }}
 
       # The default branch is read live: a `schedule` event carries no repository payload, and a manual
       # run from another ref must still bump against the default branch.
@@ -114,10 +103,23 @@ jobs:
           set -euo pipefail
           echo "name=$(gh api "repos/$REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
 
+      # A separate, read-only token for the submodule fetch, so the write token reaches the calling
+      # repository alone: a run here must not be able to write to a private submodule's repository.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          repositories: ${{ inputs.private_submodules }}
+          permission-contents: read
+
+      # No `submodules:` here: that would fetch them with the write token. The action initialises the one
+      # it moves, with the read token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.base.outputs.name }}
-          submodules: true
           token: ${{ steps.token.outputs.token }}
 
       - name: Move the pin
@@ -131,3 +133,4 @@ jobs:
           agent_label: ${{ inputs.agent_label }}
           dry_run: ${{ inputs.dry_run }}
           token: ${{ steps.token.outputs.token }}
+          submodule_token: ${{ steps.submodule_token.outputs.token }}
