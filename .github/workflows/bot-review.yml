@@ -1079,7 +1079,25 @@ jobs:
           # reviewer's rule, and a caller's copy of it could be edited by the PR it judges. It exists only
           # when the caller names an index, and the index comes from the default branch like the guide.
           if [ -n "$DESIGN_SYSTEM_INDEX" ]; then
-            if git show "origin/${DEFAULT_BRANCH}:${DESIGN_SYSTEM_INDEX}" > "$RULES_DIR/design-system-index.md" 2> /dev/null; then
+            # The index is usually inside a submodule (the design system), and `git show <rev>:<path>` does
+            # not descend into one. So the path is split at the gitlink the default branch records, and the
+            # file is read from the commit that gitlink names, in the submodule the checkout already holds.
+            # That is the default branch's pin, not the PR's: a PR that bumps the pin cannot change what
+            # the review reads.
+            read_index() {
+              local path=$1 dir=$1 sha
+              git show "origin/${DEFAULT_BRANCH}:${path}" 2> /dev/null && return 0
+              while [[ $dir == */* ]]; do
+                dir=${dir%/*}
+                sha=$(git ls-tree "origin/${DEFAULT_BRANCH}" -- "$dir" 2> /dev/null | awk '$1 == "160000" {print $3; exit}')
+                [ -n "$sha" ] || continue
+                git -C "$dir" cat-file -e "${sha}^{commit}" 2> /dev/null || git -C "$dir" fetch -q origin "$sha" 2> /dev/null || return 1
+                git -C "$dir" show "${sha}:${path#"$dir"/}" 2> /dev/null
+                return
+              done
+              return 1
+            }
+            if read_index "$DESIGN_SYSTEM_INDEX" > "$RULES_DIR/design-system-index.md"; then
               index_note="The index of the design system's components is design-system-index.md in this directory, the default branch's copy."
             else
               printf '%s\n' "The index was not found on the default branch." > "$RULES_DIR/design-system-index.md"
@@ -1870,7 +1888,21 @@ jobs:
             # guide, its directory (the triage table and the rest live beside it) and the conventions
             # are refused with it. A guide at the root names no directory: "." would match everything.
             governed_list+=$'\n'"$REVIEW_GUIDE"$'\n'"$CONVENTIONS"
-            [ -z "$DESIGN_SYSTEM_INDEX" ] || governed_list+=$'\n'"$DESIGN_SYSTEM_INDEX"
+            # bound:index-governed-begin
+            # A change to an index inside a submodule shows up as the submodule's own path, a gitlink, so
+            # the index's path alone would never match it. Every directory above the index that the default
+            # branch records as a gitlink is governed too.
+            if [ -n "$DESIGN_SYSTEM_INDEX" ]; then
+              governed_list+=$'\n'"$DESIGN_SYSTEM_INDEX"
+              index_dir=$DESIGN_SYSTEM_INDEX
+              while [[ $index_dir == */* ]]; do
+                index_dir=${index_dir%/*}
+                if git ls-tree "origin/${DEFAULT_BRANCH}" -- "$index_dir" 2> /dev/null | awk '$1 == "160000" {found = 1} END {exit !found}'; then
+                  governed_list+=$'\n'"$index_dir"
+                fi
+              done
+            fi
+            # bound:index-governed-end
             case "$REVIEW_GUIDE" in */*) governed_list+=$'\n'"${REVIEW_GUIDE%/*}" ;; esac
             touched=$(awk 'NR == FNR { g[$0] = 1; next }
                            { for (p in g) if ($0 == p || index($0, p "/") == 1) { print; break } }' \

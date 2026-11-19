@@ -78,6 +78,42 @@ run_step docs/missing.md
 expect "  the step succeeds, and the rule says it could not read the index" '
   grep -q "could not be read from the default branch" "$rule" && grep -q "do not apply the rule" "$rule"'
 
+echo "-- an index inside a submodule"
+# The design system is usually a submodule, and `git show <rev>:<path>` does not descend into one.
+sub="$work/sub"
+git_ init -q "$sub"
+mkdir -p "$sub/docs"
+echo "BASE SUB INDEX" > "$sub/docs/components.md"
+git -C "$sub" add -A && git_ -C "$sub" commit -q -m "index"
+git_ -C "$work/origin" -c protocol.file.allow=always submodule add -q "$sub" design-system
+git_ -C "$work/origin" commit -q -m "add the design system"
+git_ -c protocol.file.allow=always clone -q --recurse-submodules "$work/origin" "$work/repo2"
+# The PR bumps the pin to a commit whose index says something else.
+git_ -C "$work/repo2" checkout -q -b pr
+echo "PR SUB INDEX" > "$sub/docs/components.md"
+git -C "$sub" add -A && git_ -C "$sub" commit -q -m "pr index"
+git_ -C "$work/repo2/design-system" -c protocol.file.allow=always fetch -q origin
+git -C "$work/repo2/design-system" checkout -q FETCH_HEAD
+git -C "$work/repo2" add -A && git_ -C "$work/repo2" commit -q -m "bump the design system"
+rm -rf "$work/rules" "$work/out"
+(cd "$work/repo2" && RULES_DIR="$work/rules" DEFAULT_BRANCH=main GUIDE_PATH=.ai/agents/pr-review-guide.md CONVENTIONS_PATH=CLAUDE.md \
+   DESIGN_SYSTEM_INDEX=design-system/docs/components.md GITHUB_OUTPUT="$work/out" bash "$work/step.sh") > "$work/log" 2>&1 || true
+expect "  the index is read from the pin the default branch records, not the PR's" '
+  grep -q "BASE SUB INDEX" "$work/rules/design-system-index.md" && ! grep -q "PR SUB INDEX" "$work/rules/design-system-index.md"'
+expect "  and the rule is on" 'grep -q "^design_system_rule=" "$work/out" && ! grep -q "could not be read" "$work/rules/design-system-rule.md"'
+
+# The governed list the merge guard builds, read out of the workflow between its markers.
+awk '/# bound:index-governed-begin/ {on = 1; next} /# bound:index-governed-end/ {exit} on {sub(/^ */, ""); print}' "$workflow" > "$work/governed.sh"
+[ -s "$work/governed.sh" ] || { fail "the governed-index block is not in the workflow"; exit 1; }
+governed_for() { # $1 = index path
+  (cd "$work/repo2" && DEFAULT_BRANCH=main DESIGN_SYSTEM_INDEX="$1" bash -c 'governed_list=""; . "$0"; printf "%s\n" "$governed_list"' "$work/governed.sh")
+}
+expect "  the submodule's own path is governed, since that is what a bump changes" 'governed_for design-system/docs/components.md | grep -qx "design-system"'
+expect "  the index path is governed too" 'governed_for design-system/docs/components.md | grep -qx "design-system/docs/components.md"'
+expect "  an index tracked in the repository itself adds only its own path" '[ "$(governed_for docs/components.md | grep -c .)" -eq 1 ]'
+expect "  no index adds nothing" '[ -z "$(governed_for "" | grep .)" ]'
+export -f governed_for 2> /dev/null || true
+
 echo "-- the prompt and the merge guard"
 review=$(awk '/prompt: \|/ {on = 1} on' "$workflow")
 export review workflow
@@ -87,7 +123,7 @@ expect "  and says the rule is not a file the PR can change" 'grep -q "not of an
 expect "  the rule text is not in the prompt, so an empty input leaves the prompt as it was" '! grep -q "judgement, not a name match" <<<"$review"'
 expect "  the input defaults to empty" 'awk "/^      design_system_index:/ {on = 1} on && /default:/ {print; exit}" "$workflow" | grep -q "default: '"''"'"'
 expect "  an index a PR changes is refused for an unbuilt merge, like the guide" '
-  grep -q "DESIGN_SYSTEM_INDEX\" \] || governed_list+=" "$workflow"'
+  grep -q "governed_list+=.*DESIGN_SYSTEM_INDEX" "$workflow"'
 
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"
