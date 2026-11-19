@@ -160,6 +160,8 @@ expect "  a pin-bump frame is recorded only when the diff moves a pin, the frame
   grep -q "frames from the <submodule> bump" <<<"$gate" && grep -q "git log -p old..new" <<<"$gate" && grep -q "without a pin move in the" <<<"$gate" && grep -q "a frame of code this PR did not touch is a stop" <<<"$gate"'
 expect "  the workflow reads the PR body for the pin-bump sentence and prints what it found, rather than asking the agent to read it" '
   grep -q "gh pr view \"\$PR\" --json body" <<<"$gate" && grep -q "the submodules it names with" <<<"$gate" && grep -q "a submodule that is not in that" <<<"$gate"'
+expect "  the agent renders only with the submodules at the pin the commit records, and a no-change render against the old pin is not a reason to stop" '
+  grep -q "Render only with every submodule at the pin this commit records" <<<"$gate" && grep -q "submodule update --init --recursive --force" <<<"$gate" && grep -q "did not see the PR.s own change" <<<"$gate"'
 expect "  the hard stops stay: render and out-of-memory errors, anything else red, more than 40 frames" '
   grep -q "Nothing else is red" <<<"$gate" && grep -q "at most 40 failing frames" <<<"$gate" && grep -q "out-of-memory failure and a" <<<"$gate"'
 expect "  the agent is asked for the percentages file the step reads" '
