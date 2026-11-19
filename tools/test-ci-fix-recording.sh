@@ -49,8 +49,10 @@ check "a run queued behind a finished one" yes ok '[{"status":"completed"},{"sta
 check "a run waiting for approval" yes ok '[{"status":"waiting"}]'
 check "an API failure or a missing workflow is not a recording" no fail '[]'
 : > "$GH_LOG"; STUB_MODE=ok STUB_RUNS='[]' recording_in_progress || true
-grep -q '^api repos/o/r/actions/workflows/record-screenshots.yml/runs?branch=feature/x' "$GH_LOG" \
+grep -q '^api repos/o/r/actions/workflows/record-screenshots.yml/runs?branch=feature%2Fx' "$GH_LOG" \
   && pass "it asks about this branch's runs of record-screenshots.yml" || fail "it asks about the wrong runs: $(head -1 "$GH_LOG")"
+BRANCH='a&b#c+d' STUB_MODE=ok STUB_RUNS='[]' recording_in_progress || true
+grep -q 'runs?branch=a%26b%23c%2Bd&per_page' "$GH_LOG" && pass "a branch name with & # + is encoded in the query" || fail "the branch name is not encoded: $(head -1 "$GH_LOG")"
 grep -q '^token=actionstoken$' "$GH_LOG" && pass "with the workflow's token, not the author app's" || fail "wrong token"
 
 python3 - "$workflow" <<'PY' || failures=$((failures + 1))
@@ -61,10 +63,12 @@ run = g["run"]
 i, j = run.index("recording_in_progress; then"), run.index('marker="<!-- ci-fix-attempted')
 head = run[i:j]
 ok = "skip=true" in head and "exit 0" in head and run.index("recording-end") < i
+ok = ok and "<!-- ci-fix-recording:${SHA} -->" in head and 'existing=""' in head and "::warning::" in head
+ok = ok and head.index("ci-fix-recording") < head.index("skip=true")
 env = g["env"]
 ok = ok and env.get("BRANCH") and "github.token" in env.get("ACTIONS_TOKEN", "")
 if not ok:
     print("FAIL  the guard does not stand down, before spending an attempt, on the workflow's token"); sys.exit(1)
-print("ok    the guard stands down (skip=true) before the attempt marker is read")
+print("ok    the guard says so on the PR once per head, then stands down (skip=true) before the attempt marker is read")
 PY
 [ "$failures" -eq 0 ]

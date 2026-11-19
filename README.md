@@ -196,8 +196,9 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
 
 `author-ci-fix.yml` makes no attempt while a `record-screenshots` run is queued or in progress on the branch. The conflict
 bot dispatches one after it takes the default branch's frames, and a fix beside it would record the same classes and
-collide on the push. The recording's own commit starts CI again, and that head gets its own attempt. A failed lookup
-of the runs changes nothing.
+collide on the push. It says so once on the PR. If the recording commits frames, CI runs again and that head gets its
+own attempt; if it commits nothing, re-running CI on the PR gets the attempt back. A failed lookup of the runs changes
+nothing.
 
 - **The gate.** The agent re-records only when nothing else is red, there are at most 40 failing frames,
   and every failing frame is one of three cases. It renders a component whose source the PR changed.
