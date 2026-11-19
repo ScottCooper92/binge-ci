@@ -74,13 +74,14 @@ if not bad:
     ok.append("checks and tests wait for `changes`, skip unless it succeeded and said so, and stop their daemon")
 
 # Every action is pinned: a commit for a third party, a release tag for this repository's own.
+before_pins = len(bad)
 for ref in re.findall(r"^\s*(?:- )?uses:\s*(\S+)", text, re.M):
     if ref.startswith("ScottCooper92/binge-ci/"):
         if not re.search(r"@v\d+\.\d+\.\d+$", ref):
             bad.append(f"{ref}: a self-reference must pin a release tag")
     elif not re.search(r"@[0-9a-f]{40}$", ref):
         bad.append(f"{ref}: a third-party action must be pinned to a full commit")
-if not any("pinned" in b or "pin" in b for b in bad):
+if len(bad) == before_pins:
     ok.append("every action is pinned")
 
 # The worked caller: a job of its own named `build` that fails unless the shared run passed.
