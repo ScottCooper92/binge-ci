@@ -44,6 +44,8 @@ tasks.validatePlugins {
 
 tasks.test {
     inputs.files(testKitKotlin, testKitAndroid)
+    // The design-system tests read the fragments from outside this build, so an edit to one has to rerun them.
+    inputs.files(fileTree("../detekt") { include("*.yml") }).withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("testKitKotlin", testKitKotlin.asPath)
     systemProperty("testKitAndroid", testKitAndroid.asPath)
     useJUnitPlatform()

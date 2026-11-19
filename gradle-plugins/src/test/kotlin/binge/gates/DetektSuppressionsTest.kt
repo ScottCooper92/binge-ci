@@ -50,3 +50,51 @@ class DetektSuppressionsTest {
         assertEquals(listOf("style"), ruleSetsWithOwnExcludes(config))
     }
 }
+
+class DetektConfigClashesTest {
+    @Test
+    fun `a list written as items or inline is found at the third level, and the keys of an item are not`() {
+        val config =
+            """
+            style:
+              ForbiddenMethodCall:
+                active: true
+                excludes: ['**/build/**']
+                methods:
+                  - value: 'kotlin.runCatching'
+                    reason: 'swallows cancellation'
+              MagicNumber:
+                active: true
+            potential-bugs:
+              UnsafeCallOnNullableType:
+                active: true
+            """.trimIndent()
+
+        assertEquals(setOf("style>ForbiddenMethodCall>excludes", "style>ForbiddenMethodCall>methods"), listKeys(config))
+    }
+
+    @Test
+    fun `a rule set's own list, a scalar and a comment are not a rule's list`() {
+        val config = "# note\nstyle:\n  excludes: ['**/A.kt']\n  MagicNumber:\n    active: true\n    ignoreNumbers: '-1'\n"
+
+        assertEquals(emptySet<String>(), listKeys(config))
+    }
+
+    @Test
+    fun `a list under a key at the same indent as its items is found`() {
+        assertEquals(setOf("style>Rule>methods"), listKeys("style:\n  Rule:\n    methods:\n    - value: 'a'\n"))
+    }
+
+    @Test
+    fun `only a list that two files both set clashes, and the files are named in order`() {
+        val own = "style:\n  ForbiddenMethodCall:\n    methods:\n      - value: 'kotlin.runCatching'\n"
+        val fragment =
+            "style:\n  ForbiddenImport:\n    forbiddenImports:\n      - value: 'a.B'\n  ForbiddenMethodCall:\n    methods:\n      - value: 'a.c'\n"
+
+        assertEquals(
+            mapOf("style>ForbiddenMethodCall>methods" to listOf("detekt.yml", "bans.yml")),
+            clashingLists(listOf("detekt.yml" to own, "bans.yml" to fragment)),
+        )
+        assertEquals(emptyMap<String, List<String>>(), clashingLists(listOf("detekt.yml" to "style:\n  MagicNumber:\n    active: true\n", "bans.yml" to fragment)))
+    }
+}

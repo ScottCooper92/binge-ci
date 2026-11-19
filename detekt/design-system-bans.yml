@@ -1,0 +1,65 @@
+# Bans the raw Material 3 blocks that the design system wraps, at the import, so an app uses the wrapper.
+#
+# A consumer adds this file to `detektGate { additionalConfigs.from(...) }` from its `binge-ci` submodule, after its own
+# `detekt.yml`. It sets one list, `style.ForbiddenImport.forbiddenImports`. detekt replaces a list rather than merging it, so
+# a consumer whose own `detekt.yml` sets the same list has the build refused (see `checkDetektConfigClashes`) until the two
+# are one list. The calls, under a wildcard import or a fully qualified name, are `design-system-call-bans.yml`, a second file
+# because a consumer may already set `ForbiddenMethodCall.methods` of its own.
+#
+# The bans cover app code only. The design system's own path and build output are excluded, and the gate reads production
+# source sets only.
+#
+# A reviewed exception is an annotation, not a config edit: `@file:Suppress("ForbiddenImport")` on the file that imports it,
+# with a one-line comment saying why the wrapper does not fit. The review rule asks for that line. A new component belongs in the
+# design system, not in the app.
+style:
+  ForbiddenImport:
+    active: true
+    excludes: ['**/design-system/**', '**/build/**']
+    forbiddenImports:
+      - value: 'androidx.compose.material3.TopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material TopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.CenterAlignedTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material CenterAlignedTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.MediumTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material MediumTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.LargeTopAppBar'
+        reason: 'Use BingeScreenScaffold for a screen bar, BingeTopBar, BingeMediumTopBar or BingeLargeTopBar for a standalone one, BingeSheetTopBar inside a sheet instead of the raw Material LargeTopAppBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Scaffold'
+        reason: 'Use BingeScreenScaffold instead of the raw Material Scaffold. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.ModalBottomSheet'
+        reason: 'Use BingeBottomSheet or BingeAdaptiveSheet, and BingeChoiceSheet to pick one or several from a list instead of the raw Material ModalBottomSheet. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TextField'
+        reason: 'Use BingeTextField instead of the raw Material TextField. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.OutlinedTextField'
+        reason: 'Use BingeTextField instead of the raw Material OutlinedTextField. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SearchBar'
+        reason: 'Use BingeSearchField instead of the raw Material SearchBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.DockedSearchBar'
+        reason: 'Use BingeSearchField instead of the raw Material DockedSearchBar. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.AlertDialog'
+        reason: 'Use BingeConfirmDialog or BingeMessageDialog instead of the raw Material AlertDialog. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.BasicAlertDialog'
+        reason: 'Use BingeConfirmDialog or BingeMessageDialog instead of the raw Material BasicAlertDialog. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material TabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.PrimaryTabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material PrimaryTabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SecondaryTabRow'
+        reason: 'Use BingeTabRow, or BingeTabbedPager for tabs over pages instead of the raw Material SecondaryTabRow. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.FilterChip'
+        reason: 'Use BingeFilterChip, and BingeFilterChipRow for a row of them instead of the raw Material FilterChip. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.InputChip'
+        reason: 'Use BingeFilterChip, and BingeFilterChipRow for a row of them instead of the raw Material InputChip. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Button'
+        reason: 'Use BingeFilledButton instead of the raw Material Button. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.OutlinedButton'
+        reason: 'Use BingeOutlinedButton instead of the raw Material OutlinedButton. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.TextButton'
+        reason: 'Use BingeTextButton instead of the raw Material TextButton. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.Slider'
+        reason: 'Use BingeNumberSlider or BingeStopSlider instead of the raw Material Slider. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.RangeSlider'
+        reason: 'Use BingeRangeSlider instead of the raw Material RangeSlider. See design-system/docs/components.md.'
+      - value: 'androidx.compose.material3.SnackbarHost'
+        reason: 'Use BingeSnackbarHost instead of the raw Material SnackbarHost. See design-system/docs/components.md.'

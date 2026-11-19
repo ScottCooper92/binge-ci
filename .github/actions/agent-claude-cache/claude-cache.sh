@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Lets a self-hosted runner reuse one Claude Code and Bun install across jobs. Unset
 # BINGE_CI_CLAUDE_CODE_CACHE does nothing, and anything that goes wrong leaves the outputs empty so the
-# claude-code-action step installs them itself. The body below is the step the five agent jobs carried
-# inline, moved as it is; tools/test-claude-code-cache.sh holds each inline copy equal to it until they
-# are replaced by the action.
+# claude-code-action step installs them itself. The five agent jobs run it through the action beside it.
 set -uo pipefail
 # No -e: this step only ever helps. Anything that goes wrong leaves its output empty, and the
 # agent step then installs Claude Code and Bun itself, as it does on a runner without a cache.
