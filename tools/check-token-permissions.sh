@@ -35,6 +35,8 @@ GRANTS = {
     # The reviewer app is installed on the owner's repositories with read access to contents. Only the
     # read-only submodule mints narrow its token, and they ask for contents alone.
     "REVIEWER_APP_ID": {"contents", "metadata"},
+    # The release app, used only by release-tag.yml to write tags and one branch. Contents and nothing else.
+    "RELEASE_APP_ID": {"contents", "metadata"},
 }
 
 # The workflows whose write token must reach the calling repository alone.

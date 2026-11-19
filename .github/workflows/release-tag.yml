@@ -1,0 +1,111 @@
+name: Release tag
+
+# Cuts the release when its pull request merges: the `vX.Y.Z` tag at the merge commit, then the `v1` alias, then
+# the `stable` branch the consumers' submodules follow. The merge is the one human step; this is what a person used
+# to do after it, in the order CLAUDE.md gives. It runs only in this repository, so it is not a reusable workflow.
+#
+# Tagging is a privilege: the tag ruleset forbids it, and the GitHub App below is on that ruleset's bypass list. So
+# `decide` takes nothing on trust. It tags only a merge of a `release/v1.0.N` branch of this repository, made by a
+# person, whose whole diff is the self-reference bump from the previous release to that tag, and whose tree agrees
+# with the branch name. Anything that looks like a release and fails those checks fails the run and opens an issue;
+# a merge that is not a release exits green and does nothing.
+#
+# The App's token, not GITHUB_TOKEN, creates the refs: a push made with GITHUB_TOKEN starts no workflow, and
+# tag-check.yml has to run on the tag and on the `v1` move as it always has. The secrets exist only in the
+# `release` environment, which only `main` can deploy to, and only the `tag` job asks for it.
+#
+# A failure that happens before `decide` knows the version (an API error reading the pull request) is not reported
+# as an issue, since the issue is per release; the red run on `main` and `tag-check.yml` show it.
+#
+# What the maintainer sets up is in README.md, "Releasing".
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      version: ${{ steps.decide.outputs.version }}
+      resume: ${{ steps.decide.outputs.resume }}
+    steps:
+      # Every tag and the history, so the previous release and the merge commit's parent can be read.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Is this the merge of a release?
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: OUT="$GITHUB_OUTPUT" ./tools/release-tag.sh decide
+
+  tag:
+    needs: decide
+    if: needs.decide.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    # Two release merges close together must not race to move `v1`. The group is on this job, not the workflow: a
+    # group holds one running and one pending run and cancels the older pending one, so on the workflow every
+    # ordinary merge to `main` could push a waiting release run out of the queue before any of its jobs started.
+    concurrency:
+      group: release-tag
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      # Contents only, and only this repository. The App can write nothing else.
+      - name: Mint the release token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          repositories: ${{ github.event.repository.name }}
+      - name: Tag, move v1, move stable
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: ./tools/release-tag.sh tag
+
+  report:
+    needs: [decide, tag]
+    # A release that failed anywhere has to say so: a silent half release is the state the check exists to catch.
+    if: always() && needs.decide.outputs.version != '' && (needs.decide.result != 'success' || (needs.tag.result != 'success' && needs.tag.result != 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open one issue for the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./tools/release-tag.sh report
