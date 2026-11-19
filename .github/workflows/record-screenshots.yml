@@ -7,7 +7,7 @@ name: Record screenshots
 #
 # MAINTAINER-TRIGGERED ONLY. The caller is a `workflow_dispatch`, which GitHub allows only to a person
 # with write access, and this workflow refuses anything else: the triggering event has to be a dispatch,
-# its sender a user and not a bot, and that user's permission on the repository write or better. No bot
+# its sender a user and not a bot (bar the one login `trusted_dispatcher` names), and that user's permission on the repository write or better. No bot
 # starts it and no pull request can. The agent bots keep their own, narrower re-record path.
 #
 # What it will not do. It never pushes to the default branch, it never forces a push, and it commits
@@ -69,6 +69,13 @@ on:
           setting. Empty leaves the project's `gradle.properties` alone.
         type: string
         default: ''
+      trusted_dispatcher:
+        description: >
+          The login of one bot whose dispatch is accepted, such as the author bot, which starts a recording when
+          it takes the default branch's frames in a screenshot-only merge conflict. Exact match, case-sensitive.
+          Empty (the default) accepts a person's dispatch only. Every other check still applies to it.
+        type: string
+        default: ''
       timeout_minutes:
         description: The job's timeout, in minutes.
         type: number
@@ -115,18 +122,25 @@ jobs:
           REF: ${{ inputs.ref }}
           TESTS: ${{ inputs.tests }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          TRUSTED_DISPATCHER: ${{ inputs.trusted_dispatcher }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; echo "refusal=$1" >> "$GITHUB_OUTPUT"; exit 1; }
           [ "$EVENT" = workflow_dispatch ] || fail "this records only when a person dispatches it; the event was '$EVENT'."
-          [ "$SENDER_TYPE" = User ] || fail "this records only for a person, and the sender is a '$SENDER_TYPE'."
-          # A dispatch already needs write access. The permission is read again so that a caller wired to some other
-          # trigger by mistake still cannot be started by someone without it.
-          permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2> /dev/null || echo none)
-          case "$permission" in
-            admin | maintain | write) ;;
-            *) fail "$ACTOR has '$permission' permission here, and recording needs write." ;;
-          esac
+          # A bot is accepted only as the one login the caller names, and its permission is not read: an app is
+          # not a collaborator, and the dispatch itself needed the installation's `actions: write`.
+          if [ "$SENDER_TYPE" = Bot ] && [ -n "$TRUSTED_DISPATCHER" ] && [ "$ACTOR" = "$TRUSTED_DISPATCHER" ]; then
+            :
+          else
+            [ "$SENDER_TYPE" = User ] || fail "this records only for a person, and the sender is a '$SENDER_TYPE'."
+            # A dispatch already needs write access. The permission is read again so that a caller wired to some other
+            # trigger by mistake still cannot be started by someone without it.
+            permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2> /dev/null || echo none)
+            case "$permission" in
+              admin | maintain | write) ;;
+              *) fail "$ACTOR has '$permission' permission here, and recording needs write." ;;
+            esac
+          fi
           [[ $REF =~ ^[A-Za-z0-9._/-]+$ ]] && [[ $REF != -* ]] && [[ $REF != *..* ]] \
             || fail "'$REF' is not a branch name this will record on."
           [ "$REF" != "$DEFAULT_BRANCH" ] || fail "this never records on the default branch ($DEFAULT_BRANCH). Open a branch."

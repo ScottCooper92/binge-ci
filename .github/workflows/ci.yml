@@ -150,6 +150,9 @@ jobs:
       # This workflow pushes a commit to a branch on one person's word, so what it refuses is held here.
       - name: Test the screenshot recording workflow
         run: ./tools/test-record-screenshots.sh
+      # The conflict bot pushes a merge and starts a recording on its own, so what it takes and what it leaves is held here.
+      - name: Test the conflict bot's screenshot path
+        run: ./tools/test-conflict-png.sh
       # Every Android app's CI runs through this workflow, so what makes a job skip or a runner switch is held here.
       - name: Test the Android app workflow
         run: ./tools/test-android-app-ci.sh

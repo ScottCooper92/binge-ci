@@ -244,6 +244,27 @@ is a `workflow_dispatch` with two inputs: the branch, and a Gradle `--tests` fil
   push is made with the author app's installation token, named in the step and not left to the checkout's persisted
   credential, so CI starts on the new commit like on any push. A push made with `GITHUB_TOKEN` starts no workflow, which
   would leave the pull request's required check missing; the workflow does not dispatch CI as a fallback.
+- **A bot that may start it.** The `trusted_dispatcher` input (empty by default) names one bot login, such as
+  `binge-pr-author[bot]`. A dispatch from exactly that login is accepted; its permission is not read, since an app is
+  not a collaborator. Every other check still applies to it, and any other bot is still refused.
+
+#### Screenshot-only merge conflicts
+
+When the default branch moves and a PR conflicts only in reference frames (`**/screenshotTest*/reference/**/*.png`,
+each changed or added on both sides), `author-conflicts.yml` does not ask the agent to pick between two images. It takes
+the default branch's copy of each frame, commits the merge, and pushes it with the author app's token, so CI starts. It
+then dispatches the consumer's `record-screenshots.yml` on the branch, with exactly the affected classes as the `tests`
+filter (a class is the directory above a frame, under `reference/<package path>/`), and posts one comment naming the
+frames it took and the recording it started. Then it stops.
+
+- **What keeps today's behaviour.** A conflict in any other path (a source file, a non-reference PNG), a frame one side
+  deleted, a governed path, or a repository with no `record-screenshots.yml` is left to the agent and its usual bail.
+  The workflow is looked up before anything is pushed.
+- **What the consumer has to set up.** The caller of `record-screenshots.yml` passes `trusted_dispatcher` set to the
+  author bot's login, or the recording refuses the bot's dispatch. The author app's installation needs the Actions
+  permission at write, which a maintainer grants in the app's settings; the token mint asks for no narrower set, so it
+  carries whatever the installation grants. Without it the merge still lands, and the comment says the recording could
+  not be started and which classes to record.
 - **What it says.** The step summary lists the frames. The pull request for the branch gets one comment saying what
   happened: recorded, nothing changed, a refusal or a failure, with the run's link.
 - **The caller grants** `contents: read` and `pull-requests: write`, and passes `AUTHOR_APP_ID` and
