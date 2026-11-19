@@ -234,7 +234,18 @@ jobs:
           fi
           export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
 
       - name: Merge the base in, if the branch is behind
         if: steps.gate.outputs.skip != 'true' && steps.restack.outputs.skip != 'true'
