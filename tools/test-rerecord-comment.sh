@@ -128,6 +128,24 @@ cd "$root"
 expect "  the workflow moves the start to the fetched branch when it rebases, and passes that to the builder" '
   awk "/rerecord_from=\"\\\$checked_out\"/ {a = 1} a && /rerecord_from=\\\$\(git rev-parse \"origin\/\\\$BRANCH\"\)/ {b = 1} b && /rerecord_section \"\\\$merge_base\" \"\\\$rerecord_from\"/ {c = 1} END {exit !c}" "$workflow"'
 
+echo "-- the PR body sentence the workflow reads"
+# The step's own pipeline, run against a stubbed `gh` that serves a PR body.
+awk '/bumps=\$\(gh pr view/ {on = 1} on {print} on && /\|\| true\)$/ {exit}' "$workflow" > "$work/bumps.sh"
+[ -s "$work/bumps.sh" ] || { fail "the pin-bump reader is not in the workflow"; exit 1; }
+mkdir -p "$work/bin"
+cat > "$work/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$PR_BODY"
+STUB
+chmod +x "$work/bin/gh"
+bumps_for() { # $1 = the PR body
+  PATH="$work/bin:$PATH" PR=1 PR_BODY="$1" bash -c 'set -euo pipefail; . "$0"; printf "%s" "$bumps"' "$work/bumps.sh"
+}
+export -f bumps_for 2> /dev/null || true
+expect "  a body that says the sentence names the submodule" '[ "$(bumps_for "Bumps the design system.\n\nframes from the libs/design bump")" = "libs/design" ]'
+expect "  two bumps are both named, once each" '[ "$(bumps_for "frames from the a bump, and frames from the b bump, frames from the a bump")" = "a,b" ]'
+expect "  a body without the sentence names nothing, and the step does not fail" '[ -z "$(bumps_for "Looks like the frames moved because of the bump")" ]'
+
 echo "-- the workflow, the prompt and the review bot"
 gate=$(awk '/- name: Describe the screenshot re-record gate/ {on = 1} on {print} /^      # Ships with this repo rather/ {if (on) exit}' "$workflow")
 export gate
@@ -139,7 +157,9 @@ expect "  a render or out-of-memory failure is a stop, not a diff" 'grep -q "out
 expect "  a new frame is recorded only for a test or preview this PR added or changed, and a missing reference with no such test is a stop" '
   grep -q "ScreenshotImageNotFoundException" <<<"$gate" && grep -q "added or changed in this PR.s" <<<"$gate" && grep -q "this PR did not add or change is a stop" <<<"$gate"'
 expect "  a pin-bump frame is recorded only when the diff moves a pin, the frame traces to the pin, and the PR body says so" '
-  grep -q "frames from the <submodule> bump" <<<"$gate" && grep -q "git log -p old..new" <<<"$gate" && grep -q "without a pin move in the diff" <<<"$gate" && grep -q "a frame of code this PR did not touch is a stop" <<<"$gate"'
+  grep -q "frames from the <submodule> bump" <<<"$gate" && grep -q "git log -p old..new" <<<"$gate" && grep -q "without a pin move in the" <<<"$gate" && grep -q "a frame of code this PR did not touch is a stop" <<<"$gate"'
+expect "  the workflow reads the PR body for the pin-bump sentence and prints what it found, rather than asking the agent to read it" '
+  grep -q "gh pr view \"\$PR\" --json body" <<<"$gate" && grep -q "the submodules it names with" <<<"$gate" && grep -q "a submodule that is not in that" <<<"$gate"'
 expect "  the hard stops stay: render and out-of-memory errors, anything else red, more than 40 frames" '
   grep -q "Nothing else is red" <<<"$gate" && grep -q "at most 40 failing frames" <<<"$gate" && grep -q "out-of-memory failure and a" <<<"$gate"'
 expect "  the agent is asked for the percentages file the step reads" '

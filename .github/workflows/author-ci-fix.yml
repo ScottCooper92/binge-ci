@@ -715,8 +715,17 @@ jobs:
           inputs.rerecord_screenshots &&
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
+          # The pin-bump case needs a sentence in the PR body. The workflow reads the body and hands the agent
+          # only what it found, so the agent needs no way to read it and the body is not put in the prompt.
+          bumps=$(gh pr view "$PR" --json body --jq .body 2> /dev/null \
+                  | grep -oE 'frames from the [A-Za-z0-9._/-]+ bump' | sed -E 's/^frames from the (.*) bump$/\1/' \
+                  | sort -u | paste -sd, - || true)
           delim="EOF_$(openssl rand -hex 8)"
           {
             echo "block<<${delim}"
@@ -747,8 +756,10 @@ jobs:
                re-recorded when what it shows changed because of what the new pin changed (a
                component, a theme or a token that `git log -p old..new` shows, which the frame's
                screen uses), and only when the PR body says `frames from the <submodule> bump`,
-               naming the submodule. Without that sentence, or without a pin move in the diff,
-               a frame of code this PR did not touch is a stop.
+               naming that submodule. The workflow has read the body for you and prints the
+               submodules it names at the end of this block: a submodule that is not in that
+               list gets no allowance. Without that sentence, or without a pin move in the
+               diff, a frame of code this PR did not touch is a stop.
             4. A new frame, one whose reference image does not exist, may be recorded only when
                the test function or preview that renders it was added or changed in this PR's
                diff. Find it in `git diff` against the merge base. A missing reference whose test
@@ -786,6 +797,7 @@ jobs:
           the commit is ignored.
           ${{ runner.temp }}/rerecord.tsv
           GATE
+            printf '\nPR body, read by the workflow: the submodules it names with `frames from the <submodule> bump`: %s\n' "${bumps:-none}"
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
 
