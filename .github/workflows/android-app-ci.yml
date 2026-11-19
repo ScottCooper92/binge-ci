@@ -1,0 +1,486 @@
+name: Android app CI
+
+# The CI an Android app runs on a pull request, a push to its default branch and a nightly: a job that
+# decides which of the others a diff can affect, then the Gradle checks, the unit tests, the screenshot
+# validation and the release build as jobs of their own, in parallel. Each app's `ci.yml` was a copy of
+# the same shape, drifting a word at a time. This is that shape once; an app calls it through a thin
+# caller (callers/example/android-app-ci.yml) and names its own modules, Gradle tasks and paths.
+#
+# Built up in parts. This part is the routing, the checks, the tests and the screenshot shards; the
+# release build and the aggregate that says the whole run passed follow, and nothing should call it
+# before the release that holds them.
+#
+# The jobs, and why they are separate. `./gradlew build` runs every check the app lists under its gates,
+# because the plugins wire themselves into `check`. Run as one job it took about 20 minutes, end to end:
+# lint, detekt, the unit tests, the screenshot validation and R8 one after another. So the slowest pieces
+# run as jobs of their own and `checks` runs `build` with exactly those tasks excluded. Excluding, not
+# listing: a gate added to `check` later lands in `checks` without anyone touching the caller.
+#
+# What a caller owns. The triggers, the concurrency group, the name `CI` (the bots match this workflow by
+# name), and the one job that branch protection requires: a job in the CALLER, after this one, that fails
+# unless this run passed. A reusable workflow's jobs reach branch protection as `<caller job> / <job>`, so
+# a required check named `build` has to be a job of the caller's own. There is deliberately no
+# `paths-ignore`: a skipped run is a pull request the review bot never sees, so `changes` decides
+# instead which jobs run, and a job it skips is reported as skipped, never missing.
+#
+# Self-hosted runners. `runner` is a JSON array, so an app on a hosted runner now moves to its own by
+# changing one input. Nothing here assumes a fresh disk, an empty home directory or `/home/runner`: the
+# checkout is clean, the daemon is stopped when a job ends so a shared runner keeps none alive, and
+# the heap is a per-job input. A self-hosted runner needs `git`, `jq` and a JDK on PATH, and `gh` for
+# `changes`. Hosted images carry all of them.
+#
+# The caller must grant `contents: read` and `actions: read`: this workflow declares both, and a caller
+# that holds less fails at startup with nothing on the PR. `actions: read` is what `changes` reads the
+# pull request's earlier runs with.
+#
+# One runner per user and Gradle home is assumed. A job ends with `./gradlew --stop`, which stops every
+# daemon of that Gradle version in the user's Gradle home, so two runner instances sharing one home
+# could stop each other's build.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >
+          runs-on, as a JSON array string, for every job. An app on a hosted runner now moves to a
+          self-hosted one by changing this alone.
+        type: string
+        default: '["ubuntu-latest"]'
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, the checkout
+          uses a GitHub App token that can read the caller and these repositories, so the app must be
+          installed on every one of them.
+        type: string
+        default: ''
+      submodules:
+        description: Passed to actions/checkout by the jobs that build. A build that includes a submodule needs `recursive`.
+        type: string
+        default: recursive
+      java_version:
+        description: The JDK the build runs on.
+        type: string
+        default: '21'
+      release_inputs:
+        description: >
+          The allow-list for the release build, one bash glob per line: the paths that decide whether R8 can
+          build the app (build files, the version catalog, keep rules, a submodule pin). The release build
+          runs on a pull request only for a path in it. Required; see the changed-files action for the syntax.
+        type: string
+        required: true
+      product_none:
+        description: >
+          Paths no Gradle task reads (documentation, tooling), one bash glob per line. A pull request whose
+          every path is in this set skips the checks, the tests and the screenshots. Empty runs them all.
+        type: string
+        default: ''
+      no_frames:
+        description: >
+          Paths of product code that cannot move a screenshot frame (tests, a service with no UI), in the
+          same syntax. A pull request whose every path is in `product_none` or here skips the screenshots.
+        type: string
+        default: ''
+      green_job:
+        description: >
+          The name of the CALLER's job that only succeeds when the whole run did. A run vouches for its
+          commit, so the next push is judged only on what changed since, only if this job succeeded in it.
+        type: string
+        default: build
+      ci_workflow_file:
+        description: The file name of the caller's CI workflow, for the same lookup.
+        type: string
+        default: ci.yml
+      checks_tasks:
+        description: >
+          The Gradle arguments of the checks job. The default runs `build` less the tasks the other jobs own,
+          so a gate added to `check` lands here. Name modules (`:app:build`) as the app needs; whitespace
+          separates arguments, and there is no quoting. `build` also reaches the unit tests of the other
+          variants (`testReleaseUnitTest`) through `check`: an app that does not want them here adds
+          `-x testReleaseUnitTest`.
+        type: string
+        default: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
+      tests_tasks:
+        description: >
+          The Gradle arguments of the tests job: the unit tests, and the coverage check that reads them.
+        type: string
+        default: testDebugUnitTest koverVerify --continue
+      checks_jvmargs:
+        description: >
+          `org.gradle.jvmargs` for the checks job, for a runner whose memory differs from the project's own
+          setting (a heap that fits a hosted runner may be too small for a bigger one, and a shared runner
+          may be capped below it). Empty leaves the project's `gradle.properties` alone.
+        type: string
+        default: ''
+      tests_jvmargs:
+        description: The same for the tests job.
+        type: string
+        default: ''
+      screenshot_shards:
+        description: >
+          How many shards the screenshot validation is split into, each a job of its own with a JVM of its
+          own. The render holds every frame's native memory until its JVM exits, so one JVM for the whole
+          suite grows with the suite and, past what a runner has, stalls and is cancelled with no log. A
+          whole number from 1 to 32. More shards than classes leaves some empty; an empty one passes.
+        type: number
+        default: 3
+      screenshot_test_dir:
+        description: Where the screenshot test classes are, relative to the workspace.
+        type: string
+        default: app/src/screenshotTest
+      screenshot_reference_dir:
+        description: Where the reference PNGs are, relative to the workspace.
+        type: string
+        default: app/src/screenshotTestDebug/reference
+      screenshot_compile_tasks:
+        description: >
+          The Gradle arguments that compile the screenshot sources, run before the validation in a JVM of its
+          own so a cold compile and the render do not share one and run it out of memory.
+        type: string
+        default: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      screenshot_validate_tasks:
+        description: >
+          The Gradle arguments that validate the frames. A shard's `--tests` filters are added after them.
+        type: string
+        default: :app:validateDebugScreenshotTest --continue
+      screenshots_jvmargs:
+        description: The same as `checks_jvmargs`, for the screenshot shards. This is the job that runs a runner out of memory.
+        type: string
+        default: ''
+      checks_timeout_minutes:
+        description: Minutes before the checks job is stopped.
+        type: number
+        default: 30
+      tests_timeout_minutes:
+        description: Minutes before the tests job is stopped.
+        type: number
+        default: 30
+      screenshots_timeout_minutes:
+        description: Per shard. A successful run takes 11 to 16 minutes unsharded, and a slow runner has taken twice that.
+        type: number
+        default: 20
+    secrets:
+      REVIEWER_APP_ID:
+        description: Only read when `private_submodules` is set, to mint the read-only submodule token.
+        required: false
+      REVIEWER_APP_PRIVATE_KEY:
+        description: The private key of the app `REVIEWER_APP_ID` names. Read with it.
+        required: false
+    outputs:
+      product:
+        description: "`true` when the checks and the tests ran or had to."
+        value: ${{ jobs.changes.outputs.product }}
+      screens:
+        description: "`true` when the screenshots ran or had to."
+        value: ${{ jobs.changes.outputs.screens }}
+      release:
+        description: "`true` when the release build ran or had to."
+        value: ${{ jobs.changes.outputs.release }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # Decides which of the jobs below a pull request can affect, so a docs-only diff, a test-only one or a
+  # follow-up that moves no frame does not pay for the whole suite. The jobs it gates are skipped
+  # outright. A push to the default branch and the nightly run everything, so a wrong skip is found at the
+  # next merge and never lies dormant. The rules are in the changed-files action, which has its own tests.
+  changes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 5
+    outputs:
+      product: ${{ steps.classify.outputs.product }}
+      screens: ${{ steps.classify.outputs.screens }}
+      release: ${{ steps.classify.outputs.release }}
+      shards: ${{ steps.shards.outputs.shards }}
+    steps:
+      # The whole history, no submodules: the diff needs a merge base, and nothing here builds.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # `green_job` names a job of the CALLER's workflow, so the Actions API reports it by that bare name.
+      - name: Classify the diff
+        id: classify
+        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.51
+        with:
+          product_none: ${{ inputs.product_none }}
+          no_frames: ${{ inputs.no_frames }}
+          release_inputs: ${{ inputs.release_inputs }}
+          workflow: ${{ inputs.ci_workflow_file }}
+          green_job: ${{ inputs.green_job }}
+
+      # The matrix of the screenshots job, from the input. Checked here, once, because a matrix built from a
+      # bad value fails every shard with a message about the matrix and none about the input.
+      - name: Name the screenshot shards
+        id: shards
+        env:
+          SHARDS: ${{ inputs.screenshot_shards }}
+        run: |
+          set -euo pipefail
+          [[ $SHARDS =~ ^[0-9]+$ ]] && [ "$SHARDS" -ge 1 ] && [ "$SHARDS" -le 32 ] \
+            || { echo "::error::screenshot_shards must be a whole number from 1 to 32, not '$SHARDS'."; exit 1; }
+          list=$(seq 0 $((SHARDS - 1)) | paste -sd, -)
+          echo "shards=[$list]" >> "$GITHUB_OUTPUT"
+  # `build` minus what the other jobs own: compile, lint, detekt and its baseline-staleness check, ktlint
+  # and whatever else the app wires into `check`. The one job that saves the Gradle cache; the others
+  # restore it, so a push writes one copy of the Gradle home (1 to 3.5 GB) and not one per job.
+  checks:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.product == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.checks_timeout_minutes }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A `schedule` run carries no `repository` in its event payload, so the name comes from the context.
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      # The submodules are private to the author: the default token reads the calling repository only.
+      # This one is read-only, and lists the caller too, because `repositories` replaces the default scope.
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
+      # A clean checkout: a self-hosted runner keeps its workspace between jobs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
+          clean: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-cleanup: on-success
+
+      # --continue surfaces every failure in one run rather than stopping at the first, which matters most
+      # to the author bot: it gets one repair attempt per commit, and a log showing only the first of three
+      # failures spends that attempt on a third of the problem.
+      - name: Build and lint, less what the other jobs run
+        env:
+          TASKS: ${{ inputs.checks_tasks }}
+          JVMARGS: ${{ inputs.checks_jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::checks_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      - name: Upload reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports-checks
+          path: |
+            **/build/reports/lint-results-*.html
+            **/build/reports/ktlint/**
+            **/build/reports/detekt/**
+          if-no-files-found: ignore
+          retention-days: 1
+
+      # A shared runner must not keep a daemon alive across jobs. A job that failed to start Gradle has
+      # nothing to stop, so a failure here is not one.
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
+
+  # The unit tests, and the coverage floor that reads them.
+  tests:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.product == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.tests_timeout_minutes }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
+          clean: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+
+      - name: Unit tests and coverage
+        env:
+          TASKS: ${{ inputs.tests_tasks }}
+          JVMARGS: ${{ inputs.tests_jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::tests_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      # A test that leaks a coroutine is reported by the one that ran next. The report names the leak,
+      # and the artifact below expires in a day, so a failed run says what leaked in its own log.
+      - name: Print the coroutine leak report
+        if: ${{ failure() }}
+        run: |
+          # No -e: this step reports, and a missing report is the common case.
+          set -uo pipefail
+          shopt -s nullglob
+          reports=(./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt ./*/*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt)
+          if [ "${#reports[@]}" -gt 0 ]; then
+            cat "${reports[@]}"
+          else
+            echo "No coroutine leak was reported."
+          fi
+
+      - name: Upload reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports-tests
+          path: |
+            **/build/reports/tests/**
+            **/build/reports/kover/**
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
+
+  # The screenshot frames, in shards. Each shard validates its share of the test classes in a JVM of its
+  # own, and `fail-fast` is off so one red shard does not hide what the others found.
+  screenshots:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.screens == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.screenshots_timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.shards) }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
+          clean: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+
+      # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
+      # suite, which is what sharding avoids. So it skips Gradle and passes.
+      - name: Pick this shard's test classes
+        id: shard
+        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.51
+        with:
+          shards: ${{ inputs.screenshot_shards }}
+          index: ${{ matrix.shard }}
+          test_dir: ${{ inputs.screenshot_test_dir }}
+          reference_dir: ${{ inputs.screenshot_reference_dir }}
+
+      # With no Gradle cache, a cold compile and the screenshot render shared one VM and ran it out of memory.
+      - name: Compile the screenshot sources
+        if: steps.shard.outputs.empty != 'true'
+        env:
+          TASKS: ${{ inputs.screenshot_compile_tasks }}
+          JVMARGS: ${{ inputs.screenshots_jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::screenshot_compile_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      - name: Validate the screenshots (shard ${{ matrix.shard }} of ${{ inputs.screenshot_shards }})
+        if: steps.shard.outputs.empty != 'true'
+        env:
+          TASKS: ${{ inputs.screenshot_validate_tasks }}
+          JVMARGS: ${{ inputs.screenshots_jvmargs }}
+          FILTERS: ${{ steps.shard.outputs.filters }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::screenshot_validate_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          mapfile -t filters <<< "$FILTERS"
+          [ "${#filters[@]}" -gt 0 ] || { echo "::error::this shard has classes but no filters."; exit 1; }
+          # The compile's JVM goes before the render's starts.
+          ./gradlew --stop
+          ./gradlew "${args[@]}" "${filters[@]}"
+
+      - name: Upload reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports-screenshots-${{ matrix.shard }}
+          path: |
+            **/build/outputs/screenshotTest-results/**/diffs/**
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
