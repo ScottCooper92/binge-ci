@@ -144,7 +144,7 @@ bot_fixture bump-split submodule-bump.yml "$plain_write
 $read_mint"
 expect bump-split pass
 
-# The submodule fetch step the author bots share. Each of the five copies must be the same, no checkout
+# The submodule fetch step the author bots share. Each of the six copies must be the same, no checkout
 # may fetch submodules itself (that would use the write token), and the step, run against a stubbed
 # `git`, must give the read token to the listed repositories only: never on a broader URL key.
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -153,7 +153,7 @@ python3 -I - "$root" "$work/fetch" <<'PY' || failures=1
 import sys, yaml
 root, out = sys.argv[1:3]
 n, bad = 0, []
-for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retarget"]:
+for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retarget", "record-screenshots"]:
     doc = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))
     for job, body in doc["jobs"].items():
         steps = body.get("steps", [])
@@ -176,12 +176,12 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retar
 for b in bad:
     print("FAIL  " + b)
 print(f"{n} fetch steps found")
-sys.exit(1 if bad or n != 5 else 0)
+sys.exit(1 if bad or n != 6 else 0)
 PY
 same=true
 for copy in "$work"/fetch/step.*; do cmp -s "$work/fetch/step.1" "$copy" || same=false; done
-if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 5 ] && [ "$same" = true ]; then
-  echo "ok    the fetch step is the same in all five places"
+if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 6 ] && [ "$same" = true ]; then
+  echo "ok    the fetch step is the same in all six places"
 else
   echo "FAIL  the fetch step differs between jobs"; failures=1
 fi
@@ -248,5 +248,58 @@ then
 else
   echo "FAIL  the read header is not scoped to the listed repositories"; failures=1
 fi
+
+echo "-- the step leaves each submodule at the pin the PR head records"
+# A render has to see the PR's own submodule pin: a frame rendered against the old one reads as no change.
+# These run the step with real git against scratch repositories, as it runs on a runner whose workspace
+# may hold an earlier checkout of the same repository.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME=Dev GIT_AUTHOR_EMAIL=dev@example.com GIT_COMMITTER_NAME=Dev GIT_COMMITTER_EMAIL=dev@example.com
+sub="$work/sub"; super="$work/super"
+git init -q -b main "$sub"
+printf 'one\n' > "$sub/tokens.txt" && git -C "$sub" add -A && git -C "$sub" commit -q -m one && pin_old=$(git -C "$sub" rev-parse HEAD)
+printf 'two\n' > "$sub/tokens.txt" && git -C "$sub" add -A && git -C "$sub" commit -q -m two && pin_new=$(git -C "$sub" rev-parse HEAD)
+git init -q -b main "$super"
+git -C "$super" -c protocol.file.allow=always submodule add -q "$sub" design > /dev/null 2>&1
+git -C "$super/design" checkout -q "$pin_old"
+git -C "$super" add -A && git -C "$super" commit -q -m "base pins the old design system"
+git -C "$super" checkout -q -b pr
+git -C "$super/design" checkout -q "$pin_new"
+git -C "$super" add -A && git -C "$super" commit -q -m "bump the design system"
+real_fetch() { # $1 = the working copy the step runs in
+  ( cd "$1" && env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always \
+      SUBMODULE_TOKEN=X PRIVATE_SUBMODULES="" OWNER=acme bash "$work/fetch/step.1" > "$work/real.log" 2>&1 )
+}
+at_pin() { [ "$(git -C "$1/design" rev-parse HEAD)" = "$pin_new" ] && [ "$(git -C "$1" ls-tree HEAD design | awk '{print $3}')" = "$pin_new" ]; }
+# A fresh clone of the PR head.
+rm -rf "$work/fresh" && git -c protocol.file.allow=always clone -q -b pr "$super" "$work/fresh" 2> /dev/null
+if real_fetch "$work/fresh" && at_pin "$work/fresh"; then echo "ok    a fresh checkout of the head gets the new pin"; else echo "FAIL  a fresh checkout is not at the PR's pin: $(cat "$work/real.log")"; failures=1; fi
+# A workspace that still holds the base's checkout, with the submodule at the old pin, moved to the head.
+rm -rf "$work/stale" && git -c protocol.file.allow=always clone -q --recurse-submodules -b main "$super" "$work/stale" 2> /dev/null
+git -C "$work/stale" -c protocol.file.allow=always fetch -q origin pr && git -C "$work/stale" checkout -q FETCH_HEAD
+if [ "$(git -C "$work/stale/design" rev-parse HEAD)" = "$pin_old" ] && real_fetch "$work/stale" && at_pin "$work/stale"; then
+  echo "ok    a workspace left at the old pin is moved to the new one"
+else echo "FAIL  a stale submodule checkout stayed at the old pin: $(cat "$work/real.log")"; failures=1; fi
+# The same, with an edit in the submodule that would block the checkout.
+rm -rf "$work/dirty" && git -c protocol.file.allow=always clone -q --recurse-submodules -b main "$super" "$work/dirty" 2> /dev/null
+git -C "$work/dirty" -c protocol.file.allow=always fetch -q origin pr && git -C "$work/dirty" checkout -q FETCH_HEAD
+printf 'local\n' > "$work/dirty/design/tokens.txt"
+if real_fetch "$work/dirty" && at_pin "$work/dirty" && [ "$(cat "$work/dirty/design/tokens.txt")" = "two" ]; then
+  echo "ok    an edit left in the submodule does not keep the old pin"
+else echo "FAIL  a modified submodule checkout blocked the move to the new pin: $(cat "$work/real.log")"; failures=1; fi
+
+# A submodule that is still not at the recorded pin after the update fails the step instead of rendering.
+mkdir -p "$work/bin-off"
+cat > "$work/bin-off/git" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1 $2" = "submodule status" ]; then echo "+0123456789abcdef0123456789abcdef01234567 design (heads/main)"; fi
+exit 0
+STUB
+chmod +x "$work/bin-off/git"
+if PATH="$work/bin-off:$PATH" SUBMODULE_TOKEN=X PRIVATE_SUBMODULES="" OWNER=acme bash "$work/fetch/step.1" > "$work/off.log" 2>&1; then
+  echo "FAIL  a submodule at the wrong commit let the step pass"; failures=1
+elif grep -q 'a submodule is not at the pin this commit records' "$work/off.log"; then
+  echo "ok    a submodule that is not at the recorded pin fails the step and is named"
+else echo "FAIL  the step failed without saying why: $(cat "$work/off.log")"; failures=1; fi
 
 exit "$failures"

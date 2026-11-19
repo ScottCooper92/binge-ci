@@ -70,7 +70,9 @@ on:
         description: >
           Lets the agent re-record the screenshot frames of screens the PR itself changed, under a
           narrow gate: every failing frame renders a component this PR's diff (or a submodule bump
-          in it) changed, there are at most 40 of them, and nothing else is red. A large difference
+          in it, when the PR body says `frames from the <submodule> bump`) changed, or is a new frame
+          whose test function or preview this PR added or changed, there are at most 40 of them, and
+          nothing else is red. A large difference
           is fine when the screen is the PR's own, since an intended redesign moves most of its
           pixels. A render or out-of-memory error is not a difference and is always a stop, and so
           is anything outside the gate, as it is with this off. Every re-record posts a comment with
@@ -502,7 +504,18 @@ jobs:
           fi
           export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
 
       # Recorded now, before the agent runs. Read later from origin/<branch>, it would move with any
       # `git fetch` or push the agent makes, and the undo and the "did it commit" check would then
@@ -713,8 +726,17 @@ jobs:
           inputs.rerecord_screenshots &&
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
+          # The pin-bump case needs a sentence in the PR body. The workflow reads the body and hands the agent
+          # only what it found, so the agent needs no way to read it and the body is not put in the prompt.
+          bumps=$(gh pr view "$PR" --json body --jq .body 2> /dev/null \
+                  | grep -oE 'frames from the [A-Za-z0-9._/-]+ bump' | sed -E 's/^frames from the (.*) bump$/\1/' \
+                  | sort -u | paste -sd, - || true)
           delim="EOF_$(openssl rand -hex 8)"
           {
             echo "block<<${delim}"
@@ -731,16 +753,36 @@ jobs:
                format finding or a compile error is a stop.
             2. There are at most 40 failing frames. How much a frame differs does not matter
                when the screen is the PR's own: an intended redesign moves most of its pixels.
-               A frame that is not a difference at all does: an out-of-memory failure, a render
-               or compose error, and a frame that is missing or new are not diffs. Never
-               re-record on one of those, however many other frames differ.
-            3. Every failing frame renders a component whose source this PR changed. Check it
-               yourself: `git diff` against the merge base with the PR's base branch, and, when
-               the PR moves a submodule pin, `git log -p old..new` inside that submodule. The
-               PR body may name the cause, but that is a hint to check and not evidence.
+               A failure that is not a difference at all does: an out-of-memory failure and a
+               render or compose error are not diffs. Never re-record on one of those, however
+               many other frames differ. A missing reference image (`ScreenshotImageNotFoundException`,
+               "Reference image file does not exist") is a new frame, and rule 4 says when it may
+               be recorded.
+            3. Every failing frame that already has a reference renders a component whose source
+               this PR changed. Check it yourself: `git diff` against the merge base with the
+               PR's base branch, and, when the PR moves a submodule pin, `git log -p old..new`
+               inside that submodule. The PR body may name the cause, but that is a hint to check
+               and not evidence. A PR that moves a submodule pin also changes the frames of screens
+               whose own code it did not touch, and the pin is the PR's change: such a frame may be
+               re-recorded when what it shows changed because of what the new pin changed (a
+               component, a theme or a token that `git log -p old..new` shows, which the frame's
+               screen uses), and only when the PR body says `frames from the <submodule> bump`,
+               naming that submodule. The workflow has read the body for you and prints the
+               submodules it names at the end of this block: a submodule that is not in that
+               list gets no allowance. Without that sentence, or without a pin move in the
+               diff, a frame of code this PR did not touch is a stop.
+            4. A new frame, one whose reference image does not exist, may be recorded only when
+               the test function or preview that renders it was added or changed in this PR's
+               diff. Find it in `git diff` against the merge base. A missing reference whose test
+               this PR did not add or change is a stop: something else deleted or renamed it.
 
           Then:
 
+            - Render only with every submodule at the pin this commit records. `git submodule
+              status --recursive` must show no line that starts with `+`, `-` or `U`; if one
+              does, run `git submodule update --init --recursive --force` first. A frame rendered
+              against the old pin of a PR that moves it reads as "no change", and that is not a
+              reason to stop: it means the render did not see the PR's own change.
             - Re-record only the failing classes, never the whole suite: the update task for
               the variant that failed, scoped with `--tests <fully.qualified.Class>` per class
               (for example `./gradlew :app:updateDebugScreenshotTest --tests <Class>`).
@@ -749,17 +791,20 @@ jobs:
               means revert everything and stop.
             - Look before keeping. For each frame, write the old PNG out with
               `git show HEAD:<path> > <tmp>.png` and Read both images. Keep the change only if
-              the difference is confined to the component the PR changed. If it is anywhere
-              else, revert everything and stop.
+              the difference is confined to the component the PR changed, or, for a pin bump,
+              to what the new pin changed. If it is anywhere else, revert everything and stop.
+              A new frame has no old image: Read the new one and keep it only if it shows what
+              its test is for, not a blank screen, an error or a half-rendered layout.
             - Run the matching validate task, scoped the same way, and keep the change only if
               it passes.
 
           You may not edit a suppression file, an allowlist or a test to get there. The only
           files this case lets you write are those reference PNGs.
 
-          In note.md, name each re-recorded frame, its diff percentage, and the change in this
-          PR (file, or submodule commit) it traces to, so a reviewer can check the frames
-          rather than re-derive the cause. If you stopped, say which condition failed.
+          In note.md, name each re-recorded frame, its diff percentage (a new frame has none:
+          say it is new and which test this PR added or changed), and the change in this PR
+          (file, or submodule commit) it traces to, so a reviewer can check the frames rather
+          than re-derive the cause. If you stopped, say which condition failed.
 
           Also write one line per re-recorded frame to the file named below: the frame's
           reference PNG path as `git status` shows it, a tab, and its difference as a plain
@@ -768,6 +813,7 @@ jobs:
           the commit is ignored.
           ${{ runner.temp }}/rerecord.tsv
           GATE
+            printf '\nPR body, read by the workflow: the submodules it names with `frames from the <submodule> bump`: %s\n' "${bumps:-none}"
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
 
@@ -1067,7 +1113,7 @@ jobs:
           # runs this.
           # bound:rerecord-begin
           rerecord_section() { # $1=merge base  $2=commit before the agent  $3=owner/repo  $4=server URL  $5=agent's path<TAB>percent file
-            local mb=$1 before=$2 repo=$3 server=$4 tsv=$5 head status path pct enc shown b_img a_img mb_note="" rows="" odd="" n=0 tick=$'\x60'
+            local mb=$1 before=$2 repo=$3 server=$4 tsv=$5 head status path pct enc shown b_img a_img mb_note="" rows="" added=0 deleted=0 pins="" n=0 tick=$'\x60'
             head=$(git rev-parse HEAD)
             while IFS= read -r -d '' status && IFS= read -r -d '' path; do
               n=$((n + 1))
@@ -1083,8 +1129,8 @@ jobs:
                 b_img="unavailable"
               fi
               a_img="<img src=\"${server}/${repo}/blob/${head}/${enc}?raw=true\" width=\"220\">"
-              if [ "$status" = D ]; then a_img="deleted"; odd="yes"; fi
-              if [ "$status" = A ]; then odd="yes"; fi
+              if [ "$status" = D ]; then a_img="deleted"; deleted=$((deleted + 1)); fi
+              if [ "$status" = A ]; then added=$((added + 1)); fi
               rows+=$(printf '| `%s` | %s | %s | %s |' "$shown" "$b_img" "$a_img" "$pct")$'\n'
             done < <(git diff --name-status --no-renames -z "$before" HEAD -- '*.png')
             [ "$n" -gt 0 ] || return 0
@@ -1092,8 +1138,19 @@ jobs:
             printf '<!-- ci-fix-rerecord:%s -->\n' "$head"
             printf 'Re-recorded %s reference frame(s) in `%s`. Before is the frame at the merge base%s, after is the frame in `%s`. The percentages are what the agent reported from the CI log, not measured here.\n\n' \
               "$n" "${head:0:7}" "$mb_note" "${head:0:7}"
-            if [ -n "$odd" ]; then
-              printf '**This commit adds or deletes a frame. A re-record only changes existing ones, so check these.**\n\n'
+            # A pin bump explains frames of screens whose own code the PR did not touch, so the section says
+            # which submodules the PR moves, for the reviewer to hold the PR body's claim against.
+            if [ -n "$mb" ]; then
+              pins=$(git diff --raw --no-renames -z "$mb" HEAD 2> /dev/null | tr '\0' '\n' | awk '/^:160000 / || /^:[0-9]+ 160000 / { getline p; print p }' | tr '|\140' '__' | paste -sd, - || true)
+            fi
+            if [ "$added" -gt 0 ]; then
+              printf '**This commit adds %s new frame(s). A new frame is expected only when this PR added or changed the test or preview that renders it, so check that each does.**\n\n' "$added"
+            fi
+            if [ "$deleted" -gt 0 ]; then
+              printf '**This commit deletes %s frame(s). A re-record never deletes one, so check these.**\n\n' "$deleted"
+            fi
+            if [ -n "$pins" ]; then
+              printf 'This PR moves the submodule pin of %s. Frames of screens its own code did not touch may differ because of it, and the PR body is to say `frames from the <submodule> bump` when they do.\n\n' "$pins"
             fi
             printf '| Frame | Before | After | Diff |\n| --- | --- | --- | --- |\n%s' "$rows"
           }
@@ -1539,7 +1596,18 @@ jobs:
           fi
           export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
 
       # As in the job above, retried for the same race: the log archive finalizes after workflow_run
       # fires. An unreadable log records no attempt, so re-running CI on the commit tries again.

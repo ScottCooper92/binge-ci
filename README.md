@@ -195,20 +195,28 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
 `rerecord_screenshots: true` on the caller. It is off by default, and nothing changes without it.
 
 - **The gate.** The agent re-records only when nothing else is red, there are at most 40 failing frames,
-  and every failing frame renders a component whose source the PR (or a submodule bump in it) changed.
-  How large the difference is does not matter when the screen is the PR's own: an intended redesign
-  moves most of its pixels. A frame outside the gate stops the run, and so does anything that is not a
-  difference: an out-of-memory failure, a render or compose error, a frame that is missing or new.
+  and every failing frame is one of three cases. It renders a component whose source the PR changed.
+  Or it is a new frame: its reference image does not exist, and the test function or preview that renders it
+  was added or changed in this PR's diff. Or the PR moves a submodule pin, the frame's screen did not
+  need the PR's own code to change because what it shows changed with the new pin (a component, a theme
+  or a token in `git log -p old..new`), and the PR body says `frames from the <submodule> bump`. How large
+  the difference is does not matter when the screen is the PR's own: an intended redesign moves most of
+  its pixels. A frame outside the gate stops the run: one the PR did not touch on a PR with no pin move
+  or no such sentence, a missing reference whose test this PR did not add, and anything that is not a
+  difference, an out-of-memory failure or a render or compose error.
 - **What it changes.** Only the reference PNGs of the failing frames, scoped to those test classes. It
   runs the update task and then the validate task, and looks at the old and new image of each frame.
 - **The record.** After the push, the comment on the PR lists every re-recorded frame with its before (the
   frame at the merge base with the PR's base branch) and after (the frame at the pushed commit) as
   images, and the difference the agent reported. The workflow builds the list from the commit's own
-  diff, so the agent cannot add or hide a frame, and it flags a commit that adds or deletes one. The
+  diff, so the agent cannot add or hide a frame. It says how many frames the commit adds (expected only
+  for a test the PR added) or deletes (never expected), and which submodule pins the PR moves. The
   comment carries `<!-- ci-fix-rerecord:<sha> -->`. The images are links to the files on GitHub, so
   they show for a viewer with access to the repository.
 - **The review.** `bot-review.yml` sees the comment, looks at each frame and judges it against what the
-  PR says it changes. A frame that differs somewhere the change does not explain is a finding. The
+  PR says it changes. A frame that differs somewhere the change does not explain is a finding. A pin-bump
+  frame is explained only when the PR body says `frames from the <submodule> bump` and the frame shows
+  what the pin changed, and a new frame only when the PR added the test that renders it. The
   rules for this are in the workflow's own prompt, so a consumer's review guide needs no change: the
   guide is the consumer's own file, and a rule kept there would be missing for every other repository.
 - **The consumer's half.** The caller's `gate_rules` and the triage table of its
@@ -218,6 +226,27 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
   | A screenshot test fails | The rendering changed | If `rerecord_screenshots` is on and every failing frame is a screen this PR changed, re-record only those frames, as the prompt says. Otherwise stop and name the frames. Never re-record on a render error or an out-of-memory failure |
 
   Drop "Do not touch any screenshot baseline PNG, and never run the update task" from `gate_rules`.
+
+### Recording screenshots on a runner
+
+A cloud worker cannot build an app whose submodules are private, so it cannot record a new or changed screenshot
+frame. `record-screenshots.yml` does it on a CI runner, for a maintainer. The caller (`callers/example/record-screenshots.yml`)
+is a `workflow_dispatch` with two inputs: the branch, and a Gradle `--tests` filter such as `com.example.home.*ScreenshotTest`.
+
+- **Who can start it.** Only a person with write access: the dispatch needs it, and the workflow checks again that the
+  event is a dispatch, the sender is a user and not a bot, and the user's permission is write or better. No bot starts it
+  and no pull request can. It refuses the default branch and an unsafe filter (letters, digits and `_ . * $ ,` only).
+- **What it does.** It checks out the branch, fetches every submodule at the pin the branch records, compiles the
+  screenshot sources, stops the daemon so the render gets a JVM of its own, and runs the record task with one `--tests`
+  per filter. Then it commits the changed PNGs, with a message naming the filter, and pushes the branch.
+- **What it will not do.** It stages only PNG files. Any other file the run changed, tracked or new, fails the run and is
+  listed. The push is never forced, so a branch that moved under the run is a rejected push, not a lost commit. The
+  push uses the author app's token, so CI starts on the new commit like on any push.
+- **What it says.** The step summary lists the frames. The pull request for the branch gets one comment saying what
+  happened: recorded, nothing changed, a refusal or a failure, with the run's link.
+- **The caller grants** `contents: read` and `pull-requests: write`, and passes `AUTHOR_APP_ID` and
+  `AUTHOR_APP_PRIVATE_KEY`, and `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` when `private_submodules` is set. The
+  tasks default to the `:app` module; a multi-module app names its own in `compile_tasks` and `record_tasks`.
 
 ### A runner-local Claude Code cache
 
@@ -317,7 +346,8 @@ drifted a word at a time, so they live here too:
 | `fork-review.yml` | reusable workflow | An advisory, read-only review of a fork PR, after a maintainer labels it. Two callers, one for the untrusted `pull_request` stage and one for the trusted `workflow_run` stage, both in `callers/example/`; each needs `contents: read`, `actions: read` and `pull-requests: write`. See [docs/fork-review.md](docs/fork-review.md). |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
-| `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks`, the unit `tests` and the screenshot validation in `screenshot_shards` shards as jobs of their own (the release build and the aggregate follow in a later part, so do not call it before the release that holds them). Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see `callers/example/android-app-ci.yml`. |
+| `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks`, the unit `tests`, the screenshot validation in `screenshot_shards` shards and the release build as jobs of their own, and a `result` job that says whether each did what `changes` asked for. Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see "App CI" below and `callers/example/android-app-ci.yml`. |
+| `record-screenshots.yml` | reusable workflow | A maintainer runs it to record screenshot frames on a CI runner, for an app whose submodules a cloud worker cannot fetch: `updateDebugScreenshotTest --tests <filter>` on a branch with every submodule at its pin, then one commit of the changed PNGs. Dispatch only, for a person with write access, never on the default branch, no non-PNG file, no forced push. Grant `contents: read` and `pull-requests: write`; pass the author app secrets (and the reviewer app's when `private_submodules` is set). See "Recording screenshots on a runner" below. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
@@ -347,7 +377,7 @@ secrets: inherit
 ```
 
 - It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
-  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml`, `android-app-ci.yml` and `consumer-check.yml`. In
+  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml`, `android-app-ci.yml`, `record-screenshots.yml` and `consumer-check.yml`. In
   `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules; see
   "Private consumers" below for those.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.
@@ -583,6 +613,41 @@ detektGate {
   a line with a real reason is accepted, and one without a reason is a question. The rule is written by the workflow
   and not read from the repository, so a PR cannot edit it, and the index is refused as a path a PR may change when CI
   does not build it. Set it in the caller beside `conventions_path`.
+
+### App CI
+
+`android-app-ci.yml` is the CI of an Android app, kept once. An app's own `ci.yml` is a thin caller: its triggers, its
+paths and its Gradle tasks, and one job that says whether the run passed. `callers/example/android-app-ci.yml` is the
+worked one.
+
+The jobs run in parallel after `changes`:
+
+| Job | What it runs | When |
+| --- | --- | --- |
+| `changes` | the `changed-files` action | always, except a draft pull request |
+| `checks` | `checks_tasks`: `build` less the tasks the other jobs own | `product` |
+| `tests` | `tests_tasks`: the unit tests and the coverage check | `product` |
+| `screenshots` | `screenshot_shards` shards of the screenshot validation, each in a JVM of its own | `screens` |
+| `release` | `release_tasks`: the release build, with R8 and its keep rules | `release` |
+| `result` | nothing: it checks each job did what `changes` asked for | always, except a draft pull request |
+
+- **Routing.** `changes` decides from the paths a pull request touched. `product_none` and `no_frames` are the paths
+  that cannot affect a job, `release_inputs` the only paths that can reach the release build. A push to the default
+  branch and the nightly run everything. There is no `paths-ignore`: the review bot needs a successful run against every
+  head, so the run always happens and a job `changes` did not clear is skipped.
+- **`result`** is green only when `changes` succeeded, every job it cleared succeeded, and every job it did not clear was
+  skipped. A job that ran when it should not have fails it, and so does a skip `changes` did not order.
+- **The required check is the caller's.** A reusable workflow's jobs reach branch protection as `<caller job> / <job>`,
+  so a required check named `build` has to be a job of the caller's own. The worked caller's `build` needs the shared
+  run (`ci`), the pin check and actionlint, and passes only if each succeeded or, for the last two, was skipped. The pin
+  check, actionlint and the nightly report are jobs of the caller, where they are shared steps of their own.
+- **A self-hosted runner** is one input, `runner`, a JSON array as in the other workflows. Every job runs on it, starts
+  from a clean checkout and ends by stopping its Gradle daemon. The workflow assumes one runner per user and Gradle home,
+  since `./gradlew --stop` stops every daemon of that Gradle version in the home. Heap is a `*_jvmargs` input per
+  Gradle job, empty by default, which leaves the project's `gradle.properties` alone. The runner needs `git`, `jq`, `gh`
+  and a JDK on PATH.
+- **The caller grants** `contents: read` and `actions: read`, and passes `REVIEWER_APP_ID` and
+  `REVIEWER_APP_PRIVATE_KEY` when `private_submodules` is set. `tools/check-callers.sh` checks the worked caller.
 
 ## Its own gate
 
