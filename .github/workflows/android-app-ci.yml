@@ -479,8 +479,8 @@ jobs:
           read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
           [ "${#args[@]}" -gt 0 ] || { echo "::error::screenshot_validate_tasks is empty."; exit 1; }
           [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          [ -n "$FILTERS" ] || { echo "::error::this shard has classes but no filters."; exit 1; }
           mapfile -t filters <<< "$FILTERS"
-          [ "${#filters[@]}" -gt 0 ] || { echo "::error::this shard has classes but no filters."; exit 1; }
           # The compile's JVM goes before the render's starts.
           ./gradlew --stop
           ./gradlew "${args[@]}" "${filters[@]}"

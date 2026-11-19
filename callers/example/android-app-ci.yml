@@ -11,7 +11,9 @@ name: CI
 # are shared steps of their own, and a skip passes for each (the pin check outside a pull request, and
 # actionlint on the nightly).
 #
-# Move to a self-hosted runner by changing `runner` alone. No `paths-ignore`: bot-review needs a
+# Move the build jobs to a self-hosted runner by changing `runner` alone. The small jobs of this file (the pin
+# check, actionlint, `build`, the nightly report) read no build output and stay on a hosted runner unless
+# their `runs-on` changes too. No `paths-ignore`: bot-review needs a
 # successful run of this workflow against every head, so the shared workflow decides which jobs a diff
 # can affect and skips the rest, and the run itself always happens.
 on:
@@ -60,6 +62,9 @@ jobs:
       # An app with several modules names its tasks here. These are the defaults:
       # checks_tasks: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
       # tests_tasks: testDebugUnitTest koverVerify --continue
+      # A multi-module app names its modules in the screenshot tasks too, since the defaults name `:app`:
+      # screenshot_compile_tasks: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      # screenshot_validate_tasks: :app:validateDebugScreenshotTest --continue
       # The screenshot validation runs in shards, each in a JVM of its own. These are the defaults:
       # screenshot_shards: 3
       # screenshot_test_dir: app/src/screenshotTest
