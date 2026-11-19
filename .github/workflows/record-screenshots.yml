@@ -13,7 +13,8 @@ name: Record screenshots
 # What it will not do. It never pushes to the default branch, it never forces a push, and it commits
 # nothing but PNG files: any other change the run leaves behind (a lock file, a generated source) fails the
 # run and is listed, rather than riding into the commit. The push uses the author app's token, not
-# GITHUB_TOKEN, so the commit starts CI on the branch like any other push.
+# GITHUB_TOKEN, so the commit starts CI on the branch like any other push. The token is named in the push step
+# itself: a push made with GITHUB_TOKEN starts no workflow, and a consumer's required check would never run.
 #
 # The caller must grant `contents: read` and `pull-requests: write` (the report on the pull request) and
 # pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`, and `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`
@@ -247,6 +248,8 @@ jobs:
         env:
           REF: ${{ inputs.ref }}
           TESTS: ${{ inputs.tests }}
+          APP_TOKEN: ${{ steps.token.outputs.token }}
+          SERVER_URL: ${{ github.server_url }}
         run: |
           set -euo pipefail
           other=()
@@ -272,6 +275,17 @@ jobs:
           git add -- "${pngs[@]}"
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -q -m "chore: record screenshots for $TESTS"
+          # The push is made with the author app's installation token, named here and not left to whatever the
+          # checkout persisted: a push made with GITHUB_TOKEN starts no workflow, so the consumer's CI would not run
+          # on the new head and its required check would never report. The empty entry first clears any header
+          # a broader source left for this host, so exactly one goes out. The token travels in the environment of
+          # this step alone, never in argv or a git config file.
+          basic=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          n=${GIT_CONFIG_COUNT:-0}
+          export "GIT_CONFIG_KEY_$n=http.${SERVER_URL}/.extraheader" "GIT_CONFIG_VALUE_$n="
+          export "GIT_CONFIG_KEY_$((n + 1))=http.${SERVER_URL}/.extraheader" "GIT_CONFIG_VALUE_$((n + 1))=AUTHORIZATION: basic $basic"
+          export GIT_CONFIG_COUNT=$((n + 2)) GIT_TERMINAL_PROMPT=0
           # Not forced: a branch that moved since the run began is a rejected push, and the report says so.
           git push origin "HEAD:refs/heads/$REF"
           sha=$(git rev-parse HEAD)
@@ -283,6 +297,8 @@ jobs:
             echo "### Recorded ${#pngs[@]} frame(s) on \`$REF\` at \`${sha:0:7}\`"
             echo
             echo "Filter: \`$TESTS\`"
+            echo
+            echo "Pushed with the author app's installation token, so CI starts on the new head."
             echo
             git diff --name-status --no-renames HEAD~1 HEAD | sed 's/^\(.\)\t\(.*\)$/- `\1` `\2`/'
           } >> "$GITHUB_STEP_SUMMARY"
