@@ -187,7 +187,7 @@ If the run log stops at the token step, the release App's secrets are not set up
 
 State to check by hand: \`git ls-remote --tags origin $VERSION v1\` and the \`stable\` branch. The order is the release tag, then \`v1\`, then \`stable\`; nothing after a failed step ran. Re-running the workflow resumes a release that was tagged in part, and refuses one whose tag names another commit."
   existing=$(gh issue list --repo "$REPO" --state open --limit 100 --json number,body \
-               --jq "[.[] | select(.body | contains(\"$marker\"))] | .[0].number // empty") \
+               | jq -r --arg m "$marker" '[.[] | select(.body | contains($m))] | .[0].number // empty') \
     || die "could not look for an existing issue."
   if [ -n "$existing" ]; then
     gh issue comment "$existing" --repo "$REPO" --body "Failed again: $RUN_URL" > /dev/null
