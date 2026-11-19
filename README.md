@@ -574,6 +574,14 @@ detektGate {
   components go in the design system, never in the app."
 - **The PR line.** A PR that adds a composable outside the design system carries one line in its body, `Design system:
   <component> - <why it did not fit>`, naming what it checked. Each consumer adds it to its PR template.
+- **The review rule.** `bot-review.yml` takes `design_system_index`, the path in the calling repository of the document
+  that indexes the design system's components (`design-system/docs/components.md` in a consumer that has the design
+  system as a submodule). Empty, the default, changes nothing. When it is set the review reads the index from the
+  default branch and asks, as a judgement and not a name match, whether the UI the PR adds duplicates a component the
+  index offers. A duplicate with no `Design system:` line is a request for changes naming the file and the component;
+  a line with a real reason is accepted, and one without a reason is a question. The rule is written by the workflow
+  and not read from the repository, so a PR cannot edit it, and the index is refused as a path a PR may change when CI
+  does not build it. Set it in the caller beside `conventions_path`.
 
 ## Its own gate
 
