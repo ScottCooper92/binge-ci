@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
 # Holds the step that lets a self-hosted runner reuse one Claude Code and Bun install across jobs.
-# The script is in the agent-claude-cache action. Each agent job still carries an inline copy, since a
-# new action has no release tag to pin until a release, so this requires each copy to equal the script,
-# ties each one to the pin of the claude-code-action step it serves, and runs the script against a
-# stubbed installer: variable unset, cold cache, warm cache, two jobs at
+# The script is in the agent-claude-cache action, and each agent job calls the action at this repository's
+# release tag. This ties each call to the pin of the claude-code-action step it serves, and runs the
+# script against a stubbed installer: variable unset, cold cache, warm cache, two jobs at
 # once, a corrupted file, a failed install, an unreadable version, and pruning.
 set -euo pipefail
 
@@ -15,10 +14,9 @@ failures=0
 fail() { echo "FAIL  $1"; failures=$((failures + 1)); }
 ok() { echo "ok    $1"; }
 
-mkdir "$work/steps"
-python3 -I - "$root" "$work/steps" <<'PY' || failures=$((failures + 1))
+python3 -I - "$root" <<'PY' || failures=$((failures + 1))
 import sys, yaml
-root, out = sys.argv[1:3]
+root = sys.argv[1]
 bad, n = [], 0
 for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]:
     doc = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))
@@ -38,17 +36,18 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
         c = cache[0]
         s = steps[c]
         n += 1
-        open(f"{out}/step.{n}", "w").write(s["run"])
         if s.get("id") != "cc_cache":
             bad.append(f"{where}: the cache step has no `id: cc_cache`")
-        if s.get("env", {}).get("ACTION_REF") != pin:
-            bad.append(f"{where}: ACTION_REF is not the pin of the claude-code-action step ({pin})")
+        if not str(s.get("uses", "")).startswith("ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v"):
+            bad.append(f"{where}: the cache step does not call the agent-claude-cache action at a release tag")
+        if "run" in s:
+            bad.append(f"{where}: the cache step carries an inline script again; it belongs in the action")
+        if s.get("with", {}).get("action_ref") != pin:
+            bad.append(f"{where}: action_ref is not the pin of the claude-code-action step ({pin})")
         if not c < a:
             bad.append(f"{where}: the cache step must come before the agent step")
         if s.get("timeout-minutes") != 10 or s.get("continue-on-error") is not True:
             bad.append(f"{where}: the cache step must be capped at 10 minutes and allowed to fail, so a slow download is left to the agent step's own install")
-        if "timeout --foreground" in s["run"]:
-            bad.append(f"{where}: `timeout --foreground` signals only its direct child, and the pipeline's curl would outlive it")
         if limits and not c < limits[0]:
             bad.append(f"{where}: the cache step must come before the step that sets curl's limits, which would cut the download short")
         if s.get("if") != steps[a].get("if"):
@@ -66,6 +65,8 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "bot-review"]
     total, agent = inputs["timeout_minutes"]["default"], inputs["agent_timeout_minutes"]["default"]
     if total - agent < 19:
         bad.append(f"{wf}: timeout_minutes ({total}) leaves {total - agent} minutes beyond agent_timeout_minutes ({agent}); a cold cache install needs 10 on top of ~9 for setup and downstream steps")
+if "timeout --foreground" in open(f"{root}/.github/actions/agent-claude-cache/claude-cache.sh").read():
+    bad.append("the cache script uses `timeout --foreground`, which signals only its direct child, and the pipeline's curl would outlive it")
 # A fork PR's text reaches the agent there, and the cache outlives the job.
 fork = open(f"{root}/.github/workflows/fork-review.yml").read()
 if "BINGE_CI_CLAUDE_CODE_CACHE" in fork or "cc_cache" in fork:
@@ -76,15 +77,6 @@ print(f"ok    {n} agent jobs carry the cache step" if not bad else "")
 sys.exit(1 if bad or n != 5 else 0)
 PY
 script="$root/.github/actions/agent-claude-cache/claude-cache.sh"
-# The script is the step's body behind a header of comments; the body starts at its `set` line.
-tail -n +"$(grep -n '^set -uo pipefail' "$script" | head -n 1 | cut -d: -f1)" "$script" > "$work/script-body"
-same=true
-for copy in "$work"/steps/step.*; do cmp -s "$work/script-body" "$copy" || same=false; done
-if [ "$same" = true ] && [ "$(ls "$work"/steps/step.* | wc -l)" -eq 5 ]; then
-  ok "the cache step is the action's script in all five agent jobs"
-else
-  fail "an inline cache step differs from the action's script"
-fi
 step="$script"
 
 # A runner: <root>/_work/<repo> as the workspace, the action's checkout beside it under _actions.
