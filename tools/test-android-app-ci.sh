@@ -84,6 +84,7 @@ if not any("pinned" in b or "pin" in b for b in bad):
     ok.append("every action is pinned")
 
 # The worked caller: a job of its own named `build` that fails unless the shared run passed.
+before = len(bad)
 cjobs = caller["jobs"]
 build = cjobs.get("build")
 if build is None or build.get("needs") != "ci" or "always()" not in str(build.get("if", "")):
@@ -92,7 +93,7 @@ elif "needs.ci.result" not in str(build["steps"]):
     bad.append("the worked caller's `build` does not read the shared run's result")
 if caller.get("name") != "CI":
     bad.append("the worked caller's workflow is not named `CI`, which the bots match by name")
-else:
+if len(bad) == before:
     ok.append("the worked caller keeps `CI` and a `build` job of its own")
 
 for line in ok:

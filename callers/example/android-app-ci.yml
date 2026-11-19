@@ -71,5 +71,6 @@ jobs:
         env:
           RESULT: ${{ needs.ci.result }}
         run: |
+          set -euo pipefail
           echo "ci: $RESULT"
           [ "$RESULT" = success ]

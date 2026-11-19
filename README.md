@@ -357,7 +357,7 @@ secrets: inherit
   private repositories only, since their write token fetches the caller.
 - The read-only workflows (`bot-review.yml`, `submodule-pins.yml`, `device-smoke.yml`,
   `android-app-ci.yml`, `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
-  three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
+  four that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
   secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
 - The author bots and `submodule-bump.yml` check out and push with their app token, which reaches the
   calling repository alone with or without the input. For the listed repositories they mint a second

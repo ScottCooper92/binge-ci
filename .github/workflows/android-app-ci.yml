@@ -29,9 +29,13 @@ name: Android app CI
 # the heap is a per-job input. A self-hosted runner needs `git`, `jq` and a JDK on PATH, and `gh` for
 # `changes`. Hosted images carry all of them.
 #
-# The caller must grant `contents: read` and `actions: read`. `changes` reads the pull request's earlier
-# runs from the Actions API, and without the permission its baseline falls back to the merge base,
-# which is sound and runs more.
+# The caller must grant `contents: read` and `actions: read`: this workflow declares both, and a caller
+# that holds less fails at startup with nothing on the PR. `actions: read` is what `changes` reads the
+# pull request's earlier runs with.
+#
+# One runner per user and Gradle home is assumed. A job ends with `./gradlew --stop`, which stops every
+# daemon of that Gradle version in the user's Gradle home, so two runner instances sharing one home
+# could stop each other's build.
 on:
   workflow_call:
     inputs:
@@ -90,7 +94,9 @@ on:
         description: >
           The Gradle arguments of the checks job. The default runs `build` less the tasks the other jobs own,
           so a gate added to `check` lands here. Name modules (`:app:build`) as the app needs; whitespace
-          separates arguments, and there is no quoting.
+          separates arguments, and there is no quoting. `build` also reaches the unit tests of the other
+          variants (`testReleaseUnitTest`) through `check`: an app that does not want them here adds
+          `-x testReleaseUnitTest`.
         type: string
         default: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
       tests_tasks:
@@ -301,7 +307,7 @@ jobs:
       # and the artifact below expires in a day, so a failed run says what leaked in its own log.
       - name: Print the coroutine leak report
         if: ${{ failure() }}
-        run: cat ./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt 2>/dev/null || echo "No coroutine leak was reported."
+        run: cat ./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt ./*/*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt 2>/dev/null || echo "No coroutine leak was reported."
 
       - name: Upload reports
         if: ${{ failure() }}
