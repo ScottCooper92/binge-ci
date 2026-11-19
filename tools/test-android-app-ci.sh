@@ -194,5 +194,8 @@ result_row skipped skipped skipped skipped skipped true true true fail "a skippe
 result_row success failure success success success true true true fail "a failed job fails"
 result_row success success success cancelled success true true true fail "a cancelled job fails"
 result_row success success success success success "" true true fail "an empty answer from changes fails"
+# A mismatch is annotated with the job that was wrong, so the checks UI points at the cause.
+msg=$(CHANGES=success CHECKS=success TESTS=success SCREENSHOTS=success RELEASE=skipped RUN_PRODUCT=true RUN_SCREENS=true RUN_RELEASE=true bash "$work/result.sh" 2>&1 || true)
+if grep -q '::error::release was skipped, but changes cleared it' <<< "$msg"; then echo "ok    a mismatch is annotated with the job that was wrong"; else echo "FAIL  no annotation naming the job: $msg"; failures=$((failures + 1)); fi
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"

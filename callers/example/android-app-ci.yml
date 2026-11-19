@@ -63,6 +63,7 @@ jobs:
       # checks_tasks: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
       # tests_tasks: testDebugUnitTest koverVerify --continue
       # A multi-module app names its modules in the screenshot tasks too, since the defaults name `:app`:
+      # release_tasks: assembleRelease --continue
       # screenshot_compile_tasks: :app:compileDebugScreenshotTestKotlin --max-workers=2
       # screenshot_validate_tasks: :app:validateDebugScreenshotTest --continue
       # The screenshot validation runs in shards, each in a JVM of its own. These are the defaults:

@@ -599,7 +599,7 @@ The jobs run in parallel after `changes`:
 | `tests` | `tests_tasks`: the unit tests and the coverage check | `product` |
 | `screenshots` | `screenshot_shards` shards of the screenshot validation, each in a JVM of its own | `screens` |
 | `release` | `release_tasks`: the release build, with R8 and its keep rules | `release` |
-| `result` | nothing: it checks each job did what `changes` asked for | always |
+| `result` | nothing: it checks each job did what `changes` asked for | always, except a draft pull request |
 
 - **Routing.** `changes` decides from the paths a pull request touched. `product_none` and `no_frames` are the paths
   that cannot affect a job, `release_inputs` the only paths that can reach the release build. A push to the default

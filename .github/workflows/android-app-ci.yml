@@ -609,10 +609,15 @@ jobs:
           for answer in "$RUN_PRODUCT" "$RUN_SCREENS" "$RUN_RELEASE"; do
             [ "$answer" = true ] || [ "$answer" = false ] || exit 1
           done
+          # $1 = job, $2 = its result, $3 = what `changes` said about it. The annotation names the job that was wrong.
           wanted() {
-            if [ "$2" = true ]; then [ "$1" = success ]; else [ "$1" = skipped ]; fi
+            if [ "$3" = true ]; then
+              [ "$2" = success ] || { echo "::error::$1 was $2, but changes cleared it, so it had to succeed."; exit 1; }
+            else
+              [ "$2" = skipped ] || { echo "::error::$1 was $2, but changes did not clear it, so it had to be skipped."; exit 1; }
+            fi
           }
-          wanted "$CHECKS" "$RUN_PRODUCT" || exit 1
-          wanted "$TESTS" "$RUN_PRODUCT" || exit 1
-          wanted "$SCREENSHOTS" "$RUN_SCREENS" || exit 1
-          wanted "$RELEASE" "$RUN_RELEASE" || exit 1
+          wanted checks "$CHECKS" "$RUN_PRODUCT"
+          wanted tests "$TESTS" "$RUN_PRODUCT"
+          wanted screenshots "$SCREENSHOTS" "$RUN_SCREENS"
+          wanted release "$RELEASE" "$RUN_RELEASE"
