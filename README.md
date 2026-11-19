@@ -241,7 +241,9 @@ is a `workflow_dispatch` with two inputs: the branch, and a Gradle `--tests` fil
   per filter. Then it commits the changed PNGs, with a message naming the filter, and pushes the branch.
 - **What it will not do.** It stages only PNG files. Any other file the run changed, tracked or new, fails the run and is
   listed. The push is never forced, so a branch that moved under the run is a rejected push, not a lost commit. The
-  push uses the author app's token, so CI starts on the new commit like on any push.
+  push is made with the author app's installation token, named in the step and not left to the checkout's persisted
+  credential, so CI starts on the new commit like on any push. A push made with `GITHUB_TOKEN` starts no workflow, which
+  would leave the pull request's required check missing; the workflow does not dispatch CI as a fallback.
 - **What it says.** The step summary lists the frames. The pull request for the branch gets one comment saying what
   happened: recorded, nothing changed, a refusal or a failure, with the run's link.
 - **The caller grants** `contents: read` and `pull-requests: write`, and passes `AUTHOR_APP_ID` and
