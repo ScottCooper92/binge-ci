@@ -57,6 +57,10 @@ jobs:
       # An app with several modules names its tasks here. These are the defaults:
       # checks_tasks: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
       # tests_tasks: testDebugUnitTest koverVerify --continue
+      # The screenshot validation runs in shards, each in a JVM of its own. These are the defaults:
+      # screenshot_shards: 3
+      # screenshot_test_dir: app/src/screenshotTest
+      # screenshot_reference_dir: app/src/screenshotTestDebug/reference
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

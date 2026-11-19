@@ -6,7 +6,7 @@ name: Android app CI
 # the same shape, drifting a word at a time. This is that shape once; an app calls it through a thin
 # caller (callers/example/android-app-ci.yml) and names its own modules, Gradle tasks and paths.
 #
-# Built up in parts. This part is the routing, the checks and the tests; the screenshot shards, the
+# Built up in parts. This part is the routing, the checks, the tests and the screenshot shards; the
 # release build and the aggregate that says the whole run passed follow, and nothing should call it
 # before the release that holds them.
 #
@@ -115,20 +115,55 @@ on:
         description: The same for the tests job.
         type: string
         default: ''
+      screenshot_shards:
+        description: >
+          How many shards the screenshot validation is split into, each a job of its own with a JVM of its
+          own. The render holds every frame's native memory until its JVM exits, so one JVM for the whole
+          suite grows with the suite and, past what a runner has, stalls and is cancelled with no log. A
+          whole number from 1 to 32. More shards than classes leaves some empty; an empty one passes.
+        type: number
+        default: 3
+      screenshot_test_dir:
+        description: Where the screenshot test classes are, relative to the workspace.
+        type: string
+        default: app/src/screenshotTest
+      screenshot_reference_dir:
+        description: Where the reference PNGs are, relative to the workspace.
+        type: string
+        default: app/src/screenshotTestDebug/reference
+      screenshot_compile_tasks:
+        description: >
+          The Gradle arguments that compile the screenshot sources, run before the validation in a JVM of its
+          own so a cold compile and the render do not share one and run it out of memory.
+        type: string
+        default: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      screenshot_validate_tasks:
+        description: >
+          The Gradle arguments that validate the frames. A shard's `--tests` filters are added after them.
+        type: string
+        default: :app:validateDebugScreenshotTest --continue
+      screenshots_jvmargs:
+        description: The same as `checks_jvmargs`, for the screenshot shards. This is the job that runs a runner out of memory.
+        type: string
+        default: ''
       checks_timeout_minutes:
-        description: The checks job's timeout, in minutes.
+        description: Minutes before the checks job is stopped.
         type: number
         default: 30
       tests_timeout_minutes:
-        description: The tests job's timeout, in minutes.
+        description: Minutes before the tests job is stopped.
         type: number
         default: 30
+      screenshots_timeout_minutes:
+        description: Per shard. A successful run takes 11 to 16 minutes unsharded, and a slow runner has taken twice that.
+        type: number
+        default: 20
     secrets:
       REVIEWER_APP_ID:
         description: Only read when `private_submodules` is set, to mint the read-only submodule token.
         required: false
       REVIEWER_APP_PRIVATE_KEY:
-        description: Only read when `private_submodules` is set, with `REVIEWER_APP_ID`.
+        description: The private key of the app `REVIEWER_APP_ID` names. Read with it.
         required: false
     outputs:
       product:
@@ -158,6 +193,7 @@ jobs:
       product: ${{ steps.classify.outputs.product }}
       screens: ${{ steps.classify.outputs.screens }}
       release: ${{ steps.classify.outputs.release }}
+      shards: ${{ steps.shards.outputs.shards }}
     steps:
       # The whole history, no submodules: the diff needs a merge base, and nothing here builds.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,6 +211,18 @@ jobs:
           workflow: ${{ inputs.ci_workflow_file }}
           green_job: ${{ inputs.green_job }}
 
+      # The matrix of the screenshots job, from the input. Checked here, once, because a matrix built from a
+      # bad value fails every shard with a message about the matrix and none about the input.
+      - name: Name the screenshot shards
+        id: shards
+        env:
+          SHARDS: ${{ inputs.screenshot_shards }}
+        run: |
+          set -euo pipefail
+          [[ $SHARDS =~ ^[0-9]+$ ]] && [ "$SHARDS" -ge 1 ] && [ "$SHARDS" -le 32 ] \
+            || { echo "::error::screenshot_shards must be a whole number from 1 to 32, not '$SHARDS'."; exit 1; }
+          list=$(seq 0 $((SHARDS - 1)) | paste -sd, -)
+          echo "shards=[$list]" >> "$GITHUB_OUTPUT"
   # `build` minus what the other jobs own: compile, lint, detekt and its baseline-staleness check, ktlint
   # and whatever else the app wires into `check`. The one job that saves the Gradle cache; the others
   # restore it, so a push writes one copy of the Gradle home (1 to 3.5 GB) and not one per job.
@@ -311,12 +359,15 @@ jobs:
       - name: Print the coroutine leak report
         if: ${{ failure() }}
         run: |
-          # No -e: this step only reports. A glob that matches nothing is skipped, so the fallback line is
-          # printed only when no report exists, and never after one.
+          # No -e: this step reports, and a missing report is the common case.
           set -uo pipefail
           shopt -s nullglob
           reports=(./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt ./*/*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt)
-          if [ "${#reports[@]}" -gt 0 ]; then cat "${reports[@]}"; else echo "No coroutine leak was reported."; fi
+          if [ "${#reports[@]}" -gt 0 ]; then
+            cat "${reports[@]}"
+          else
+            echo "No coroutine leak was reported."
+          fi
 
       - name: Upload reports
         if: ${{ failure() }}
@@ -326,6 +377,107 @@ jobs:
           path: |
             **/build/reports/tests/**
             **/build/reports/kover/**
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
+
+  # The screenshot frames, in shards. Each shard validates its share of the test classes in a JVM of its
+  # own, and `fail-fast` is off so one red shard does not hide what the others found.
+  screenshots:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.screens == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.screenshots_timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.shards) }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
+          clean: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+
+      # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
+      # suite, which is what sharding avoids. So it skips Gradle and passes.
+      - name: Pick this shard's test classes
+        id: shard
+        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.51
+        with:
+          shards: ${{ inputs.screenshot_shards }}
+          index: ${{ matrix.shard }}
+          test_dir: ${{ inputs.screenshot_test_dir }}
+          reference_dir: ${{ inputs.screenshot_reference_dir }}
+
+      # With no Gradle cache, a cold compile and the screenshot render shared one VM and ran it out of memory.
+      - name: Compile the screenshot sources
+        if: steps.shard.outputs.empty != 'true'
+        env:
+          TASKS: ${{ inputs.screenshot_compile_tasks }}
+          JVMARGS: ${{ inputs.screenshots_jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::screenshot_compile_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      - name: Validate the screenshots (shard ${{ matrix.shard }} of ${{ inputs.screenshot_shards }})
+        if: steps.shard.outputs.empty != 'true'
+        env:
+          TASKS: ${{ inputs.screenshot_validate_tasks }}
+          JVMARGS: ${{ inputs.screenshots_jvmargs }}
+          FILTERS: ${{ steps.shard.outputs.filters }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::screenshot_validate_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          mapfile -t filters <<< "$FILTERS"
+          [ "${#filters[@]}" -gt 0 ] || { echo "::error::this shard has classes but no filters."; exit 1; }
+          # The compile's JVM goes before the render's starts.
+          ./gradlew --stop
+          ./gradlew "${args[@]}" "${filters[@]}"
+
+      - name: Upload reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports-screenshots-${{ matrix.shard }}
+          path: |
+            **/build/outputs/screenshotTest-results/**/diffs/**
           if-no-files-found: ignore
           retention-days: 1
 
