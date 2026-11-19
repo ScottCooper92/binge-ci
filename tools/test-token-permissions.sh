@@ -144,7 +144,7 @@ bot_fixture bump-split submodule-bump.yml "$plain_write
 $read_mint"
 expect bump-split pass
 
-# The submodule fetch step the author bots share. Each of the five copies must be the same, no checkout
+# The submodule fetch step the author bots share. Each of the six copies must be the same, no checkout
 # may fetch submodules itself (that would use the write token), and the step, run against a stubbed
 # `git`, must give the read token to the listed repositories only: never on a broader URL key.
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -153,7 +153,7 @@ python3 -I - "$root" "$work/fetch" <<'PY' || failures=1
 import sys, yaml
 root, out = sys.argv[1:3]
 n, bad = 0, []
-for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retarget"]:
+for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retarget", "record-screenshots"]:
     doc = yaml.safe_load(open(f"{root}/.github/workflows/{wf}.yml"))
     for job, body in doc["jobs"].items():
         steps = body.get("steps", [])
@@ -176,12 +176,12 @@ for wf in ["author-ci-fix", "author-comments", "author-conflicts", "author-retar
 for b in bad:
     print("FAIL  " + b)
 print(f"{n} fetch steps found")
-sys.exit(1 if bad or n != 5 else 0)
+sys.exit(1 if bad or n != 6 else 0)
 PY
 same=true
 for copy in "$work"/fetch/step.*; do cmp -s "$work/fetch/step.1" "$copy" || same=false; done
-if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 5 ] && [ "$same" = true ]; then
-  echo "ok    the fetch step is the same in all five places"
+if [ "$(ls "$work"/fetch/step.* 2>/dev/null | wc -l)" -eq 6 ] && [ "$same" = true ]; then
+  echo "ok    the fetch step is the same in all six places"
 else
   echo "FAIL  the fetch step differs between jobs"; failures=1
 fi

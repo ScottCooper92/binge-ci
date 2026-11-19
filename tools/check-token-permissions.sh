@@ -36,7 +36,7 @@ GRANTS = {
 
 # The workflows whose write token must reach the calling repository alone.
 AUTHOR_BOTS = {"author-ci-fix.yml", "author-comments.yml", "author-conflicts.yml", "author-retarget.yml",
-               "submodule-bump.yml"}
+               "submodule-bump.yml", "record-screenshots.yml"}
 REPOS = re.compile(r'^\s*repositories:(.*)$')
 
 USES = re.compile(r'^(\s*(?:-\s+)?)uses:\s*actions/create-github-app-token@')

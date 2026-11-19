@@ -1,0 +1,42 @@
+name: Record screenshots
+
+# Records the screenshot frames of the tests you name, on a CI runner, and commits only the changed PNGs
+# to the branch. Run it from the Actions tab: pick the branch, type a `--tests` filter such as
+# `com.example.home.*ScreenshotTest`, run. Nothing else starts it: a `workflow_dispatch` needs write
+# access, the shared workflow checks the sender is a person with write permission, and it refuses the
+# default branch.
+#
+# The dispatch inputs are this file's, since a reusable workflow cannot declare a trigger of its own.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch to record on (empty records on the branch this was run from). Never the default branch.
+        type: string
+        default: ''
+      tests:
+        description: Gradle --tests filters, comma-separated (class names or patterns with *)
+        type: string
+        required: true
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  record:
+    uses: ScottCooper92/binge-ci/.github/workflows/record-screenshots.yml@v1
+    with:
+      ref: ${{ inputs.ref || github.ref_name }}
+      tests: ${{ inputs.tests }}
+      # The tasks default to the `:app` module. A multi-module app names its own:
+      # compile_tasks: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      # record_tasks: :app:updateDebugScreenshotTest
+      # Private submodules the build includes, so the read-only token can read them:
+      # private_submodules: shared-ui,shared-contracts
+    secrets:
+      AUTHOR_APP_ID: ${{ secrets.AUTHOR_APP_ID }}
+      AUTHOR_APP_PRIVATE_KEY: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
