@@ -150,6 +150,9 @@ jobs:
       # A false `true` lets an arbitrary workflow edit through without a human, so what must stay false is held here.
       - name: Test the pin-only check
         run: ./tools/test-pin-only.sh
+      # Every Android app's CI runs through this workflow, so what makes a job skip or a runner switch is held here.
+      - name: Test the Android app workflow
+        run: ./tools/test-android-app-ci.sh
       # The rule rides in the review prompt behind an input, so what it reads and what it leaves out is held here.
       - name: Test the design-system review rule
         run: ./tools/test-design-system-rule.sh
