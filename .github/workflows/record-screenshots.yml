@@ -1,0 +1,332 @@
+name: Record screenshots
+
+# Records the screenshot frames of the tests a maintainer names, on a CI runner, and commits only the
+# changed PNGs to the branch. A cloud worker cannot build an app whose submodules are private, so this is
+# how a new or changed frame gets recorded: `updateDebugScreenshotTest --tests <filter>` against the
+# branch with every submodule at the pin the branch records, then one commit of the reference images.
+#
+# MAINTAINER-TRIGGERED ONLY. The caller is a `workflow_dispatch`, which GitHub allows only to a person
+# with write access, and this workflow refuses anything else: the triggering event has to be a dispatch,
+# its sender a user and not a bot, and that user's permission on the repository write or better. No bot
+# starts it and no pull request can. The agent bots keep their own, narrower re-record path.
+#
+# What it will not do. It never pushes to the default branch, it never forces a push, and it commits
+# nothing but PNG files: any other change the run leaves behind (a lock file, a generated source) fails the
+# run and is listed, rather than riding into the commit. The push uses the author app's token, not
+# GITHUB_TOKEN, so the commit starts CI on the branch like any other push.
+#
+# The caller must grant `contents: read` and `pull-requests: write` (the report on the pull request) and
+# pass `AUTHOR_APP_ID` and `AUTHOR_APP_PRIVATE_KEY`, and `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`
+# when `private_submodules` is set. It owns the dispatch inputs (a reusable workflow cannot declare a
+# trigger of its own) and forwards them.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The branch to record on, in the calling repository. Never the default branch.
+        type: string
+        required: true
+      tests:
+        description: >
+          What to record, as Gradle `--tests` filters: fully qualified class names or patterns with `*`,
+          comma-separated. Letters, digits and `_ . * $ ,` only.
+        type: string
+        required: true
+      runner:
+        description: runs-on, as a JSON array string. A self-hosted runner needs `git`, `gh` and a JDK on PATH.
+        type: string
+        default: '["ubuntu-latest"]'
+      private_submodules:
+        description: >
+          Names of private repositories, comma- or newline-separated and under the caller's owner, that the
+          checkout fetches as git submodules. Empty (the default) changes nothing. When set, they are fetched
+          with a second, read-only token from the reviewer app, so the app must be installed on every one of
+          them.
+        type: string
+        default: ''
+      default_branch:
+        description: The branch this never records on.
+        type: string
+        default: main
+      java_version:
+        description: The JDK the build runs on.
+        type: string
+        default: '21'
+      compile_tasks:
+        description: >
+          The Gradle arguments that compile the screenshot sources, run first in a JVM of its own so a cold
+          compile and the render do not share one and run it out of memory.
+        type: string
+        default: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      record_tasks:
+        description: The Gradle arguments that record the frames. Each `--tests` filter is added after them.
+        type: string
+        default: :app:updateDebugScreenshotTest
+      jvmargs:
+        description: >
+          `org.gradle.jvmargs` for both Gradle runs, for a runner whose memory differs from the project's own
+          setting. Empty leaves the project's `gradle.properties` alone.
+        type: string
+        default: ''
+      timeout_minutes:
+        description: The job's timeout, in minutes.
+        type: number
+        default: 45
+    secrets:
+      AUTHOR_APP_ID:
+        description: The author app, whose token pushes the commit so that CI starts on it.
+        required: true
+      AUTHOR_APP_PRIVATE_KEY:
+        required: true
+      REVIEWER_APP_ID:
+        description: Only read when `private_submodules` is set, to mint the read-only submodule token.
+        required: false
+      REVIEWER_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One recording per branch at a time, and a second request waits rather than cancelling the first: two
+# recordings racing to push the same branch is a rejected push and a wasted run.
+concurrency:
+  group: record-screenshots-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      outcome: ${{ steps.commit.outputs.outcome }}
+    steps:
+      # The request is checked before any token is minted or any code is checked out. `github.event` here is
+      # the caller's event. A refusal is a failed step, and the `report` job says why on the pull request.
+      - name: Check the request
+        id: request
+        env:
+          EVENT: ${{ github.event_name }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+          TESTS: ${{ inputs.tests }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; echo "refusal=$1" >> "$GITHUB_OUTPUT"; exit 1; }
+          [ "$EVENT" = workflow_dispatch ] || fail "this records only when a person dispatches it; the event was '$EVENT'."
+          [ "$SENDER_TYPE" = User ] || fail "this records only for a person, and the sender is a '$SENDER_TYPE'."
+          # A dispatch already needs write access. The permission is read again so that a caller wired to some other
+          # trigger by mistake still cannot be started by someone without it.
+          permission=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2> /dev/null || echo none)
+          case "$permission" in
+            admin | maintain | write) ;;
+            *) fail "$ACTOR has '$permission' permission here, and recording needs write." ;;
+          esac
+          [[ $REF =~ ^[A-Za-z0-9._/-]+$ ]] && [[ $REF != -* ]] && [[ $REF != *..* ]] \
+            || fail "'$REF' is not a branch name this will record on."
+          [ "$REF" != "$DEFAULT_BRANCH" ] || fail "this never records on the default branch ($DEFAULT_BRANCH). Open a branch."
+          [[ $TESTS =~ ^[A-Za-z0-9_.*$,]+$ ]] && [[ $TESTS != ,* ]] && [[ $TESTS != *, ]] && [[ $TESTS != *,,* ]] \
+            || fail "the tests filter has to be class names or patterns, comma-separated: letters, digits and _ . * $ only."
+          gh api "repos/$GH_REPO/branches/$REF" --jq .name > /dev/null 2>&1 || fail "the branch '$REF' does not exist in $GH_REPO."
+
+      # Contents write, for the one push, and pull requests write for the report. Neither the repositories
+      # nor the permissions of a private submodule's token are widened by it: that is the next mint.
+      - name: Mint the author app token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.AUTHOR_APP_ID }}
+          private-key: ${{ secrets.AUTHOR_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ inputs.private_submodules }}
+          permission-contents: read
+
+      # By the branch, as it is when the run starts; the push below is not forced, so a branch that moves under
+      # the run is a rejected push and not a lost commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token }}
+          clean: true
+
+      - name: Fetch the submodules
+        env:
+          SUBMODULE_TOKEN: ${{ steps.submodule_token.outputs.token }}
+          PRIVATE_SUBMODULES: ${{ inputs.private_submodules }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          n=${GIT_CONFIG_COUNT:-0}
+          add() { export "GIT_CONFIG_KEY_$n=$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+          # As actions/checkout did for submodules: an ssh-form URL is fetched over https.
+          add url.https://github.com/.insteadOf git@github.com:
+          if [ -n "$PRIVATE_SUBMODULES" ]; then
+            basic=$(printf 'x-access-token:%s' "$SUBMODULE_TOKEN" | base64 -w0)
+            echo "::add-mask::$basic"
+            mapfile -t repos < <(sed -e 's/[, ]/\n/g' <<<"$PRIVATE_SUBMODULES" | sed '/^$/d')
+            for repo in "${repos[@]}"; do
+              # `<repo>` and `<repo>.git` both: git matches the URL path on whole segments, so a
+              # `.gitmodules` URL that ends in .git is not matched by the bare name. The empty value
+              # first clears any header a broader key left for this URL, so exactly one goes out.
+              for name in "$repo" "$repo.git"; do
+                add "http.https://github.com/$OWNER/$name.extraheader" ""
+                add "http.https://github.com/$OWNER/$name.extraheader" "AUTHORIZATION: basic $basic"
+              done
+            done
+          fi
+          export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
+          git submodule sync --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+
+      - name: Compile the screenshot sources
+        env:
+          TASKS: ${{ inputs.compile_tasks }}
+          JVMARGS: ${{ inputs.jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::compile_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      - name: Record the frames
+        env:
+          TASKS: ${{ inputs.record_tasks }}
+          JVMARGS: ${{ inputs.jvmargs }}
+          TESTS: ${{ inputs.tests }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::record_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          IFS=',' read -r -a filters <<< "$TESTS"
+          for filter in "${filters[@]}"; do args+=(--tests "$filter"); done
+          # The compile's JVM goes before the render's starts.
+          ./gradlew --stop
+          ./gradlew "${args[@]}"
+
+      # Only PNG files go into the commit. Anything else the run left changed, tracked or new, is listed and fails
+      # the run: a recording that also rewrites a lock file is not the change a maintainer asked for. `-z` and
+      # `--no-renames` so an odd file name is neither quoted nor hidden, and ignored build output is not counted.
+      - name: Commit the changed frames
+        id: commit
+        env:
+          REF: ${{ inputs.ref }}
+          TESTS: ${{ inputs.tests }}
+        run: |
+          set -euo pipefail
+          other=()
+          pngs=()
+          while IFS= read -r -d '' entry; do
+            path=${entry:3}
+            case "$path" in
+              *.png) pngs+=("$path") ;;
+              *) other+=("$path") ;;
+            esac
+          done < <(git status --porcelain=v1 -z --no-renames --untracked-files=all)
+          if [ "${#other[@]}" -gt 0 ]; then
+            echo "::error::the recording changed files that are not PNGs, so nothing was committed:"
+            printf '  %s\n' "${other[@]:0:20}"
+            echo "outcome=other-files" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if [ "${#pngs[@]}" -eq 0 ]; then
+            echo "outcome=unchanged" >> "$GITHUB_OUTPUT"
+            echo "No frame changed for \`$TESTS\`: nothing to commit."
+            exit 0
+          fi
+          git add -- "${pngs[@]}"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "chore: record screenshots for $TESTS"
+          # Not forced: a branch that moved since the run began is a rejected push, and the report says so.
+          git push origin "HEAD:refs/heads/$REF"
+          sha=$(git rev-parse HEAD)
+          {
+            echo "outcome=recorded"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Recorded ${#pngs[@]} frame(s) on \`$REF\` at \`${sha:0:7}\`"
+            echo
+            echo "Filter: \`$TESTS\`"
+            echo
+            git diff --name-status --no-renames HEAD~1 HEAD | sed 's/^\(.\)\t\(.*\)$/- `\1` `\2`/'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
+
+  # Says what happened on the pull request for the branch, whatever happened: recorded, nothing to record, or
+  # a refusal or failure. Without it a failed recording is a red run nobody opens. It holds no secrets: the
+  # workflow's own token posts it. A branch with no open pull request has the step summary alone.
+  report:
+    if: ${{ always() }}
+    needs: record
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 5
+    steps:
+      - name: Say what happened on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+          TESTS: ${{ inputs.tests }}
+          RESULT: ${{ needs.record.result }}
+          OUTCOME: ${{ needs.record.outputs.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -uo pipefail
+          # No -e: this step only reports, and a branch with no pull request is not an error.
+          [[ $REF =~ ^[A-Za-z0-9._/-]+$ ]] || exit 0
+          pr=$(gh pr list --head "$REF" --state open --json number --jq '.[0].number // empty' 2> /dev/null || true)
+          case "$RESULT:$OUTCOME" in
+            success:recorded) line="Recorded the changed frames for \`$TESTS\` on this branch and pushed one commit. CI runs on it." ;;
+            success:unchanged) line="Ran \`$TESTS\` and no frame changed, so nothing was committed." ;;
+            *:other-files) line="Recording \`$TESTS\` changed files that are not PNGs, so nothing was committed. The run lists them: $RUN_URL" ;;
+            cancelled:*) line="The recording of \`$TESTS\` was cancelled or timed out: $RUN_URL" ;;
+            *) line="Recording \`$TESTS\` did not finish: $RUN_URL" ;;
+          esac
+          echo "$line"
+          [ -n "$pr" ] || exit 0
+          marker="<!-- record-screenshots:${RUN_ID}-${ATTEMPT} -->"
+          existing=$(gh pr view "$pr" --json comments --jq '.comments[].body' 2> /dev/null | grep -cF "$marker" || true)
+          [ "${existing:-0}" -gt 0 ] && exit 0
+          printf '%s\nRequested by @%s. %s\n' "$marker" "$ACTOR" "$line" | gh pr comment "$pr" --body-file - || true

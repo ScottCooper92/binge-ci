@@ -227,6 +227,27 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
 
   Drop "Do not touch any screenshot baseline PNG, and never run the update task" from `gate_rules`.
 
+### Recording screenshots on a runner
+
+A cloud worker cannot build an app whose submodules are private, so it cannot record a new or changed screenshot
+frame. `record-screenshots.yml` does it on a CI runner, for a maintainer. The caller (`callers/example/record-screenshots.yml`)
+is a `workflow_dispatch` with two inputs: the branch, and a Gradle `--tests` filter such as `com.example.home.*ScreenshotTest`.
+
+- **Who can start it.** Only a person with write access: the dispatch needs it, and the workflow checks again that the
+  event is a dispatch, the sender is a user and not a bot, and the user's permission is write or better. No bot starts it
+  and no pull request can. It refuses the default branch and an unsafe filter (letters, digits and `_ . * $ ,` only).
+- **What it does.** It checks out the branch, fetches every submodule at the pin the branch records, compiles the
+  screenshot sources, stops the daemon so the render gets a JVM of its own, and runs the record task with one `--tests`
+  per filter. Then it commits the changed PNGs, with a message naming the filter, and pushes the branch.
+- **What it will not do.** It stages only PNG files. Any other file the run changed, tracked or new, fails the run and is
+  listed. The push is never forced, so a branch that moved under the run is a rejected push, not a lost commit. The
+  push uses the author app's token, so CI starts on the new commit like on any push.
+- **What it says.** The step summary lists the frames. The pull request for the branch gets one comment saying what
+  happened: recorded, nothing changed, a refusal or a failure, with the run's link.
+- **The caller grants** `contents: read` and `pull-requests: write`, and passes `AUTHOR_APP_ID` and
+  `AUTHOR_APP_PRIVATE_KEY`, and `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` when `private_submodules` is set. The
+  tasks default to the `:app` module; a multi-module app names its own in `compile_tasks` and `record_tasks`.
+
 ### A runner-local Claude Code cache
 
 Each agent job installs Claude Code, and Bun for the action's own scripts, from the network: several
@@ -326,6 +347,7 @@ drifted a word at a time, so they live here too:
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
 | `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks`, the unit `tests`, the screenshot validation in `screenshot_shards` shards and the release build as jobs of their own, and a `result` job that says whether each did what `changes` asked for. Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see "App CI" below and `callers/example/android-app-ci.yml`. |
+| `record-screenshots.yml` | reusable workflow | A maintainer runs it to record screenshot frames on a CI runner, for an app whose submodules a cloud worker cannot fetch: `updateDebugScreenshotTest --tests <filter>` on a branch with every submodule at its pin, then one commit of the changed PNGs. Dispatch only, for a person with write access, never on the default branch, no non-PNG file, no forced push. Grant `contents: read` and `pull-requests: write`; pass the author app secrets (and the reviewer app's when `private_submodules` is set). See "Recording screenshots on a runner" below. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
@@ -355,7 +377,7 @@ secrets: inherit
 ```
 
 - It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
-  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml`, `android-app-ci.yml` and `consumer-check.yml`. In
+  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml`, `android-app-ci.yml`, `record-screenshots.yml` and `consumer-check.yml`. In
   `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules; see
   "Private consumers" below for those.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.

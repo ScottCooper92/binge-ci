@@ -504,7 +504,18 @@ jobs:
           fi
           export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
 
       # Recorded now, before the agent runs. Read later from origin/<branch>, it would move with any
       # `git fetch` or push the agent makes, and the undo and the "did it commit" check would then
@@ -767,6 +778,11 @@ jobs:
 
           Then:
 
+            - Render only with every submodule at the pin this commit records. `git submodule
+              status --recursive` must show no line that starts with `+`, `-` or `U`; if one
+              does, run `git submodule update --init --recursive --force` first. A frame rendered
+              against the old pin of a PR that moves it reads as "no change", and that is not a
+              reason to stop: it means the render did not see the PR's own change.
             - Re-record only the failing classes, never the whole suite: the update task for
               the variant that failed, scoped with `--tests <fully.qualified.Class>` per class
               (for example `./gradlew :app:updateDebugScreenshotTest --tests <Class>`).
@@ -1580,7 +1596,18 @@ jobs:
           fi
           export GIT_CONFIG_COUNT=$n GIT_TERMINAL_PROMPT=0
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force: a submodule checkout left from an earlier run, or edited since, must not keep the old
+          # pin. A render against it reads as "no change" for a PR whose whole change is the pin.
+          git submodule update --init --recursive --force
+          # Every submodule has to be at the commit the PR head records. `+` is a different commit, `-` is
+          # not initialised and `U` is a conflict: any of them means a render would not be of this PR.
+          status=$(git submodule status --recursive)
+          if grep -q '^[+U-]' <<<"$status"; then
+            echo "::error::a submodule is not at the pin this commit records:"
+            grep '^[+U-]' <<<"$status"
+            exit 1
+          fi
+          if [ -n "$status" ]; then echo "Submodules are at the pins this commit records:"; echo "$status"; fi
 
       # As in the job above, retried for the same race: the log archive finalizes after workflow_run
       # fires. An unreadable log records no attempt, so re-running CI on the commit tries again.
