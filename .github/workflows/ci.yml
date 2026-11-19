@@ -147,6 +147,9 @@ jobs:
       # A false `true` lets an arbitrary workflow edit through without a human, so what must stay false is held here.
       - name: Test the pin-only check
         run: ./tools/test-pin-only.sh
+      # This workflow pushes a commit to a branch on one person's word, so what it refuses is held here.
+      - name: Test the screenshot recording workflow
+        run: ./tools/test-record-screenshots.sh
       # Every Android app's CI runs through this workflow, so what makes a job skip or a runner switch is held here.
       - name: Test the Android app workflow
         run: ./tools/test-android-app-ci.sh
