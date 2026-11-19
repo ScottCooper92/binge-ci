@@ -6,9 +6,8 @@ name: Android app CI
 # the same shape, drifting a word at a time. This is that shape once; an app calls it through a thin
 # caller (callers/example/android-app-ci.yml) and names its own modules, Gradle tasks and paths.
 #
-# Built up in parts. This part is the routing, the checks, the tests and the screenshot shards; the
-# release build and the aggregate that says the whole run passed follow, and nothing should call it
-# before the release that holds them.
+# The jobs are `changes`, `checks`, `tests`, `screenshots`, `release` and `result`, which says whether the
+# whole run did what `changes` asked for.
 #
 # The jobs, and why they are separate. `./gradlew build` runs every check the app lists under its gates,
 # because the plugins wire themselves into `check`. Run as one job it took about 20 minutes, end to end:
@@ -158,6 +157,21 @@ on:
         description: Per shard. A successful run takes 11 to 16 minutes unsharded, and a slow runner has taken twice that.
         type: number
         default: 20
+      release_tasks:
+        description: >
+          The Gradle arguments of the release job: the release build, with R8 and its keep rules and the
+          lint checks the release variant runs. A keep rule that no longer compiles fails here, on the pull
+          request, and not on the next tag.
+        type: string
+        default: assembleRelease --continue
+      release_jvmargs:
+        description: The same as `checks_jvmargs`, for the release job.
+        type: string
+        default: ''
+      release_timeout_minutes:
+        description: The release job's timeout, in minutes.
+        type: number
+        default: 30
     secrets:
       REVIEWER_APP_ID:
         description: Only read when `private_submodules` is set, to mint the read-only submodule token.
@@ -484,3 +498,121 @@ jobs:
       - name: Stop the Gradle daemon
         if: ${{ always() }}
         run: ./gradlew --stop || true
+
+  # The release build: R8 with the app's keep rules, and lint-vital. On a pull request it runs only for a path
+  # in `release_inputs`, so a change that cannot reach R8 does not pay for it; on a push to the default branch
+  # and the nightly it always runs.
+  release:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.release == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: ${{ inputs.release_timeout_minutes }}
+    steps:
+      - name: Name the calling repository
+        id: repo
+        if: inputs.private_submodules != ''
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "name=${REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only token for private submodules
+        id: submodule_token
+        if: inputs.private_submodules != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+          repositories: ${{ format('{0},{1}', steps.repo.outputs.name, inputs.private_submodules) }}
+          permission-contents: read
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ steps.submodule_token.outputs.token || github.token }}
+          clean: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+
+      - name: Assemble the release build
+        env:
+          TASKS: ${{ inputs.release_tasks }}
+          JVMARGS: ${{ inputs.release_jvmargs }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$(tr '\n' ' ' <<< "$TASKS")"
+          [ "${#args[@]}" -gt 0 ] || { echo "::error::release_tasks is empty."; exit 1; }
+          [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
+          ./gradlew "${args[@]}"
+
+      - name: Upload reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports-release
+          path: |
+            **/build/reports/lint-results-*.html
+            **/build/outputs/mapping/**/missing_rules.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Stop the Gradle daemon
+        if: ${{ always() }}
+        run: ./gradlew --stop || true
+
+  # Says whether the run did what `changes` asked for, so the caller's own `build` job has one result to read.
+  # Green only when `changes` succeeded, every job it cleared succeeded, and every job it did not clear was
+  # skipped: a job that ran when it should not have is as wrong as one that did not run, and a skip that
+  # `changes` did not order is a job that never started. `always()`, so a failure upstream reaches it instead
+  # of skipping it, which would read as "not run" and not as red.
+  result:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    needs: [changes, checks, tests, screenshots, release]
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 5
+    steps:
+      # The jobs' reports as the one artifact the author bot downloads by name. Artifact names have to be
+      # unique within a run, so each job uploads its own and they are merged here.
+      - name: Merge reports
+        if: ${{ contains(needs.*.result, 'failure') }}
+        uses: actions/upload-artifact/merge@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: build-reports
+          pattern: build-reports-*
+          delete-merged: true
+          retention-days: ${{ github.event_name == 'schedule' && 7 || 1 }}
+        continue-on-error: true
+
+      - name: Fail unless every job did what `changes` asked for
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CHECKS: ${{ needs.checks.result }}
+          TESTS: ${{ needs.tests.result }}
+          SCREENSHOTS: ${{ needs.screenshots.result }}
+          RELEASE: ${{ needs.release.result }}
+          RUN_PRODUCT: ${{ needs.changes.outputs.product }}
+          RUN_SCREENS: ${{ needs.changes.outputs.screens }}
+          RUN_RELEASE: ${{ needs.changes.outputs.release }}
+        run: |
+          set -euo pipefail
+          echo "changes: $CHANGES (product $RUN_PRODUCT, screens $RUN_SCREENS, release $RUN_RELEASE)"
+          echo "checks: $CHECKS; tests: $TESTS; screenshots: $SCREENSHOTS; release: $RELEASE"
+          [ "$CHANGES" = success ] || exit 1
+          for answer in "$RUN_PRODUCT" "$RUN_SCREENS" "$RUN_RELEASE"; do
+            [ "$answer" = true ] || [ "$answer" = false ] || exit 1
+          done
+          wanted() {
+            if [ "$2" = true ]; then [ "$1" = success ]; else [ "$1" = skipped ]; fi
+          }
+          wanted "$CHECKS" "$RUN_PRODUCT" || exit 1
+          wanted "$TESTS" "$RUN_PRODUCT" || exit 1
+          wanted "$SCREENSHOTS" "$RUN_SCREENS" || exit 1
+          wanted "$RELEASE" "$RUN_RELEASE" || exit 1

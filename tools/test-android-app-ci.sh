@@ -38,8 +38,8 @@ if not bad:
     ok.append(f"all {len(jobs)} jobs run on the runner input, a JSON array")
 
 # The jobs that build wait for `changes` and run only when it succeeded and says they matter.
-wanted = {"checks": "product", "tests": "product", "screenshots": "screens"}
-gradle_steps = {"checks": 1, "tests": 1, "screenshots": 2}
+wanted = {"checks": "product", "tests": "product", "screenshots": "screens", "release": "release"}
+gradle_steps = {"checks": 1, "tests": 1, "screenshots": 2, "release": 1}
 for name, output in wanted.items():
     job = jobs.get(name)
     if job is None:
@@ -69,6 +69,12 @@ for name, output in wanted.items():
     checkout = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
     if not checkout or checkout[0].get("with", {}).get("clean") is not True:
         bad.append(f"{name}: the checkout is not asked to clean, which a self-hosted runner needs")
+# The aggregate the caller's `build` reads: it waits for every job, runs `always()`, and skips a draft.
+res = jobs["result"]
+if sorted(res.get("needs", [])) != sorted(["changes", "checks", "tests", "screenshots", "release"]):
+    bad.append("result: it does not need every job")
+if "always()" not in str(res.get("if", "")) or "draft == false" not in str(res.get("if", "")):
+    bad.append("result: it is not `always()` and skipped for a draft")
 # The screenshots job: a matrix of shards that does not stop at the first red one, built from `changes`, and a
 # shard with no class skips Gradle, since a validate task given no filter runs the whole suite.
 shots = jobs["screenshots"]
@@ -107,7 +113,7 @@ if len(bad) == before_pins:
 before = len(bad)
 cjobs = caller["jobs"]
 build = cjobs.get("build")
-if build is None or build.get("needs") != "ci" or "always()" not in str(build.get("if", "")):
+if build is None or "ci" not in build.get("needs", []) or "always()" not in str(build.get("if", "")):
     bad.append("the worked caller has no `build` job that needs the shared run and runs `always()`")
 elif "needs.ci.result" not in str(build["steps"]):
     bad.append("the worked caller's `build` does not read the shared run's result")
@@ -164,5 +170,29 @@ for module in app a/b; do
 done
 out=$(leak_run none)
 if grep -q 'No coroutine leak was reported' <<< "$out"; then echo "ok    no report prints the fallback"; else echo "FAIL  no report: $out"; failures=$((failures + 1)); fi
+
+# The aggregate's script, run on its own. A job has to have done what `changes` asked for: success when it
+# said true, skipped when it said false. Each row is the results of changes, checks, tests, screenshots and
+# release, then the three answers, then whether the run passes.
+python3 -I - "$root/.github/workflows/android-app-ci.yml" "$work/result.sh" <<'INNER'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+step = [s for s in wf["jobs"]["result"]["steps"] if s.get("name", "").startswith("Fail unless")][0]
+open(sys.argv[2], "w").write(step["run"])
+INNER
+result_row() { # changes checks tests screenshots release product screens release want(pass|fail) description
+  if CHANGES=$1 CHECKS=$2 TESTS=$3 SCREENSHOTS=$4 RELEASE=$5 RUN_PRODUCT=$6 RUN_SCREENS=$7 RUN_RELEASE=$8 bash "$work/result.sh" > /dev/null 2>&1; then got=pass; else got=fail; fi
+  if [ "$got" = "$9" ]; then echo "ok    ${10}"; else echo "FAIL  ${10}: it $got"; failures=$((failures + 1)); fi
+}
+result_row success success success success success true true true pass "everything cleared and everything succeeded passes"
+result_row success success success skipped skipped true false false pass "jobs changes did not clear may be skipped"
+result_row success skipped skipped skipped skipped false false false pass "a docs-only change skips them all and passes"
+result_row success success success skipped skipped true true false fail "a job changes cleared that was skipped fails"
+result_row success success success success skipped true false false fail "a job changes did not clear that ran fails"
+result_row failure skipped skipped skipped skipped true true true fail "a failed changes fails, whatever the rest says"
+result_row skipped skipped skipped skipped skipped true true true fail "a skipped changes fails"
+result_row success failure success success success true true true fail "a failed job fails"
+result_row success success success cancelled success true true true fail "a cancelled job fails"
+result_row success success success success success "" true true fail "an empty answer from changes fails"
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"
