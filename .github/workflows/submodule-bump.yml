@@ -124,7 +124,7 @@ jobs:
 
       - name: Move the pin
         id: bump
-        uses: ScottCooper92/binge-ci/.github/actions/submodule-bump@v1.0.52
+        uses: ScottCooper92/binge-ci/.github/actions/submodule-bump@v1.0.53
         with:
           submodule_path: ${{ inputs.submodule_path }}
           branch: ${{ inputs.branch }}
