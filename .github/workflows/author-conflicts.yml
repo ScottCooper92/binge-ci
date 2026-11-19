@@ -568,7 +568,7 @@ jobs:
           # Looked up before anything is pushed: with no recording to start, frames taken from the default
           # branch would stay stale and nobody would know.
           if ! gh api "repos/${GH_REPO}/actions/workflows/record-screenshots.yml" --jq .state > /dev/null 2>&1; then
-            echo "This repository has no record-screenshots workflow - leaving it to the agent."
+            echo "No record-screenshots workflow here, or the app cannot read Actions - leaving it to the agent."
             exit 0
           fi
 
@@ -597,7 +597,8 @@ jobs:
           existing=$(gh api "repos/${GH_REPO}/issues/${{ matrix.pr }}/comments?per_page=100" --paginate --jq '.[].body')
           grep -qF "$marker" <<<"$existing" && exit 0
           printf '%s\nThis PR conflicted with `%s` only in screenshot frames. I merged it in and took its copy of these frames, which are out of date until they are recorded again:\n\n%s\n\n%s\n' \
-            "$marker" "$DEFAULT_BRANCH" "$frames" "$outcome" | gh pr comment ${{ matrix.pr }} --body-file -
+            "$marker" "$DEFAULT_BRANCH" "$frames" "$outcome" | gh pr comment ${{ matrix.pr }} --body-file - \
+            || echo "::warning::The merge landed and the recording was dispatched, but the comment could not be posted."
 
       # Named in the agent's prompt, before the rewrite replaces them: otherwise the agent finds
       # the governed paths modified, edits it did not make, and reports them as tampering.

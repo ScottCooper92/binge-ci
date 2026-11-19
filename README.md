@@ -194,6 +194,12 @@ By default a failing screenshot test is a stop: re-recording the reference frame
 whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a PR itself changed. Set
 `rerecord_screenshots: true` on the caller. It is off by default, and nothing changes without it.
 
+`author-ci-fix.yml` makes no attempt while a `record-screenshots` run is queued or in progress on the branch. The conflict
+bot dispatches one after it takes the default branch's frames, and a fix beside it would record the same classes and
+collide on the push. It says so once on the PR. If the recording commits frames, CI runs again and that head gets its
+own attempt; if it commits nothing, re-running CI on the PR gets the attempt back. A failed lookup of the runs changes
+nothing.
+
 - **The gate.** The agent re-records only when nothing else is red, there are at most 40 failing frames,
   and every failing frame is one of three cases. It renders a component whose source the PR changed.
   Or it is a new frame: its reference image does not exist, and the test function or preview that renders it
@@ -259,11 +265,12 @@ frames it took and the recording it started. Then it stops.
 
 - **What keeps today's behaviour.** A conflict in any other path (a source file, a non-reference PNG), a frame one side
   deleted, a governed path, or a repository with no `record-screenshots.yml` is left to the agent and its usual bail.
-  The workflow is looked up before anything is pushed.
+  The workflow is looked up before anything is pushed. The lookup needs the app to read Actions, so on an installation
+  without the permission it fails and the conflict goes to the agent, as before.
 - **What the consumer has to set up.** The caller of `record-screenshots.yml` passes `trusted_dispatcher` set to the
   author bot's login, or the recording refuses the bot's dispatch. The author app's installation needs the Actions
   permission at write, which a maintainer grants in the app's settings; the token mint asks for no narrower set, so it
-  carries whatever the installation grants. Without it the merge still lands, and the comment says the recording could
+  carries whatever the installation grants. With the permission but without `trusted_dispatcher`, the merge lands and the comment says the recording could
   not be started and which classes to record.
 - **What it says.** The step summary lists the frames. The pull request for the branch gets one comment saying what
   happened: recorded, nothing changed, a refusal or a failure, with the run's link.
