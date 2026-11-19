@@ -317,7 +317,7 @@ drifted a word at a time, so they live here too:
 | `fork-review.yml` | reusable workflow | An advisory, read-only review of a fork PR, after a maintainer labels it. Two callers, one for the untrusted `pull_request` stage and one for the trusted `workflow_run` stage, both in `callers/example/`; each needs `contents: read`, `actions: read` and `pull-requests: write`. See [docs/fork-review.md](docs/fork-review.md). |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
-| `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks`, the unit `tests` and the screenshot validation in `screenshot_shards` shards as jobs of their own (the release build and the aggregate follow in a later part, so do not call it before the release that holds them). Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see `callers/example/android-app-ci.yml`. |
+| `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks`, the unit `tests`, the screenshot validation in `screenshot_shards` shards and the release build as jobs of their own, and a `result` job that says whether each did what `changes` asked for. Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see "App CI" below and `callers/example/android-app-ci.yml`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
@@ -583,6 +583,41 @@ detektGate {
   a line with a real reason is accepted, and one without a reason is a question. The rule is written by the workflow
   and not read from the repository, so a PR cannot edit it, and the index is refused as a path a PR may change when CI
   does not build it. Set it in the caller beside `conventions_path`.
+
+### App CI
+
+`android-app-ci.yml` is the CI of an Android app, kept once. An app's own `ci.yml` is a thin caller: its triggers, its
+paths and its Gradle tasks, and one job that says whether the run passed. `callers/example/android-app-ci.yml` is the
+worked one.
+
+The jobs run in parallel after `changes`:
+
+| Job | What it runs | When |
+| --- | --- | --- |
+| `changes` | the `changed-files` action | always, except a draft pull request |
+| `checks` | `checks_tasks`: `build` less the tasks the other jobs own | `product` |
+| `tests` | `tests_tasks`: the unit tests and the coverage check | `product` |
+| `screenshots` | `screenshot_shards` shards of the screenshot validation, each in a JVM of its own | `screens` |
+| `release` | `release_tasks`: the release build, with R8 and its keep rules | `release` |
+| `result` | nothing: it checks each job did what `changes` asked for | always, except a draft pull request |
+
+- **Routing.** `changes` decides from the paths a pull request touched. `product_none` and `no_frames` are the paths
+  that cannot affect a job, `release_inputs` the only paths that can reach the release build. A push to the default
+  branch and the nightly run everything. There is no `paths-ignore`: the review bot needs a successful run against every
+  head, so the run always happens and a job `changes` did not clear is skipped.
+- **`result`** is green only when `changes` succeeded, every job it cleared succeeded, and every job it did not clear was
+  skipped. A job that ran when it should not have fails it, and so does a skip `changes` did not order.
+- **The required check is the caller's.** A reusable workflow's jobs reach branch protection as `<caller job> / <job>`,
+  so a required check named `build` has to be a job of the caller's own. The worked caller's `build` needs the shared
+  run (`ci`), the pin check and actionlint, and passes only if each succeeded or, for the last two, was skipped. The pin
+  check, actionlint and the nightly report are jobs of the caller, where they are shared steps of their own.
+- **A self-hosted runner** is one input, `runner`, a JSON array as in the other workflows. Every job runs on it, starts
+  from a clean checkout and ends by stopping its Gradle daemon. The workflow assumes one runner per user and Gradle home,
+  since `./gradlew --stop` stops every daemon of that Gradle version in the home. Heap is a `*_jvmargs` input per
+  Gradle job, empty by default, which leaves the project's `gradle.properties` alone. The runner needs `git`, `jq`, `gh`
+  and a JDK on PATH.
+- **The caller grants** `contents: read` and `actions: read`, and passes `REVIEWER_APP_ID` and
+  `REVIEWER_APP_PRIVATE_KEY` when `private_submodules` is set. `tools/check-callers.sh` checks the worked caller.
 
 ## Its own gate
 

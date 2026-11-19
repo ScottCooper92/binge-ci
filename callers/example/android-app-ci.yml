@@ -5,10 +5,15 @@ name: CI
 #
 # `build` is the one job branch protection requires, and it lives HERE: a reusable workflow's jobs
 # reach branch protection as `<caller job> / <job>`, so a required check named `build` has to be the
-# caller's own. It fails unless the shared run passed, and `always()` makes a failure upstream reach it
-# instead of skipping it, which would read as "not run" rather than red.
+# caller's own. It fails unless the shared run passed and so did the pin check and actionlint, and
+# `always()` makes a failure upstream reach it instead of skipping it, which would read as "not run"
+# rather than red. The pin check and actionlint are jobs of this file, not of the shared workflow: they
+# are shared steps of their own, and a skip passes for each (the pin check outside a pull request, and
+# actionlint on the nightly).
 #
-# Move to a self-hosted runner by changing `runner` alone. No `paths-ignore`: bot-review needs a
+# Move the build jobs to a self-hosted runner by changing `runner` alone. The small jobs of this file (the pin
+# check, actionlint, `build`, the nightly report) read no build output and stay on a hosted runner unless
+# their `runs-on` changes too. No `paths-ignore`: bot-review needs a
 # successful run of this workflow against every head, so the shared workflow decides which jobs a diff
 # can affect and skips the rest, and the run itself always happens.
 on:
@@ -57,6 +62,10 @@ jobs:
       # An app with several modules names its tasks here. These are the defaults:
       # checks_tasks: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
       # tests_tasks: testDebugUnitTest koverVerify --continue
+      # A multi-module app names its modules in the screenshot tasks too, since the defaults name `:app`:
+      # release_tasks: assembleRelease --continue
+      # screenshot_compile_tasks: :app:compileDebugScreenshotTestKotlin --max-workers=2
+      # screenshot_validate_tasks: :app:validateDebugScreenshotTest --continue
       # The screenshot validation runs in shards, each in a JVM of its own. These are the defaults:
       # screenshot_shards: 3
       # screenshot_test_dir: app/src/screenshotTest
@@ -65,16 +74,64 @@ jobs:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
+  # A submodule pin can be a commit that only exists on an unmerged branch of its own repository. The shared
+  # check fails a pull request whose pin is not an ancestor of its submodule's default branch, unless the
+  # PR carries `hold`, and one that moves a pin backwards. The caller grants `pull-requests: read`, which it
+  # reads the label with: a reusable workflow cannot hold more than its caller.
+  submodule-pins:
+    if: github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ScottCooper92/binge-ci/.github/workflows/submodule-pins.yml@v1
+    # with:
+    #   private_submodules: shared-ui,shared-contracts
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+  # Lints the workflow files, which is where a typo turns into a silent startup_failure. It lives here and
+  # not in its own workflow, so there is still one required check to keep in sync with branch protection.
+  actionlint:
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ScottCooper92/binge-ci/.github/actions/actionlint@v1
+
   build:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
-    needs: ci
+    needs: [ci, submodule-pins, actionlint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Fail unless the shared run passed
         env:
           RESULT: ${{ needs.ci.result }}
+          PINS: ${{ needs.submodule-pins.result }}
+          ACTIONLINT: ${{ needs.actionlint.result }}
         run: |
           set -euo pipefail
-          echo "ci: $RESULT"
+          echo "ci: $RESULT; submodule-pins: $PINS; actionlint: $ACTIONLINT"
           [ "$RESULT" = success ]
+          [ "$PINS" = success ] || [ "$PINS" = skipped ]
+          [ "$ACTIONLINT" = success ] || [ "$ACTIONLINT" = skipped ]
+
+  # A red nightly has no PR or push to carry it, so without this it is a red mark in the Actions tab that
+  # nothing points at. One issue stays open while the canary is red and closes itself on the next green run.
+  nightly-report:
+    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: ScottCooper92/binge-ci/.github/actions/nightly-report@v1
+        with:
+          result: ${{ needs.build.result }}
+          title: Nightly CI is failing on main
+          note: >-
+            Nothing was pushed to cause this, so suspect the environment first: a runner image or Android
+            SDK update, or a toolchain drift.
