@@ -88,7 +88,7 @@ chmod +x "$work/bin/gh"
 request() { # extra env assignments
   : > "$work/out"
   env -i PATH="$work/bin:$PATH" GITHUB_OUTPUT="$work/out" EVENT=workflow_dispatch SENDER_TYPE=User ACTOR=maintainer \
-    GH_TOKEN=t GH_REPO=o/r REF=feature/x TESTS='com.example.home.*ScreenshotTest' DEFAULT_BRANCH=main "$@" \
+    GH_TOKEN=t GH_REPO=o/r REF=feature/x TESTS='com.example.home.*ScreenshotTest' DEFAULT_BRANCH=main TRUSTED_DISPATCHER= "$@" \
     bash "$work/request.sh" > "$work/request.log" 2>&1
 }
 accepts() { if request "${@:2}"; then ok "$1"; else fail "$1 was refused: $(grep -m1 error "$work/request.log")"; fi; }
@@ -99,6 +99,14 @@ accepts "admin permission" STUB_PERMISSION=admin
 refuses "a push event" EVENT=push
 refuses "a pull request event" EVENT=pull_request
 refuses "a bot sender" SENDER_TYPE=Bot
+refuses "a bot with no trusted dispatcher named" SENDER_TYPE=Bot ACTOR=author-bot
+refuses "a bot other than the one named" SENDER_TYPE=Bot ACTOR=other-bot TRUSTED_DISPATCHER=author-bot
+refuses "a bot whose login differs in case" SENDER_TYPE=Bot ACTOR=Author-Bot TRUSTED_DISPATCHER=author-bot
+refuses "a user whose login is the one named, with no write access" ACTOR=author-bot TRUSTED_DISPATCHER=author-bot STUB_PERMISSION=none
+refuses "the named bot on the default branch" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot REF=main
+refuses "the named bot on a push event" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot EVENT=push
+refuses "the named bot with a bad filter" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot 'TESTS=$(id)'
+accepts "the bot the caller names, which is not a collaborator" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot STUB_PERMISSION=none
 refuses "a user with read permission" STUB_PERMISSION=read
 refuses "a user with no permission" STUB_PERMISSION=none
 refuses "the default branch" REF=main
