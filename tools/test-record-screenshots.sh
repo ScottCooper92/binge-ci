@@ -170,12 +170,15 @@ entries = {}
 for m in re.finditer(r"^GIT_CONFIG_(KEY|VALUE)_(\d+)=(.*)$", push, re.M):
     entries.setdefault(int(m.group(2)), {})[m.group(1)] = m.group(3)
 pairs = [(e["KEY"], e["VALUE"]) for _, e in sorted(entries.items())]
+count = re.search(r"^GIT_CONFIG_COUNT=(\d+)$", push, re.M)
 want = "AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:APPTOKEN123").decode()
 key = "http.https://github.com/.extraheader"
 bad = []
 headers = [v for k, v in pairs if k == key]
 if headers != ["", want]:
     bad.append(f"expected an empty reset then the app token's header, got {headers!r}")
+if not count or int(count.group(1)) != len(pairs):
+    bad.append("GIT_CONFIG_COUNT does not cover the entries, so git would ignore them")
 if "APPTOKEN123" in argv or "ACTIONSTOKEN" in argv or want in argv:
     bad.append("a token is in the push's argv")
 if "ACTIONSTOKEN" in push or any("ACTIONSTOKEN" in v for _, v in pairs):
