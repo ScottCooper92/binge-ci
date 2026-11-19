@@ -392,7 +392,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.53
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -403,7 +403,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.branch.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.53
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -518,13 +518,96 @@ jobs:
             done
           fi
 
+      # A conflict made only of recorded screenshot frames is not one to resolve by reading: both sides are
+      # images, and the right frame is the one a recording makes of the merged code. So the default branch's
+      # copies go in, the merge is pushed, and the consumer's own `record-screenshots` workflow is dispatched
+      # on the branch for exactly the classes whose frames were taken. That needs `actions: write` on the
+      # author app's installation, and the consumer's caller must pass `trusted_dispatcher` (the author bot's
+      # login), or the recording refuses a bot's dispatch. Anything else - a non-PNG path, a frame one side
+      # deleted, a consumer with no such workflow - is left to the agent, and to today's bail.
+      #
+      # Pushed with the author app's token, not GITHUB_TOKEN: a push made with GITHUB_TOKEN starts no
+      # workflow, and the branch's required checks would never run.
+      - name: Take the default branch's screenshot frames
+        id: png
+        if: >
+          steps.branch.outputs.skip != 'true' &&
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          SHA: ${{ steps.branch.outputs.sha }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+        run: |
+          set -uo pipefail
+          unmerged="${{ runner.temp }}/unmerged-paths"
+          [ -s "$unmerged" ] || exit 0
+          mapfile -d '' paths < "$unmerged"
+          [ ${#paths[@]} -gt 0 ] || exit 0
+
+          # Every unmerged path must be a reference frame both sides changed (UU) or both added (AA). A frame
+          # one side deleted has no copy to take.
+          frame='^(.*/)?screenshotTest[^/]*/reference/.+\.png$'
+          status=$(git status --porcelain=v1 | grep -E '^(UU|AA) ' || true)
+          classes=()
+          for path in "${paths[@]}"; do
+            [[ $path =~ $frame ]] || { echo "Not only screenshot frames ($path) - leaving it to the agent."; exit 0; }
+            grep -qxF -- "UU $path" <<<"$status" || grep -qxF -- "AA $path" <<<"$status" \
+              || { echo "$path was deleted on one side - leaving it to the agent."; exit 0; }
+            # reference/<package path>/<ClassName>/<frame>.png: the class is the directory above the frame.
+            rest=${path#*/reference/}
+            dir=${rest%/*}
+            class=${dir//\//.}
+            [[ $class =~ ^[A-Za-z0-9_.$]+$ ]] && [[ $class != .* ]] && [[ $class != *. ]] && [[ $class != *..* ]] \
+              || { echo "'$dir' is not a class a recording can name - leaving it to the agent."; exit 0; }
+            classes+=("$class")
+          done
+          mapfile -t classes < <(printf '%s\n' "${classes[@]}" | sort -u)
+
+          # Looked up before anything is pushed: with no recording to start, frames taken from the default
+          # branch would stay stale and nobody would know.
+          if ! gh api "repos/${GH_REPO}/actions/workflows/record-screenshots.yml" --jq .state > /dev/null 2>&1; then
+            echo "No record-screenshots workflow here, or the app cannot read Actions - leaving it to the agent."
+            exit 0
+          fi
+
+          for path in "${paths[@]}"; do
+            git checkout --theirs -- "$path" && git add -- "$path" \
+              || { echo "::error::Could not take $DEFAULT_BRANCH's copy of $path."; git merge --abort || true; exit 1; }
+          done
+          git commit --no-edit \
+            || { echo "::error::Could not commit the merge."; git merge --abort || true; exit 1; }
+          if ! git push; then
+            echo "::error::Took the default branch's frames but the push was rejected; nothing landed."
+            exit 1
+          fi
+          echo "taken=true" >> "$GITHUB_OUTPUT"
+
+          tests=$(IFS=,; echo "${classes[*]}")
+          frames=$(printf '%s\n' "${paths[@]}" | head -20 | sed 's/^/- `/; s/$/`/')
+          if [ ${#paths[@]} -gt 20 ]; then frames="$frames"$'\n'"- and $(( ${#paths[@]} - 20 )) more"; fi
+          if gh workflow run record-screenshots.yml --ref "$BRANCH" -f "ref=$BRANCH" -f "tests=$tests"; then
+            outcome="I started \`record-screenshots\` on this branch for \`$tests\`. It commits the recorded frames here when it finishes."
+          else
+            echo "::warning::The merge landed but the recording could not be started."
+            outcome="I could not start \`record-screenshots\` (the author app needs \`actions: write\`). Run it on this branch for \`$tests\`."
+          fi
+          marker="<!-- conflict-screenshots:${SHA} -->"
+          existing=$(gh api "repos/${GH_REPO}/issues/${{ matrix.pr }}/comments?per_page=100" --paginate --jq '.[].body')
+          grep -qF "$marker" <<<"$existing" && exit 0
+          printf '%s\nThis PR conflicted with `%s` only in screenshot frames. I merged it in and took its copy of these frames, which are out of date until they are recorded again:\n\n%s\n\n%s\n' \
+            "$marker" "$DEFAULT_BRANCH" "$frames" "$outcome" | gh pr comment ${{ matrix.pr }} --body-file - \
+            || echo "::warning::The merge landed and the recording was dispatched, but the comment could not be posted."
+
       # Named in the agent's prompt, before the rewrite replaces them: otherwise the agent finds
       # the governed paths modified, edits it did not make, and reports them as tampering.
       - name: Describe the governed-path rewrite for the agent
         id: governed_note
         if: >
           steps.branch.outputs.skip != 'true' &&
-          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true' &&
+          steps.png.outputs.taken != 'true'
         env:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: |
@@ -543,7 +626,8 @@ jobs:
       - name: Rewrite the governed paths to the base's copy
         if: >
           steps.branch.outputs.skip != 'true' &&
-          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true' &&
+          steps.png.outputs.taken != 'true'
         env:
           GOVERNED_SCRIPT: ${{ steps.governed.outputs.script }}
         run: bash "$GOVERNED_SCRIPT" --rewrite
@@ -556,7 +640,8 @@ jobs:
         id: agent_token
         if: >
           steps.branch.outputs.skip != 'true' &&
-          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true' &&
+          steps.png.outputs.taken != 'true'
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.AUTHOR_APP_ID }}
@@ -577,8 +662,9 @@ jobs:
         continue-on-error: true
         if: >
           steps.branch.outputs.skip != 'true' &&
-          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.51
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true' &&
+          steps.png.outputs.taken != 'true'
+        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.53
         with:
           action_ref: 12dd8d74c712f5f3669365b2369b558c495b1104
 
@@ -587,13 +673,14 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.53
 
       - name: Resolve with Claude
         id: claude
         if: >
           steps.branch.outputs.skip != 'true' &&
-          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true'
+          steps.merge.outputs.clean != 'true' && steps.merge.outputs.governed != 'true' &&
+          steps.png.outputs.taken != 'true'
         # A bound of its own, BELOW the job's. At timeout-minutes the whole job is CANCELLED, and
         # cancellation skips every ordinary step after it. A step timeout FAILS the step and leaves
         # the job alive: the reporter and the diagnostics upload, which carry always(), still run.
@@ -678,14 +765,16 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.53
         with:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           show_full_output: ${{ inputs.show_full_output }}
 
       - name: Commit or bail out
         id: commit
-        if: steps.branch.outputs.skip != 'true' && steps.merge.outputs.clean != 'true'
+        if: >
+          steps.branch.outputs.skip != 'true' && steps.merge.outputs.clean != 'true' &&
+          steps.png.outputs.taken != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}

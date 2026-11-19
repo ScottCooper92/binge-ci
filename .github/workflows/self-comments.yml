@@ -52,7 +52,7 @@ jobs:
     concurrency:
       group: author-comments-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
-    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.51
+    uses: ScottCooper92/binge-ci/.github/workflows/author-comments.yml@v1.0.53
     with:
       author_bot_id: ${{ vars.AUTHOR_BOT_ID }}
       maintainer_handle: ScottCooper92
@@ -69,7 +69,7 @@ jobs:
         `./tools/test-token-permissions.sh`, `./tools/test-check-callers.sh`,
         `./tools/test-merge-guards.sh`, `./tools/test-governed-paths.sh`,
         `./tools/test-submodule-pins.sh`, `./tools/test-fork-review.sh`,
-        `./tools/test-download-actionlint.sh`, `./tools/test-upstream-watch.sh`, `./tools/test-submodule-bump.sh`, `./tools/test-body-checklist.sh`, `./tools/test-rebuttal-cap.sh`, `./tools/test-agent-limits.sh`, `./tools/test-claude-code-cache.sh`, `./tools/test-rerecord-comment.sh`, `./tools/test-shard-screenshots.sh`, `./tools/test-changed-files.sh`, `./tools/test-pin-only.sh`, `./tools/test-record-screenshots.sh`, `./tools/test-android-app-ci.sh`, `./tools/test-design-system-rule.sh`, `./tools/test-renovate-preset.sh`, `./tools/test-release-tag.sh`,
+        `./tools/test-download-actionlint.sh`, `./tools/test-upstream-watch.sh`, `./tools/test-submodule-bump.sh`, `./tools/test-body-checklist.sh`, `./tools/test-rebuttal-cap.sh`, `./tools/test-agent-limits.sh`, `./tools/test-claude-code-cache.sh`, `./tools/test-rerecord-comment.sh`, `./tools/test-shard-screenshots.sh`, `./tools/test-changed-files.sh`, `./tools/test-pin-only.sh`, `./tools/test-record-screenshots.sh`, `./tools/test-conflict-png.sh`, `./tools/test-ci-fix-recording.sh`, `./tools/test-android-app-ci.sh`, `./tools/test-design-system-rule.sh`, `./tools/test-renovate-preset.sh`, `./tools/test-release-tag.sh`,
         `./tools/check-gate-lists.sh` or
         `./tools/test-check-gate-lists.sh` for the invariant
         you touched. actionlint is not preinstalled; fetch it the way

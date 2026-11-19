@@ -383,8 +383,48 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           AUTHOR_BOT_ID: ${{ inputs.author_bot_id }}
           MAX_ATTEMPTS: ${{ inputs.max_attempts_per_push }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          # The workflow's own token, as for the default branch's CI: the author app's grant may not cover Actions.
+          ACTIONS_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # A recording in progress on this branch is about to commit the frames this red run is red on: the
+          # conflict bot takes the default branch's frames on purpose and dispatches `record-screenshots`,
+          # and a person may have dispatched one. An attempt now would re-record the same classes beside it,
+          # and one push or the other would be rejected. If the recording commits, that starts CI on a new
+          # head, which gets its own attempt. If it commits nothing (no frame changed, a refusal, a failure)
+          # no CI starts, and this head stays red with no attempt: so the PR is told, and re-running CI on it
+          # gets the attempt back, because the stand-down comes before the attempt marker is read.
+          #
+          # bound:recording-begin
+          recording_in_progress() {
+            local runs branch
+            # A branch name can hold `&`, `#` or `+`, which would end or change the query.
+            branch=$(jq -rn --arg b "$BRANCH" '$b | @uri') || return 1
+            # A branch with no such workflow answers 404, and an API failure answers nothing useful: both
+            # read as "no recording", the behaviour from before this check, rather than blocking every fix.
+            runs=$(GH_TOKEN="$ACTIONS_TOKEN" gh api \
+              "repos/${GH_REPO}/actions/workflows/record-screenshots.yml/runs?branch=${branch}&per_page=20" \
+              --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2> /dev/null) || return 1
+            [ "${runs:-0}" -gt 0 ]
+          }
+          # bound:recording-end
+          if recording_in_progress; then
+            echo "::notice::A record-screenshots run is in progress on $BRANCH - recording already dispatched, so no fix is attempted on ${SHA:0:7}."
+            # Best-effort, as for the red default branch: a note lost to a 5xx costs a second note later, and
+            # a failure here must not silence the reporters. One note per head.
+            recording_marker="<!-- ci-fix-recording:${SHA} -->"
+            existing=$(gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" \
+              --paginate --jq '.[].body') || existing=""
+            if ! grep -qF "$recording_marker" <<<"$existing"; then
+              printf '%s\nCI failed on `%s`, but a recording of screenshot frames is running on this branch, so I am not attempting a fix now. If it commits new frames, CI runs again on them and that head gets its own attempt. If it commits nothing, re-running CI on this PR gets the automatic fix back.\n' \
+                "$recording_marker" "${SHA:0:7}" | gh pr comment "$PR" --body-file - \
+                || echo "::warning::Could not post the recording note on PR #$PR."
+            fi
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           marker="<!-- ci-fix-attempted:${SHA} -->"
           # Not a pipeline: grep -q exits on the first match, gh takes SIGPIPE and returns 141, and
           # under pipefail that reads as "not yet attempted" - so the loop guard fails open exactly
@@ -711,7 +751,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.53
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -825,7 +865,7 @@ jobs:
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.53
         with:
           base-ref: origin/${{ steps.pr.outputs.base }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -870,7 +910,7 @@ jobs:
           inputs.toolchain == 'android' &&
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.53
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           java-version: ${{ inputs.java_version }}
@@ -952,7 +992,7 @@ jobs:
         if: >
           steps.pr.outputs.skip != 'true' && steps.guard.outputs.skip != 'true' &&
           steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.53
         with:
           action_ref: 12dd8d74c712f5f3669365b2369b558c495b1104
 
@@ -961,7 +1001,7 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.53
 
       - name: Fix with Claude
         id: claude
@@ -1081,7 +1121,7 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.53
         with:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           show_full_output: ${{ inputs.show_full_output }}
@@ -1668,7 +1708,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.53
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -1678,7 +1718,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.53
         with:
           base-ref: origin/${{ inputs.default_branch }}
           extra-paths: ${{ inputs.governed_extra_paths }}
@@ -1708,7 +1748,7 @@ jobs:
         if: >
           inputs.toolchain == 'android' &&
           steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.53
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           java-version: ${{ inputs.java_version }}
@@ -1779,7 +1819,7 @@ jobs:
         timeout-minutes: 10
         continue-on-error: true
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.53
         with:
           action_ref: 12dd8d74c712f5f3669365b2369b558c495b1104
 
@@ -1788,7 +1828,7 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.53
 
       # The same agent, tools and bounds as the job above. Screenshot re-records are not offered:
       # that gate is opted into per caller for PR branches, and a default branch is no place to start.
@@ -1861,7 +1901,7 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.51
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.53
         with:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           show_full_output: ${{ inputs.show_full_output }}

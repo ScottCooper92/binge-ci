@@ -88,7 +88,7 @@ chmod +x "$work/bin/gh"
 request() { # extra env assignments
   : > "$work/out"
   env -i PATH="$work/bin:$PATH" GITHUB_OUTPUT="$work/out" EVENT=workflow_dispatch SENDER_TYPE=User ACTOR=maintainer \
-    GH_TOKEN=t GH_REPO=o/r REF=feature/x TESTS='com.example.home.*ScreenshotTest' DEFAULT_BRANCH=main "$@" \
+    GH_TOKEN=t GH_REPO=o/r REF=feature/x TESTS='com.example.home.*ScreenshotTest' DEFAULT_BRANCH=main TRUSTED_DISPATCHER= "$@" \
     bash "$work/request.sh" > "$work/request.log" 2>&1
 }
 accepts() { if request "${@:2}"; then ok "$1"; else fail "$1 was refused: $(grep -m1 error "$work/request.log")"; fi; }
@@ -99,6 +99,14 @@ accepts "admin permission" STUB_PERMISSION=admin
 refuses "a push event" EVENT=push
 refuses "a pull request event" EVENT=pull_request
 refuses "a bot sender" SENDER_TYPE=Bot
+refuses "a bot with no trusted dispatcher named" SENDER_TYPE=Bot ACTOR=author-bot
+refuses "a bot other than the one named" SENDER_TYPE=Bot ACTOR=other-bot TRUSTED_DISPATCHER=author-bot
+refuses "a bot whose login differs in case" SENDER_TYPE=Bot ACTOR=Author-Bot TRUSTED_DISPATCHER=author-bot
+refuses "a user whose login is the one named, with no write access" ACTOR=author-bot TRUSTED_DISPATCHER=author-bot STUB_PERMISSION=none
+refuses "the named bot on the default branch" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot REF=main
+refuses "the named bot on a push event" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot EVENT=push
+refuses "the named bot with a bad filter" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot 'TESTS=$(id)'
+accepts "the bot the caller names, which is not a collaborator" SENDER_TYPE=Bot ACTOR=author-bot TRUSTED_DISPATCHER=author-bot STUB_PERMISSION=none
 refuses "a user with read permission" STUB_PERMISSION=read
 refuses "a user with no permission" STUB_PERMISSION=none
 refuses "the default branch" REF=main
@@ -128,9 +136,18 @@ echo '*.log' > .gitignore
 git add -A && git commit -q -m base && git push -q origin main
 git checkout -q -b feature/x && git push -q origin feature/x
 reset_to_branch() { git checkout -q feature/x && git reset -q --hard origin/feature/x && git clean -qfdx; }
+# A wrapper that records the credential environment git is given at a push, then runs the real git.
+mkdir -p "$work/gitbin"
+real_git=$(command -v git)
+cat > "$work/gitbin/git" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = push ]; then { echo "ARGV: \$*"; env | grep '^GIT_CONFIG_' | sort -V; echo "--"; } >> "\$PUSH_LOG"; fi
+exec "$real_git" "\$@"
+STUB
+chmod +x "$work/gitbin/git"
 commit_step() {
   : > "$work/out"
-  env -i PATH="$PATH" HOME="$work" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GITHUB_OUTPUT="$work/out" GITHUB_STEP_SUMMARY="$work/summary" \
+  env -i PATH="$work/gitbin:$PATH" HOME="$work" PUSH_LOG="$work/push.log" APP_TOKEN=APPTOKEN123 SERVER_URL=https://github.com GITHUB_TOKEN=ACTIONSTOKEN GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GITHUB_OUTPUT="$work/out" GITHUB_STEP_SUMMARY="$work/summary" \
     REF=feature/x TESTS='a.b.*ScreenshotTest' bash "$work/commit.sh" > "$work/commit.log" 2>&1
 }
 outcome() { sed -n 's/^outcome=//p' "$work/out"; }
@@ -148,6 +165,38 @@ files=$(git diff --name-only HEAD~1 HEAD | sort | tr '\n' ',')
 [ "$(git rev-parse HEAD)" = "$(git -C "$work/origin.git" rev-parse feature/x)" ] && ok "the branch on the remote is the new commit" || fail "the remote branch did not move"
 [ "$(git -C "$work/origin.git" rev-parse main)" = "$(git rev-parse main)" ] && ok "and the default branch is untouched" || fail "main moved"
 grep -q 'Recorded 3 frame' "$work/summary" && ok "the step summary says how many" || fail "no summary"
+
+echo "-- the push is made with the author app's token"
+# GITHUB_TOKEN starts no workflow, so a push made with it leaves the consumer's CI unrun and its required check
+# missing. The step has to name the installation token itself, and never put it where another process can read it.
+if python3 -I - "$work/push.log" <<'INNER'
+import base64, re, sys
+text = open(sys.argv[1]).read()
+push = text.split("--")[0]
+argv = re.search(r"^ARGV: (.*)$", push, re.M).group(1)
+entries = {}
+for m in re.finditer(r"^GIT_CONFIG_(KEY|VALUE)_(\d+)=(.*)$", push, re.M):
+    entries.setdefault(int(m.group(2)), {})[m.group(1)] = m.group(3)
+pairs = [(e["KEY"], e["VALUE"]) for _, e in sorted(entries.items())]
+count = re.search(r"^GIT_CONFIG_COUNT=(\d+)$", push, re.M)
+want = "AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:APPTOKEN123").decode()
+key = "http.https://github.com/.extraheader"
+bad = []
+headers = [v for k, v in pairs if k == key]
+if headers != ["", want]:
+    bad.append(f"expected an empty reset then the app token's header, got {headers!r}")
+if not count or int(count.group(1)) != len(pairs):
+    bad.append("GIT_CONFIG_COUNT does not cover the entries, so git would ignore them")
+if "APPTOKEN123" in argv or "ACTIONSTOKEN" in argv or want in argv:
+    bad.append("a token is in the push's argv")
+if "ACTIONSTOKEN" in push or any("ACTIONSTOKEN" in v for _, v in pairs):
+    bad.append("GITHUB_TOKEN reached the push")
+print("\n".join("      " + b for b in bad))
+sys.exit(1 if bad else 0)
+INNER
+then ok "the push carries the installation token's header after an empty reset, with no token in argv and no GITHUB_TOKEN"; else fail "the push is not made with the installation token alone"; fi
+if grep -q 'APPTOKEN123' "$work/commit.log"; then fail "the token is in the log in the clear"; else ok "and the token is not in the step's log"; fi
+grep -q "Pushed with the author app's installation token" "$work/summary" && ok "the step summary says which token pushed" || fail "the summary does not say which token pushed"
 
 echo "-- nothing changed"
 reset_to_branch

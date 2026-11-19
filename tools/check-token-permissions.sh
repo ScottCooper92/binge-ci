@@ -25,10 +25,13 @@ cd "${CHECK_ROOT:-$(dirname "$0")/..}" || exit 1
 python3 - <<'PY'
 import glob, re, sys
 
-# The author app's installation: contents, pull requests and workflows, plus the metadata every
-# app gets. It has no Issues permission; a PR's conversation is read through pull requests.
+# The author app's installation: contents, pull requests, workflows and actions, plus the metadata every
+# app gets. It has no Issues permission; a PR's conversation is read through pull requests. Actions write
+# is for author-conflicts.yml, which dispatches the consumer's record-screenshots workflow; the mint that
+# does it asks for no `permission-*`, so it gets the whole installation, and narrowing it would drop the
+# contents write the push needs.
 GRANTS = {
-    "AUTHOR_APP_ID": {"contents", "pull-requests", "workflows", "metadata"},
+    "AUTHOR_APP_ID": {"contents", "pull-requests", "workflows", "actions", "metadata"},
     # The reviewer app is installed on the owner's repositories with read access to contents. Only the
     # read-only submodule mints narrow its token, and they ask for contents alone.
     "REVIEWER_APP_ID": {"contents", "metadata"},

@@ -30,6 +30,9 @@ jobs:
     with:
       ref: ${{ inputs.ref || github.ref_name }}
       tests: ${{ inputs.tests }}
+      # The author bot's login, so that the conflict bot can start a recording after it takes the default
+      # branch's frames in a screenshot-only merge conflict. Without it, only a person's dispatch is accepted.
+      trusted_dispatcher: binge-pr-author[bot]
       # The tasks default to the `:app` module. A multi-module app names its own:
       # compile_tasks: :app:compileDebugScreenshotTestKotlin --max-workers=2
       # record_tasks: :app:updateDebugScreenshotTest
