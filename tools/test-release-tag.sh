@@ -139,12 +139,35 @@ git checkout -q main && git reset -q --hard "$base"
 git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i 's/echo hi/echo changed/' .github/workflows/one.yml
 git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
 prjson release/v1.0.2 o/r User
-expect_refuses "a release that also edits a workflow line" "not a self-reference"
+expect_refuses "a release that also edits a workflow line" "by more than"
 git checkout -q main && git reset -q --hard "$base"
 git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i 's#a@v1.0.2#b@v1.0.2#' .github/workflows/two.yml
 git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
 prjson release/v1.0.2 o/r User
-expect_refuses "a release that changes which action a line names" "differ by more than"
+expect_refuses "a release that changes which action a line names" "by more than"
+
+echo "-- a release that rearranges self-references is refused, though each line is one"
+# Two jobs, one that reads and one that writes, each using a different action. A release that swaps the two
+# lines (or moves one to another workflow) has every changed line a self-reference and the same set of lines,
+# and it hands the writing job another action.
+git checkout -q main && git reset -q --hard "$base"
+printf 'jobs:\n  r:\n    permissions:\n      contents: read\n    steps:\n      - uses: ScottCooper92/binge-ci/.github/actions/a@v1.0.1\n  w:\n    permissions:\n      contents: write\n    steps:\n      - uses: ScottCooper92/binge-ci/.github/actions/z@v1.0.1\n' > .github/workflows/three.yml
+git add -A && git commit -q -m "two jobs" && base2=$(git rev-parse HEAD)
+git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i 's#actions/a@#actions/TMP@#; s#actions/z@#actions/a@#; s#actions/TMP@#actions/z@#' .github/workflows/three.yml
+git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
+prjson release/v1.0.2 o/r User
+expect_refuses "a release that swaps two self-reference lines in one workflow" "by more than"
+git checkout -q main && git reset -q --hard "$base2"
+git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i '/actions\/z@/d' .github/workflows/three.yml && printf '      - uses: ScottCooper92/binge-ci/.github/actions/z@v1.0.2\n' >> .github/workflows/two.yml
+git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
+prjson release/v1.0.2 o/r User
+expect_refuses "a release that moves a self-reference line to another workflow" "by more than"
+git checkout -q main && git reset -q --hard "$base2"
+git checkout -q -b tmp && bump v1.0.1 v1.0.2 && chmod +x .github/workflows/two.yml
+git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
+prjson release/v1.0.2 o/r User
+expect_refuses "a release that also changes a file's mode" "changes mode"
+git checkout -q main && git reset -q --hard "$base"
 
 echo "-- a rebase merge is checked as a whole"
 git checkout -q main && git reset -q --hard "$base"
@@ -157,7 +180,7 @@ git checkout -q main && git reset -q --hard "$base"
 git checkout -q -b tmp && bump v1.0.1 v1.0.2 && sed -i '/^-- a note$/d' .github/workflows/one.yml
 git add -A && git commit -q -m x && git checkout -q main && git merge -q --squash tmp > /dev/null && git commit -q -m "release (#9)" && git branch -q -D tmp
 prjson release/v1.0.2 o/r User
-expect_refuses "a release that deletes a line starting with two dashes" "differ by more than\|not a self-reference"
+expect_refuses "a release that deletes a line starting with two dashes" "by more than"
 
 echo "-- a good release is tagged, in order"
 release "$base" v1.0.1 v1.0.2

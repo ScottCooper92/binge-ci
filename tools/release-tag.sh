@@ -30,7 +30,7 @@ patch_of() { printf '%s' "${1##*.}"; }
 
 decide() {
   : "${REPO:?}" "${SHA:?}" "${BEFORE:?}"
-  local prs pr head_ref head_repo merged_by merged_type number version newest old_refs diff
+  local prs pr head_ref head_repo merged_by merged_type number version newest
 
   # The pull request this commit is the merge of. A direct push to main, or a squash of something else, has none.
   prs=$(gh api "repos/$REPO/commits/$SHA/pulls") || die "could not list the pull requests for $SHA"
@@ -95,24 +95,31 @@ decide() {
   if grep -qvE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files"; then
     die "the merge changes more than workflow and action files: $(grep -vE '^\.github/(workflows|actions/[^/]+)/[^/]+\.yml$' <<< "$files" | head -3 | tr '\n' ' ')"
   fi
-  # Changed lines only: the file headers (between `diff --git` and the first `@@`) are skipped by position, not by
-  # their `---`/`+++` text, because a deleted line that starts with `-- ` prints as `--- ` and would be dropped.
-  diff=$(git diff -U0 --no-renames "$BEFORE" "$SHA" | awk '/^diff --git /{h=1; next} /^@@/{h=0; next} !h && /^[+-]/' || true)
-  [ -n "$diff" ] || die "the merge has no changed lines."
-  local removed added
-  removed=$(grep -E '^-' <<< "$diff" | sed 's/^-//' || true)
-  added=$(grep -E '^\+' <<< "$diff" | sed 's/^+//' || true)
-  grep -qvE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$removed" \
-    && die "a removed line is not a self-reference: $(grep -vE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$removed" | head -1)"
-  grep -qvE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$added" \
-    && die "an added line is not a self-reference: $(grep -vE 'ScottCooper92/binge-ci/[^[:space:]]*@v1\.0\.[0-9]+' <<< "$added" | head -1)"
-  [ "$(sed -E 's/@v1\.0\.[0-9]+/@V/' <<< "$removed" | sort)" = "$(sed -E 's/@v1\.0\.[0-9]+/@V/' <<< "$added" | sort)" ] \
-    || die "the changed lines differ by more than the release tag."
-  old_refs=$(grep -oE '@v1\.0\.[0-9]+' <<< "$removed" | sort -u | tr -d '@')
+  # File by file, byte for byte: the file at BEFORE with the previous release's self-references rewritten to this
+  # release's has to be exactly the file at SHA. A multiset of changed lines is not enough: it accepts two
+  # self-reference lines swapped within a workflow, or one moved to another workflow, and a swap can hand a job
+  # with write access an action another job used. This also refuses an added or deleted file and a mode change.
+  local prev prev_re f before_mode sha_mode
+  prev=$(git tag --list 'v1.0.*' | grep -E "$version_re" | awk -F. -v n="$(patch_of "$version")" '$3 + 0 < n' | sort -t. -k3 -n | tail -n 1 || true)
+  [ -n "$prev" ] || die "no release older than $version exists to bump from."
   if [ "$resume" = false ]; then
-    [ "$old_refs" = "$newest" ] || die "the bump moves '$(printf '%s ' $old_refs)', not $newest, the previous release."
+    [ "$prev" = "$newest" ] || die "the previous release is $prev, not $newest."
   fi
-  [ "$(grep -oE '@v1\.0\.[0-9]+' <<< "$added" | sort -u | tr -d '@')" = "$version" ] || die "the bump does not move every reference to $version."
+  prev_re=${prev//./\\.}
+  local scratch
+  scratch=$(mktemp -d)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    git cat-file -e "$BEFORE:$f" 2> /dev/null || die "$f did not exist before the merge: a release adds no file."
+    git cat-file -e "$SHA:$f" 2> /dev/null || die "$f is deleted by the merge: a release deletes no file."
+    before_mode=$(git ls-tree "$BEFORE" -- "$f" | awk '{print $1}')
+    sha_mode=$(git ls-tree "$SHA" -- "$f" | awk '{print $1}')
+    [ "$before_mode" = "$sha_mode" ] || die "$f changes mode: a release changes only self-references."
+    git show "$BEFORE:$f" | sed -E "s#(ScottCooper92/binge-ci/[^[:space:]@]*)@${prev_re}([^0-9]|\$)#\\1@${version}\\2#g" > "$scratch/expected"
+    git show "$SHA:$f" > "$scratch/actual"
+    cmp -s "$scratch/expected" "$scratch/actual" || die "$f differs from the previous release's copy by more than $prev becoming $version."
+  done <<< "$files"
+  rm -rf "$scratch"
 
   # The rest of the reference rules (no './', one tag, immutable).
   CHECK_ROOT="$here" bash tools/check-internal-refs.sh > /dev/null || die "tools/check-internal-refs.sh fails at $SHA."
