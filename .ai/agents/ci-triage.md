@@ -33,6 +33,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the pin-only check | `tools/test-pin-only.sh` - a pin to one tagged release (workflow lines and the submodule alike) is `true`; a workflow edit beside it, a pin to `v1` or to a commit no tag names, an untagged or off-main commit, an added or deleted line, another file or an unreadable remote is `false` |
 | Test the screenshot recording workflow | `tools/test-record-screenshots.sh` - the request is refused unless a person with write access dispatches it, on a branch that is not the default, with a plain filter; the commit holds PNG files only, a changed non-PNG file fails the run, and the push is never forced |
 | Test the conflict bot's screenshot path | `tools/test-conflict-png.sh` - a conflict made only of reference frames takes the default branch's copies, pushes, dispatches a recording for exactly those classes and comments once; a mixed conflict, a non-reference PNG, a deleted frame, a consumer with no recording workflow or a rejected push leaves the merge to the agent or fails |
+| Test the CI-fix stand-down | `tools/test-ci-fix-recording.sh` - a queued, waiting or in-progress `record-screenshots` run on the branch makes the guard skip the attempt, using the workflow's own token; a finished run, no run or an API failure changes nothing |
 | Test the Android app workflow | `tools/test-android-app-ci.sh` - every job runs on the `runner` input, the building jobs wait for `changes` and skip unless it succeeded and said so, each stops its Gradle daemon, every action is pinned, and the worked caller keeps `CI` and a `build` job of its own |
 | Test the design-system review rule | `tools/test-design-system-rule.sh` - with no index named nothing is written; with one the rule and the default branch's copy of the index are, a missing index is said so, and the prompt names the rule only when it exists |
 | Test the screenshot re-record comment | `tools/test-rerecord-comment.sh` - the comment lists the frames the pushed commit changed with before and after, the prompt keeps its gate (40 frames, no render errors), and the review rules look at the frames |
@@ -84,6 +85,7 @@ to improvise.
 | `test-pin-only.sh`: a case FAILs | A change that is not a pure pin answered `true`, or a pure pin answered `false` | Fix the script. A false `true` lets a workflow edit merge with no human reading it, so never loosen a `false` case; an answer it cannot work out is `false` |
 | `test-record-screenshots.sh`: a case FAILs | The workflow accepted a bot, a push event, a user without write, the default branch or an unsafe filter, committed a file that is not a PNG, or forced its push | Fix the workflow. Never loosen what it refuses: it pushes to a branch on one person's word |
 | `test-conflict-png.sh`: a case FAILs | The screenshot step took frames in a mixed conflict, pushed without a recording workflow to start, named the wrong classes, or the agent steps ran after it | Fix the workflow step. Never widen what counts as a frame: a source file merged by taking one side is a lost change |
+| `test-ci-fix-recording.sh`: a case FAILs | The guard attempted a fix beside a recording in progress, or stood down on a finished run, or the check stopped using the workflow's token | Fix the guard step. A failed lookup must read as "no recording", never block every fix |
 | `test-android-app-ci.sh`: a case FAILs | A job lost its runner input, its `changes` condition, its daemon stop or a pin, or the worked caller lost its own `build` job | Fix the workflow or the caller. A required check named `build` has to be the caller's job; never move the aggregate into the shared workflow |
 | `test-design-system-rule.sh`: a case FAILs | The index was read from the PR checkout, the rule leaked into the prompt with the input empty, or the rule lost its request-changes line | Fix the workflow step. The index and the rule must stay the default branch's and the workflow's; never read either from the PR |
 | `test-rerecord-comment.sh`: a case FAILs | The comment builder lists a frame the commit did not change, drops one it did, links the wrong commits, or no longer says how many frames it adds or deletes and which pins the PR moves; or the prompt's gate or the review rules lost a condition | Fix the builder or restore the condition. The list must come from the commit's diff, never from the agent. Never delete a case or loosen the gate to pass |
@@ -136,6 +138,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-pin-only.sh
 ./tools/test-record-screenshots.sh
 ./tools/test-conflict-png.sh
+./tools/test-ci-fix-recording.sh
 ./tools/test-android-app-ci.sh
 ./tools/test-design-system-rule.sh
 ./tools/check-gate-lists.sh
