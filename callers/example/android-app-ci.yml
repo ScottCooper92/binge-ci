@@ -1,0 +1,75 @@
+name: CI
+
+# The CI of an Android app, as a thin caller of the shared workflow. The name has to stay `CI`: the
+# bots in this directory match this workflow by name, so renaming it silently unhooks them.
+#
+# `build` is the one job branch protection requires, and it lives HERE: a reusable workflow's jobs
+# reach branch protection as `<caller job> / <job>`, so a required check named `build` has to be the
+# caller's own. It fails unless the shared run passed, and `always()` makes a failure upstream reach it
+# instead of skipping it, which would read as "not run" rather than red.
+#
+# Move to a self-hosted runner by changing `runner` alone. No `paths-ignore`: bot-review needs a
+# successful run of this workflow against every head, so the shared workflow decides which jobs a diff
+# can affect and skips the rest, and the run itself always happens.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # `ready_for_review` is not in the default set, and without it a PR opened as a draft and later
+    # promoted never gets a first run.
+    types: [opened, synchronize, reopened, ready_for_review]
+  # A canary for what can turn the build red with no commit here: a runner image, an Android SDK
+  # update, a toolchain drift. Scheduled workflows only run on the default branch.
+  schedule:
+    - cron: '0 4 * * *'
+
+# The event name keeps the nightly run, which shares main's ref, from cancelling or being cancelled by a push.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+# What the called workflow declares, which a caller has to hold - see README.md, "Writing a caller".
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ci:
+    uses: ScottCooper92/binge-ci/.github/workflows/android-app-ci.yml@v1
+    with:
+      runner: '["ubuntu-latest"]'
+      # Private submodules the build includes, so the app token can read them:
+      # private_submodules: shared-ui,shared-contracts
+      # The paths the release build (R8) depends on. A pull request runs it only for one of these.
+      release_inputs: |
+        app/build.gradle.kts
+        build.gradle.kts
+        settings.gradle.kts
+        gradle/libs.versions.toml
+        app/proguard-*.pro
+        libs/*
+      # Paths no Gradle task reads, so a pull request that touches only these skips the build.
+      product_none: |
+        *.md
+        docs/*
+        .ai/*
+        .github/ISSUE_TEMPLATE/*
+      # An app with several modules names its tasks here. These are the defaults:
+      # checks_tasks: build --continue -x testDebugUnitTest -x koverVerify -x validateDebugScreenshotTest -x assembleRelease
+      # tests_tasks: testDebugUnitTest koverVerify --continue
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+  build:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless the shared run passed
+        env:
+          RESULT: ${{ needs.ci.result }}
+        run: |
+          echo "ci: $RESULT"
+          [ "$RESULT" = success ]

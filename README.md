@@ -317,6 +317,7 @@ drifted a word at a time, so they live here too:
 | `fork-review.yml` | reusable workflow | An advisory, read-only review of a fork PR, after a maintainer labels it. Two callers, one for the untrusted `pull_request` stage and one for the trusted `workflow_run` stage, both in `callers/example/`; each needs `contents: read`, `actions: read` and `pull-requests: write`. See [docs/fork-review.md](docs/fork-review.md). |
 | `submodule-pins.yml` | reusable workflow | Fails a PR whose submodule pins a commit its own repository has not merged, or moves a pin to a commit that does not descend from the base branch's pin, unless the PR carries `hold`. It reads each submodule's own remote, so it takes no list of paths. Call it as a job of the required workflow, and grant `pull-requests: read`. |
 | `consumer-check.yml` | reusable workflow | Compiles a consumer against the PR's head, swapping it in for the consumer's pin. It finds that submodule by URL in the consumer's `.gitmodules`. Informational: give it a workflow of its own, not named `CI`. |
+| `android-app-ci.yml` | reusable workflow | The CI of an Android app: a `changes` job that says which jobs a diff can affect, then the Gradle `checks` and the unit `tests` as jobs of their own (the screenshot shards and the release build follow in later parts, so do not call it before the release that holds them). Pass `release_inputs`, and the modules and tasks the app needs; `runner` is a JSON array, so a move to a self-hosted runner is one input. Grant `contents: read` and `actions: read`. The required check named `build` is a job of the caller's own: see `callers/example/android-app-ci.yml`. |
 | `device-smoke.yml` | reusable workflow | Runs instrumentation tests on a Gradle Managed Device, on a hosted runner. Pass the device, its API level and system image, the default branch and the test `tasks`. Grant `actions: write`, for the AVD cache. See below. |
 | `actions-storage-sweep.yml` | reusable workflow | Deletes the repository's Actions caches not accessed for `max_age_days` (default 3) and artifacts older than that. Give it a weekly schedule of its own. Grant `actions: write`. `dry_run` logs what it would delete. `keep_cache_key_prefixes` (default `gmd-avd-`) lists cache keys to leave alone. `cache_max_age_days` (default 0, meaning `max_age_days`) ages caches separately from artifacts. `runner` (JSON array, default `["ubuntu-latest"]`) picks where it runs, for a repository that keeps its jobs off hosted runners. It deletes artifacts by age whatever retention their uploader chose, so set `max_age_days` to the longest retention the repository keeps on purpose. |
 | `upstream-watch.yml` | reusable workflow | Opens one issue for the newest new stable release of each server the app talks to (Jellyfin, Seerr, Overseerr), with a compatibility checklist. See "Upstream watch" below. Grant `issues: write`. |
@@ -346,7 +347,7 @@ secrets: inherit
 ```
 
 - It applies to `bot-review.yml`, `author-ci-fix.yml`, `author-comments.yml`, `author-conflicts.yml`,
-  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml` and `consumer-check.yml`. In
+  `author-retarget.yml`, `submodule-pins.yml`, `submodule-bump.yml`, `device-smoke.yml`, `android-app-ci.yml` and `consumer-check.yml`. In
   `consumer-check.yml` it covers the caller's own checkout, not the consumer's other submodules; see
   "Private consumers" below for those.
 - The GitHub App has to be installed on every private repository listed, with read access to contents.
@@ -355,7 +356,7 @@ secrets: inherit
   uses the same token; a hand-written mint has to do the same. The author bots' read token lists the
   private repositories only, since their write token fetches the caller.
 - The read-only workflows (`bot-review.yml`, `submodule-pins.yml`, `device-smoke.yml`,
-  `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
+  `android-app-ci.yml`, `consumer-check.yml`) mint a separate token with `permission-contents: read` for the checkout. The
   three that have no app secret today take `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` as optional
   secrets, needed only when the input is set. Pass them, or use `secrets: inherit`.
 - The author bots and `submodule-bump.yml` check out and push with their app token, which reaches the
