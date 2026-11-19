@@ -1360,9 +1360,19 @@ jobs:
                 - A frame that differs where the PR's change does not explain it
                   (another component or screen, a shifted layout, clipped or missing
                   content, an error or a blank render) is a finding, and
-                  `request_changes` when you can name the frame and what is wrong. So
-                  is a commit that adds or deletes a frame: a re-record only modifies
-                  existing ones.
+                  `request_changes` when you can name the frame and what is wrong.
+                - When the PR moves a submodule pin (the comment says so, and so does
+                  the PR's diff), a frame of a screen the PR's own code did not touch
+                  is explained when it differs because of what the new pin changed, and
+                  only when the PR body says `frames from the <submodule> bump`. Check
+                  the claim: read what the pin's commits changed and whether the frame
+                  shows that. Without the sentence, or on a PR that moves no pin, such
+                  a frame is a finding.
+                - A deleted frame is a finding: a re-record never deletes one. An added
+                  frame is expected only when this PR added or changed the test
+                  function or preview that renders it, which you check in the PR's
+                  diff; a new frame with no such test is a finding, and one that shows
+                  a blank screen or an error is a finding even when the test is new.
                 - If you cannot tell from the images whether a difference is
                   intended, say so as a question and name the frame. Do not approve a
                   re-record you did not look at.

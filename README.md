@@ -195,20 +195,28 @@ whatever rendered. `author-ci-fix.yml` can be allowed to do it for the screens a
 `rerecord_screenshots: true` on the caller. It is off by default, and nothing changes without it.
 
 - **The gate.** The agent re-records only when nothing else is red, there are at most 40 failing frames,
-  and every failing frame renders a component whose source the PR (or a submodule bump in it) changed.
-  How large the difference is does not matter when the screen is the PR's own: an intended redesign
-  moves most of its pixels. A frame outside the gate stops the run, and so does anything that is not a
-  difference: an out-of-memory failure, a render or compose error, a frame that is missing or new.
+  and every failing frame is one of three cases. It renders a component whose source the PR changed.
+  Or it is a new frame: its reference image does not exist, and the test function or preview that renders it
+  was added or changed in this PR's diff. Or the PR moves a submodule pin, the frame's screen did not
+  need the PR's own code to change because what it shows changed with the new pin (a component, a theme
+  or a token in `git log -p old..new`), and the PR body says `frames from the <submodule> bump`. How large
+  the difference is does not matter when the screen is the PR's own: an intended redesign moves most of
+  its pixels. A frame outside the gate stops the run: one the PR did not touch on a PR with no pin move
+  or no such sentence, a missing reference whose test this PR did not add, and anything that is not a
+  difference, an out-of-memory failure or a render or compose error.
 - **What it changes.** Only the reference PNGs of the failing frames, scoped to those test classes. It
   runs the update task and then the validate task, and looks at the old and new image of each frame.
 - **The record.** After the push, the comment on the PR lists every re-recorded frame with its before (the
   frame at the merge base with the PR's base branch) and after (the frame at the pushed commit) as
   images, and the difference the agent reported. The workflow builds the list from the commit's own
-  diff, so the agent cannot add or hide a frame, and it flags a commit that adds or deletes one. The
+  diff, so the agent cannot add or hide a frame. It says how many frames the commit adds (expected only
+  for a test the PR added) or deletes (never expected), and which submodule pins the PR moves. The
   comment carries `<!-- ci-fix-rerecord:<sha> -->`. The images are links to the files on GitHub, so
   they show for a viewer with access to the repository.
 - **The review.** `bot-review.yml` sees the comment, looks at each frame and judges it against what the
-  PR says it changes. A frame that differs somewhere the change does not explain is a finding. The
+  PR says it changes. A frame that differs somewhere the change does not explain is a finding. A pin-bump
+  frame is explained only when the PR body says `frames from the <submodule> bump` and the frame shows
+  what the pin changed, and a new frame only when the PR added the test that renders it. The
   rules for this are in the workflow's own prompt, so a consumer's review guide needs no change: the
   guide is the consumer's own file, and a rule kept there would be missing for every other repository.
 - **The consumer's half.** The caller's `gate_rules` and the triage table of its
