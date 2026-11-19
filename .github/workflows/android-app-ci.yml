@@ -116,9 +116,11 @@ on:
         type: string
         default: ''
       checks_timeout_minutes:
+        description: The checks job's timeout, in minutes.
         type: number
         default: 30
       tests_timeout_minutes:
+        description: The tests job's timeout, in minutes.
         type: number
         default: 30
     secrets:
@@ -126,6 +128,7 @@ on:
         description: Only read when `private_submodules` is set, to mint the read-only submodule token.
         required: false
       REVIEWER_APP_PRIVATE_KEY:
+        description: Only read when `private_submodules` is set, with `REVIEWER_APP_ID`.
         required: false
     outputs:
       product:
@@ -307,7 +310,13 @@ jobs:
       # and the artifact below expires in a day, so a failed run says what leaked in its own log.
       - name: Print the coroutine leak report
         if: ${{ failure() }}
-        run: cat ./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt ./*/*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt 2>/dev/null || echo "No coroutine leak was reported."
+        run: |
+          # No -e: this step only reports. A glob that matches nothing is skipped, so the fallback line is
+          # printed only when no report exists, and never after one.
+          set -uo pipefail
+          shopt -s nullglob
+          reports=(./*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt ./*/*/build/reports/tests/testDebugUnitTest/coroutine-leaks.txt)
+          if [ "${#reports[@]}" -gt 0 ]; then cat "${reports[@]}"; else echo "No coroutine leak was reported."; fi
 
       - name: Upload reports
         if: ${{ failure() }}
