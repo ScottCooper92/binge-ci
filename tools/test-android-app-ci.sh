@@ -38,7 +38,8 @@ if not bad:
     ok.append(f"all {len(jobs)} jobs run on the runner input, a JSON array")
 
 # The jobs that build wait for `changes` and run only when it succeeded and says they matter.
-wanted = {"checks": "product", "tests": "product"}
+wanted = {"checks": "product", "tests": "product", "screenshots": "screens"}
+gradle_steps = {"checks": 1, "tests": 1, "screenshots": 2}
 for name, output in wanted.items():
     job = jobs.get(name)
     if job is None:
@@ -57,21 +58,39 @@ for name, output in wanted.items():
     if not stop or "always()" not in str(stop[-1].get("if", "")) or steps[-1] is not stop[-1]:
         bad.append(f"{name}: the last step is not an `always()` Gradle daemon stop")
     gradle = [s for s in steps if "./gradlew \"${args[@]}\"" in str(s.get("run", ""))]
-    if len(gradle) != 1:
-        bad.append(f"{name}: expected one Gradle step that takes its arguments from an input")
-    else:
-        env = gradle[0].get("env", {})
+    if len(gradle) != gradle_steps[name]:
+        bad.append(f"{name}: expected {gradle_steps[name]} Gradle step(s) that take their arguments from an input, found {len(gradle)}")
+    for g in gradle:
+        env = g.get("env", {})
         if "inputs." not in str(env.get("TASKS", "")):
-            bad.append(f"{name}: its Gradle arguments do not come from an input through the environment")
-        if "${{" in gradle[0]["run"]:
-            bad.append(f"{name}: an expression is interpolated into the Gradle step's script")
+            bad.append(f"{name}: a Gradle step's arguments do not come from an input through the environment")
+        if "${{" in g["run"]:
+            bad.append(f"{name}: an expression is interpolated into a Gradle step's script")
     checkout = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
     if not checkout or checkout[0].get("with", {}).get("clean") is not True:
         bad.append(f"{name}: the checkout is not asked to clean, which a self-hosted runner needs")
+# The screenshots job: a matrix of shards that does not stop at the first red one, built from `changes`, and a
+# shard with no class skips Gradle, since a validate task given no filter runs the whole suite.
+shots = jobs["screenshots"]
+strat = shots.get("strategy", {})
+if strat.get("fail-fast") is not False:
+    bad.append("screenshots: a red shard stops the others, hiding what they would have found")
+if "fromJSON(needs.changes.outputs.shards)" not in str(strat.get("matrix", {}).get("shard", "")):
+    bad.append("screenshots: the matrix is not built from the shards `changes` named")
+shard_steps = [x for x in shots["steps"] if str(x.get("uses", "")).startswith("ScottCooper92/binge-ci/.github/actions/shard-screenshots@")]
+if len(shard_steps) != 1 or shard_steps[0].get("id") != "shard":
+    bad.append("screenshots: there is not one shard-screenshots step with id `shard`")
+for x in shots["steps"]:
+    if "./gradlew \"${args[@]}\"" in str(x.get("run", "")) and "steps.shard.outputs.empty != 'true'" not in str(x.get("if", "")):
+        bad.append("screenshots: a Gradle step runs for an empty shard")
+valid = [x for x in shots["steps"] if "FILTERS" in str(x.get("env", {}))]
+if len(valid) != 1 or '"${filters[@]}"' not in valid[0]["run"]:
+    bad.append("screenshots: the validation does not pass the shard's filters to Gradle")
 if jobs["changes"].get("if") != "github.event_name != 'pull_request' || github.event.pull_request.draft == false":
     bad.append("changes: a draft pull request is not skipped, or another event is")
 if not bad:
-    ok.append("checks and tests wait for `changes`, skip unless it succeeded and said so, and stop their daemon")
+    ok.append("checks, tests and screenshots wait for `changes`, skip unless it succeeded and said so, and stop their daemon")
+    ok.append("the screenshot shards are a matrix from `changes` that does not fail fast, and an empty shard skips Gradle")
 
 # Every action is pinned: a commit for a third party, a release tag for this repository's own.
 before_pins = len(bad)
@@ -103,4 +122,25 @@ for line in bad:
     print("FAIL  " + line)
 sys.exit(1 if bad else 0)
 PY
+
+# The step that turns `screenshot_shards` into the matrix, run on its own.
+work=$(mktemp -d)
+trap 'rm -rf "${work:?}"' EXIT
+python3 -I - "$root/.github/workflows/android-app-ci.yml" "$work/shards.sh" <<'INNER'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "shards"][0]
+open(sys.argv[2], "w").write(step["run"])
+INNER
+failures=0
+shards_for() { : > "$work/out"; SHARDS="$1" GITHUB_OUTPUT="$work/out" bash "$work/shards.sh" > "$work/log" 2>&1; }
+for ok_value in 1 3 32; do
+  if shards_for "$ok_value" && [ "$(sed -n 's/^shards=//p' "$work/out" | jq -c 'length')" = "$ok_value" ] && [ "$(sed -n 's/^shards=//p' "$work/out" | jq -c '.[0]')" = 0 ]; then
+    echo "ok    $ok_value shard(s) name the indexes 0 to $((ok_value - 1))"
+  else echo "FAIL  $ok_value shard(s) were not named"; failures=$((failures + 1)); fi
+done
+for bad_value in 0 33 -1 abc 1.5 ''; do
+  if shards_for "$bad_value"; then echo "FAIL  '$bad_value' shards were accepted"; failures=$((failures + 1)); else echo "ok    '$bad_value' shards are refused"; fi
+done
+[ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all passed"
