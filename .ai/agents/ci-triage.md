@@ -34,6 +34,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the screenshot recording workflow | `tools/test-record-screenshots.sh` - the request is refused unless a person with write access dispatches it, on a branch that is not the default, with a plain filter; the commit holds PNG files only, a changed non-PNG file fails the run, and the push is never forced |
 | Test the conflict bot's screenshot path | `tools/test-conflict-png.sh` - a conflict made only of reference frames takes the default branch's copies, pushes, dispatches a recording for exactly those classes and comments once; a mixed conflict, a non-reference PNG, a deleted frame, a consumer with no recording workflow or a rejected push leaves the merge to the agent or fails |
 | Test the CI-fix stand-down | `tools/test-ci-fix-recording.sh` - a queued, waiting or in-progress `record-screenshots` run on the branch makes the guard skip the attempt, using the workflow's own token; a finished run, no run or an API failure changes nothing |
+| Test the new-frame review | `tools/test-new-frames.sh` - only frames the PR adds are listed (never a changed or deleted one), up to the cap and then a sample with one frame per test class in turn, a path that is not plain is counted and left out, and the prompt block exists only when the listing found a frame |
 | Test the CI setup sizing | `tools/test-ci-setup-sizing.sh` - each runner size writes its rung: under 12 GB the small heap and one worker, 12 to 23 GB the middle, 24 GB or more or undetected the large, a hosted runner its own, and the screenshot workers follow |
 | Test the Android app workflow | `tools/test-android-app-ci.sh` - every job runs on the `runner` input, the building jobs wait for `changes` and skip unless it succeeded and said so, each stops its Gradle daemon, every action is pinned, and the worked caller keeps `CI` and a `build` job of its own |
 | Test the design-system review rule | `tools/test-design-system-rule.sh` - with no index named nothing is written; with one the rule and the default branch's copy of the index are, a missing index is said so, and the prompt names the rule only when it exists |
@@ -87,6 +88,7 @@ to improvise.
 | `test-record-screenshots.sh`: a case FAILs | The workflow accepted a bot, a push event, a user without write, the default branch or an unsafe filter, committed a file that is not a PNG, or forced its push | Fix the workflow. Never loosen what it refuses: it pushes to a branch on one person's word |
 | `test-conflict-png.sh`: a case FAILs | The screenshot step took frames in a mixed conflict, pushed without a recording workflow to start, named the wrong classes, or the agent steps ran after it | Fix the workflow step. Never widen what counts as a frame: a source file merged by taking one side is a lost change |
 | `test-ci-fix-recording.sh`: a case FAILs | The guard attempted a fix beside a recording in progress, or stood down on a finished run, or the check stopped using the workflow's token | Fix the guard step. A failed lookup must read as "no recording", never block every fix |
+| `test-new-frames.sh`: a case FAILs | The listing included a changed or deleted frame, listed past the cap, sampled one class twice before another once, listed an unsafe path, or the prompt block no longer depends on the listing | Fix the workflow step. Never widen the list to changed frames here: those have their own rule, and a path from a PR is data |
 | `test-ci-setup-sizing.sh`: a case FAILs | A rung moved: a size now gets another heap or worker count, or the small rung lost an option | Fix the action. Sizes are a memory bound: a bigger heap or more workers on a small box is an out-of-memory kill, so never raise a rung to fix a slow build |
 | `test-android-app-ci.sh`: a case FAILs | A job lost its runner input, its `changes` condition, its daemon stop or a pin, or the worked caller lost its own `build` job | Fix the workflow or the caller. A required check named `build` has to be the caller's job; never move the aggregate into the shared workflow |
 | `test-design-system-rule.sh`: a case FAILs | The index was read from the PR checkout, the rule leaked into the prompt with the input empty, or the rule lost its request-changes line | Fix the workflow step. The index and the rule must stay the default branch's and the workflow's; never read either from the PR |
@@ -144,6 +146,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-android-app-ci.sh
 ./tools/test-design-system-rule.sh
 ./tools/test-ci-setup-sizing.sh
+./tools/test-new-frames.sh
 ./tools/check-gate-lists.sh
 ./tools/test-check-gate-lists.sh
 ./actionlint -shellcheck 'shellcheck --severity=warning' .github/workflows/*.yml

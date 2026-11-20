@@ -165,6 +165,9 @@ jobs:
       # A wrong rung is an out-of-memory kill in a consumer's build, so each size's settings are held here.
       - name: Test the CI setup sizing
         run: ./tools/test-ci-setup-sizing.sh
+      # The review opens frames named by a PR, so what it lists and what it leaves out is held here.
+      - name: Test the new-frame review
+        run: ./tools/test-new-frames.sh
 
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate
