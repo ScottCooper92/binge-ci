@@ -69,7 +69,7 @@ jobs:
         `./tools/test-token-permissions.sh`, `./tools/test-check-callers.sh`,
         `./tools/test-merge-guards.sh`, `./tools/test-governed-paths.sh`,
         `./tools/test-submodule-pins.sh`, `./tools/test-fork-review.sh`,
-        `./tools/test-download-actionlint.sh`, `./tools/test-upstream-watch.sh`, `./tools/test-submodule-bump.sh`, `./tools/test-body-checklist.sh`, `./tools/test-rebuttal-cap.sh`, `./tools/test-agent-limits.sh`, `./tools/test-claude-code-cache.sh`, `./tools/test-rerecord-comment.sh`, `./tools/test-shard-screenshots.sh`, `./tools/test-changed-files.sh`, `./tools/test-pin-only.sh`, `./tools/test-record-screenshots.sh`, `./tools/test-conflict-png.sh`, `./tools/test-ci-fix-recording.sh`, `./tools/test-android-app-ci.sh`, `./tools/test-design-system-rule.sh`, `./tools/test-new-frames.sh`, `./tools/test-renovate-preset.sh`,
+        `./tools/test-download-actionlint.sh`, `./tools/test-upstream-watch.sh`, `./tools/test-submodule-bump.sh`, `./tools/test-body-checklist.sh`, `./tools/test-rebuttal-cap.sh`, `./tools/test-agent-limits.sh`, `./tools/test-claude-code-cache.sh`, `./tools/test-rerecord-comment.sh`, `./tools/test-shard-screenshots.sh`, `./tools/test-changed-files.sh`, `./tools/test-pin-only.sh`, `./tools/test-record-screenshots.sh`, `./tools/test-conflict-png.sh`, `./tools/test-ci-fix-recording.sh`, `./tools/test-android-app-ci.sh`, `./tools/test-design-system-rule.sh`, `./tools/test-ci-setup-sizing.sh`, `./tools/test-new-frames.sh`, `./tools/test-renovate-preset.sh`,
         `./tools/check-gate-lists.sh` or
         `./tools/test-check-gate-lists.sh` for the invariant
         you touched. actionlint is not preinstalled; fetch it the way

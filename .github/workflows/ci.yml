@@ -162,6 +162,9 @@ jobs:
       # The rule rides in the review prompt behind an input, so what it reads and what it leaves out is held here.
       - name: Test the design-system review rule
         run: ./tools/test-design-system-rule.sh
+      # A wrong rung is an out-of-memory kill in a consumer's build, so each size's settings are held here.
+      - name: Test the CI setup sizing
+        run: ./tools/test-ci-setup-sizing.sh
       # The review opens frames named by a PR, so what it lists and what it leaves out is held here.
       - name: Test the new-frame review
         run: ./tools/test-new-frames.sh
