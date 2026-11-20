@@ -68,12 +68,13 @@ check "a self-hosted runner caches nothing" "" "$(versions_for h self-hosted 'gr
 
 # The jars the caller names are part of the key, so a jar added later reaches a saved entry.
 catalog='gradle/libs.versions.toml=robolectric = "4.14.1"'
-plain=$(versions_for j github-hosted "$catalog")
+plain=$(versions_for j github-hosted "$catalog"); export plain
 with_jars=$(JARS='android-all-instrumented:14-r1' versions_for k github-hosted "$catalog")
 more_jars=$(JARS='android-all-instrumented:14-r1
 android-all-instrumented:13-r2' versions_for l github-hosted "$catalog")
 reordered=$(JARS='android-all-instrumented:13-r2
 android-all-instrumented:14-r1' versions_for m github-hosted "$catalog")
+export with_jars more_jars reordered
 expect "naming a jar changes the key but keeps the version in front" '[[ $with_jars == 4.14.1-???????? ]] && [ "$with_jars" != "$plain" ]'
 expect "naming another jar changes it again" '[ "$more_jars" != "$with_jars" ]'
 expect "the order the jars are named in does not" '[ "$reordered" = "$more_jars" ]'
