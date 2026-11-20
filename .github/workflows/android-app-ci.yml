@@ -153,7 +153,7 @@ on:
         description: >
           Optional, best-effort: Robolectric android-all artifacts to download before the unit tests and the
           screenshot validation, with a retry on a rate limit, one `<artifact>:<version>` per line. Empty (the
-          default) fetches nothing. Robolectric's jars are cached on a hosted runner either way.
+          default) fetches nothing. Robolectric's jars are restored from the cache on a hosted runner either way.
         type: string
         default: ''
       tests_timeout_minutes:
@@ -371,7 +371,6 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}
-          read-only: 'true'
 
       - name: Unit tests and coverage
         env:
@@ -470,11 +469,10 @@ jobs:
           cache-read-only: true
 
       # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
-      # there fails every test with initializationError. Cached on a hosted runner, keyed on the version.
+      # there fails every test with initializationError. This job only restores them; the tests job saves.
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}
-          read-only: 'true'
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.

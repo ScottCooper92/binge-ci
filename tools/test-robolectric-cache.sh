@@ -47,7 +47,7 @@ versions_for() {
   done
   git -C "$dir" add -A; git -C "$dir" commit -q --allow-empty -m c
   : > "$work/out"
-  (cd "$dir" && RUNNER_ENVIRONMENT=$env JARS="${JARS:-}" GITHUB_OUTPUT="$work/out" bash "$work/find.sh" > /dev/null)
+  (cd "$dir" && RUNNER_ENVIRONMENT=$env GITHUB_OUTPUT="$work/out" bash "$work/find.sh" > /dev/null)
   out=$(sed -n 's/^versions=//p' "$work/out")
   printf '%s' "$out"
 }
@@ -66,21 +66,6 @@ check "a build that declares none finds none" "" "$(versions_for f github-hosted
 check "a similarly named library is not Robolectric" "" "$(versions_for g github-hosted 'gradle/libs.versions.toml=robolectric-shadows = "9.9.9"')"
 check "a self-hosted runner caches nothing" "" "$(versions_for h self-hosted 'gradle/libs.versions.toml=robolectric = "4.14.1"')"
 
-# The jars the caller names are part of the key, so a jar added later reaches a saved entry.
-catalog='gradle/libs.versions.toml=robolectric = "4.14.1"'
-plain=$(versions_for j github-hosted "$catalog"); export plain
-with_jars=$(JARS='android-all-instrumented:14-r1' versions_for k github-hosted "$catalog")
-more_jars=$(JARS='android-all-instrumented:14-r1
-android-all-instrumented:13-r2' versions_for l github-hosted "$catalog")
-reordered=$(JARS='android-all-instrumented:13-r2
-android-all-instrumented:14-r1' versions_for m github-hosted "$catalog")
-export with_jars more_jars reordered
-expect "naming a jar changes the key but keeps the version in front" '[[ $with_jars == 4.14.1-???????? ]] && [ "$with_jars" != "$plain" ]'
-expect "naming another jar changes it again" '[ "$more_jars" != "$with_jars" ]'
-expect "the order the jars are named in does not" '[ "$reordered" = "$more_jars" ]'
-expect "no jar named leaves the key as the version alone" '[ "$plain" = "4.14.1" ]'
-check "naming jars where there is no Robolectric version still caches nothing" "" "$(JARS='a:b' versions_for n github-hosted 'gradle/libs.versions.toml=junit = "4.13.2"')"
-
 # The cache steps and the wiring.
 python3 -I - "$action" "$root" <<'PY' || failures=$((failures + 1))
 import sys, yaml, glob, re
@@ -88,28 +73,28 @@ act = yaml.safe_load(open(sys.argv[1]))
 root = sys.argv[2]
 bad = []
 steps = act["runs"]["steps"]
-ro = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache/restore@")]
-rw = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache@")]
-if len(ro) != 1 or len(rw) != 1:
-    bad.append("the action does not have exactly one restore-only step and one restore-and-save step")
+rest = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache/restore@")]
+saving = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache@")]
+if len(rest) != 1 or saving:
+    bad.append("the action must restore through exactly one actions/cache/restore step and never use the saving actions/cache")
 else:
-    for c in (ro[0], rw[0]):
-        if not re.search(r"@[0-9a-f]{40}$", c["uses"].split(" ")[0]):
-            bad.append("an actions/cache step is not pinned to a commit")
-        if "steps.find.outputs.versions != ''" not in str(c.get("if")):
-            bad.append("a cache step runs without a declared version")
-        w = c["with"]
-        if w["path"] != "~/.m2/repository/org/robolectric":
-            bad.append("the cache path is not Robolectric's directory")
-        if "steps.find.outputs.versions" not in w["key"] or "runner.os" not in w["key"]:
-            bad.append("the key does not name the OS and the versions")
-        rk = w["restore-keys"].strip().splitlines()
-        if rk != ["robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-", "robolectric-${{ runner.os }}-"]:
-            bad.append("the restore keys are not the version's prefix, then any version's")
-    if "inputs.read-only == 'true'" not in str(ro[0].get("if")) or "!= 'true'" not in str(rw[0].get("if")):
-        bad.append("the read-only input does not choose between the restore-only and the saving step")
-    if act["inputs"]["read-only"].get("default") != "false":
-        bad.append("read-only does not default to false")
+    c = rest[0]
+    if not re.search(r"@[0-9a-f]{40}$", c["uses"].split(" ")[0]):
+        bad.append("actions/cache/restore is not pinned to a commit")
+    if "steps.find.outputs.versions != ''" not in str(c.get("if")):
+        bad.append("the restore runs without a declared version")
+    w = c["with"]
+    if w["path"] != "~/.m2/repository/org/robolectric":
+        bad.append("the cache path is not Robolectric's directory")
+    pre = "robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-"
+    # The primary key is the bare prefix, which no save names: an exact hit on a saved name would hide newer entries.
+    if w["key"] != pre:
+        bad.append("the restore's primary key is not the version prefix that no writer saves")
+    rk = w["restore-keys"].strip().splitlines()
+    if rk != [pre, "robolectric-${{ runner.os }}-"]:
+        bad.append("the restore keys are not the version's prefix, then any version's")
+    if "read-only" in act.get("inputs", {}):
+        bad.append("the action still has a read-only input although it never saves")
     outs = act.get("outputs", {})
     if "versions" not in outs or "matched-key" not in outs or "cache-matched-key" not in outs["matched-key"]["value"]:
         bad.append("the action does not hand the versions and the matched key on")
@@ -119,14 +104,15 @@ for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Androi
     want = 2 if "workflows" in path else 1
     if len(re.findall(r"robolectric-cache@v\d+\.\d+\.\d+", text)) != want:
         bad.append(f"{label} does not use the cache action {want} time(s)")
-    if "ci-setup" in label and "read-only: ${{ inputs.gradle-cache-read-only == 'true'" not in text:
-        bad.append("ci-setup does not pass the Gradle cache's read-only rule to the Robolectric cache")
+    if "ci-setup" in label:
+        if "read-only" in text.split("robolectric-cache@")[1].split("runs:")[0] or "steps.robolectric.outputs.matched-key" not in text or "steps.robolectric.outputs.versions" not in text:
+            bad.append("ci-setup does not hand the versions and the matched key on, or still passes read-only")
     if "workflow" in label:
         # The tests job is the one writer, on the default branch; the screenshots job restores only.
         t = text[text.index("\n  tests:\n"):text.index("\n  screenshots:\n")]
         sc = text[text.index("\n  screenshots:\n"):text.index("\n  release:\n")]
-        if "robolectric-cache@" not in t or "read-only: 'true'" not in t:
-            bad.append("the tests job does not restore through the restore-only path")
+        if "robolectric-cache@" not in t or "id: robolectric" not in t:
+            bad.append("the tests job does not restore with an id the save can read")
         m = re.search(r"robolectric-cache-save@v\d+\.\d+\.\d+\n\s+if: (.*)\n\s+with:\n\s+versions: (.*)\n\s+restored-key: (.*)\n", t)
         if not m:
             bad.append("the tests job does not save after the tests")
@@ -140,8 +126,8 @@ for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Androi
                 bad.append("the save runs before the tests")
         if "robolectric-cache-save@" in sc:
             bad.append("the screenshots job saves")
-        if "robolectric-cache@" not in sc or "read-only: 'true'" not in sc:
-            bad.append("the screenshots job is not restore-only")
+        if "robolectric-cache@" not in sc:
+            bad.append("the screenshots job does not restore")
 for b in bad:
     print("FAIL  " + b)
 if not bad:
@@ -176,6 +162,7 @@ mkdir -p "$jars/13-r2"; printf 'two' > "$jars/13-r2/android-all-instrumented-13-
 key2=$(savekey "$work/save-home" 4.14.1 "$key1"); export key2
 expect "a jar added under the same version is a new key, saved though the old one was restored" '[ -n "$key2" ] && [ "$key2" != "$key1" ]'
 expect "and it still starts with the version, so the restore key finds it" '[[ $key2 == robolectric-Linux-4.14.1-* ]]'
+expect "no key the save writes is the restore's primary key, the bare prefix" '[ "$key1" != "robolectric-Linux-4.14.1-" ] && [ "$key2" != "robolectric-Linux-4.14.1-" ]'
 expect "no version means nothing is saved" '[ -z "$(savekey "$work/save-home" "" "")" ]'
 expect "a self-hosted runner saves nothing" '[ -z "$(savekey "$work/save-home" 4.14.1 "" self-hosted)" ]'
 mkdir -p "$work/empty-home/.m2/repository/org/robolectric"

@@ -3,8 +3,9 @@ description: >
   Keeps Robolectric's android-all jars between runs on a GitHub-hosted runner. Robolectric fetches them from
   Maven Central itself, into ~/.m2/repository/org/robolectric, which Gradle's cache never covers. When Maven
   Central answers HTTP 429 the download fails and every Robolectric test fails with initializationError. The
-  directory is cached under a key naming the Robolectric version(s) the build declares, with a restore key so a
-  new version still starts from the old jars. A build that declares no Robolectric version does nothing.
+  directory is restored from the newest entry for the Robolectric version(s) the build declares, falling back to any
+  version's, so a new version still starts from the old jars. It only restores: robolectric-cache-save, run after
+  the tests in the one job that writes, saves the entry. A build that declares no Robolectric version does nothing.
 
 inputs:
   jars:
@@ -17,23 +18,15 @@ inputs:
     required: false
     default: ''
 
-  read-only:
-    description: >
-      'true' restores the cache without saving one. Pass it from a job that must not write a cache other jobs
-      trust (an agent's job, a pull request's branch) and from every parallel job but one: the first writer's
-      entry wins, and a later writer with the same key fails to save. Anything else restores and saves.
-    required: false
-    default: 'false'
-
 outputs:
   versions:
-    description: The declared Robolectric version(s), joined, or empty when nothing is cached.
+    description: The declared Robolectric version(s), joined, or empty when nothing is restored.
     value: ${{ steps.find.outputs.versions }}
   matched-key:
     description: >
       The key of the entry that was restored, or empty on a miss. Pass it to robolectric-cache-save so it can skip
       a save that would write the same jars again.
-    value: ${{ steps.restore_only.outputs.cache-matched-key || steps.restore_save.outputs.cache-matched-key }}
+    value: ${{ steps.restore.outputs.cache-matched-key }}
 
 runs:
   using: composite
@@ -43,8 +36,6 @@ runs:
     - name: Find the Robolectric versions the build declares
       id: find
       shell: bash
-      env:
-        JARS: ${{ inputs.jars }}
       run: |
         set -euo pipefail
         versions=""
@@ -59,12 +50,6 @@ runs:
             } | LC_ALL=C sort -u | paste -sd_ -
           )
         fi
-        # The jars the caller names are part of the key. A saved entry is an exact hit and is never saved again, so
-        # a jar added later (a new SDK level) would otherwise never reach it: naming it changes the key, the
-        # restore key brings back the old jars, and the new entry holds the new one too.
-        if [ -n "$versions" ] && [ -n "${JARS//[[:space:]]/}" ]; then
-          versions="${versions}-$(printf '%s' "$JARS" | tr -s '[:space:]' '\n' | sed '/^$/d' | LC_ALL=C sort -u | sha256sum | cut -c1-8)"
-        fi
         echo "versions=$versions" >> "$GITHUB_OUTPUT"
         if [ -n "$versions" ]; then
           echo "Caching Robolectric's jars for: $versions"
@@ -72,26 +57,17 @@ runs:
           echo "No Robolectric version declared, or not a hosted runner: nothing to cache."
         fi
 
-    # Two steps because `actions/cache` saves in its post step and has no input that turns that off. A job that
-    # must not write the cache restores through `actions/cache/restore`, which never saves.
+    # Restore only, and with a primary key that no writer ever saves: `robolectric-cache-save` names its entries
+    # `<prefix><hash of the jars>`, never the bare prefix, so the exact lookup always misses and the restore keys
+    # decide. They are the newest entry for these versions, then the newest of any version. An exact hit on a saved
+    # name would be frozen at the jars it held and would hide every newer entry (#427).
     - name: Restore Robolectric's jars
-      id: restore_only
-      if: steps.find.outputs.versions != '' && inputs.read-only == 'true'
+      id: restore
+      if: steps.find.outputs.versions != ''
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
-        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
-        restore-keys: |
-          robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
-          robolectric-${{ runner.os }}-
-
-    - name: Restore and save Robolectric's jars
-      id: restore_save
-      if: steps.find.outputs.versions != '' && inputs.read-only != 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/.m2/repository/org/robolectric
-        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
+        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
         restore-keys: |
           robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-
