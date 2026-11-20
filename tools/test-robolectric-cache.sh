@@ -47,7 +47,7 @@ versions_for() {
   done
   git -C "$dir" add -A; git -C "$dir" commit -q --allow-empty -m c
   : > "$work/out"
-  (cd "$dir" && RUNNER_ENVIRONMENT=$env GITHUB_OUTPUT="$work/out" bash "$work/find.sh" > /dev/null)
+  (cd "$dir" && RUNNER_ENVIRONMENT=$env JARS="${JARS:-}" GITHUB_OUTPUT="$work/out" bash "$work/find.sh" > /dev/null)
   out=$(sed -n 's/^versions=//p' "$work/out")
   printf '%s' "$out"
 }
@@ -66,36 +66,65 @@ check "a build that declares none finds none" "" "$(versions_for f github-hosted
 check "a similarly named library is not Robolectric" "" "$(versions_for g github-hosted 'gradle/libs.versions.toml=robolectric-shadows = "9.9.9"')"
 check "a self-hosted runner caches nothing" "" "$(versions_for h self-hosted 'gradle/libs.versions.toml=robolectric = "4.14.1"')"
 
-# The cache step and the wiring.
+# The jars the caller names are part of the key, so a jar added later reaches a saved entry.
+catalog='gradle/libs.versions.toml=robolectric = "4.14.1"'
+plain=$(versions_for j github-hosted "$catalog")
+with_jars=$(JARS='android-all-instrumented:14-r1' versions_for k github-hosted "$catalog")
+more_jars=$(JARS='android-all-instrumented:14-r1
+android-all-instrumented:13-r2' versions_for l github-hosted "$catalog")
+reordered=$(JARS='android-all-instrumented:13-r2
+android-all-instrumented:14-r1' versions_for m github-hosted "$catalog")
+expect "naming a jar changes the key but keeps the version in front" '[[ $with_jars == 4.14.1-???????? ]] && [ "$with_jars" != "$plain" ]'
+expect "naming another jar changes it again" '[ "$more_jars" != "$with_jars" ]'
+expect "the order the jars are named in does not" '[ "$reordered" = "$more_jars" ]'
+expect "no jar named leaves the key as the version alone" '[ "$plain" = "4.14.1" ]'
+check "naming jars where there is no Robolectric version still caches nothing" "" "$(JARS='a:b' versions_for n github-hosted 'gradle/libs.versions.toml=junit = "4.13.2"')"
+
+# The cache steps and the wiring.
 python3 -I - "$action" "$root" <<'PY' || failures=$((failures + 1))
 import sys, yaml, glob, re
 act = yaml.safe_load(open(sys.argv[1]))
 root = sys.argv[2]
 bad = []
 steps = act["runs"]["steps"]
-cache = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache@")]
-if len(cache) != 1:
-    bad.append("the cache step is not in the action exactly once")
+ro = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache/restore@")]
+rw = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache@")]
+if len(ro) != 1 or len(rw) != 1:
+    bad.append("the action does not have exactly one restore-only step and one restore-and-save step")
 else:
-    c = cache[0]
-    if not re.search(r"@[0-9a-f]{40}$", c["uses"].split(" ")[0]):
-        bad.append("actions/cache is not pinned to a commit")
-    if "steps.find.outputs.versions != ''" not in str(c.get("if")):
-        bad.append("the cache runs without a declared version")
-    w = c["with"]
-    if w["path"] != "~/.m2/repository/org/robolectric":
-        bad.append("the cache path is not Robolectric's directory")
-    if "steps.find.outputs.versions" not in w["key"] or "runner.os" not in w["key"]:
-        bad.append("the key does not name the OS and the versions")
-    rk = w["restore-keys"].strip().splitlines()
-    if len(rk) != 1 or not w["key"].startswith(rk[0]) or "versions" in rk[0]:
-        bad.append("the restore key is not the key's prefix without the versions")
+    for c in (ro[0], rw[0]):
+        if not re.search(r"@[0-9a-f]{40}$", c["uses"].split(" ")[0]):
+            bad.append("an actions/cache step is not pinned to a commit")
+        if "steps.find.outputs.versions != ''" not in str(c.get("if")):
+            bad.append("a cache step runs without a declared version")
+        w = c["with"]
+        if w["path"] != "~/.m2/repository/org/robolectric":
+            bad.append("the cache path is not Robolectric's directory")
+        if "steps.find.outputs.versions" not in w["key"] or "runner.os" not in w["key"]:
+            bad.append("the key does not name the OS and the versions")
+        rk = w["restore-keys"].strip().splitlines()
+        if len(rk) != 1 or not w["key"].startswith(rk[0]) or "versions" in rk[0]:
+            bad.append("the restore key is not the key's prefix without the versions")
+    if "inputs.read-only == 'true'" not in str(ro[0].get("if")) or "!= 'true'" not in str(rw[0].get("if")):
+        bad.append("the read-only input does not choose between the restore-only and the saving step")
+    if act["inputs"]["read-only"].get("default") != "false":
+        bad.append("read-only does not default to false")
 for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Android app workflow"),
                     (root + "/.github/actions/ci-setup/action.yml", "ci-setup")):
-    n = len(re.findall(r"robolectric-cache@v\d+\.\d+\.\d+", open(path).read()))
+    text = open(path).read()
     want = 2 if "workflows" in path else 1
-    if n != want:
-        bad.append(f"{label} uses the cache action {n} times, not {want}")
+    if len(re.findall(r"robolectric-cache@v\d+\.\d+\.\d+", text)) != want:
+        bad.append(f"{label} does not use the cache action {want} time(s)")
+    if "ci-setup" in label and "read-only: ${{ inputs.gradle-cache-read-only == 'true'" not in text:
+        bad.append("ci-setup does not pass the Gradle cache's read-only rule to the Robolectric cache")
+    if "workflow" in label:
+        # The tests job is the one writer, on the default branch; the screenshots job restores only.
+        t = text[text.index("\n  tests:\n"):text.index("\n  screenshots:\n")]
+        sc = text[text.index("\n  screenshots:\n"):text.index("\n  release:\n")]
+        if "robolectric-cache@" not in t or "read-only: ${{ github.event.repository != null && github.ref_name != github.event.repository.default_branch }}" not in t:
+            bad.append("the tests job is not the one writer on the default branch")
+        if "robolectric-cache@" not in sc or "read-only: 'true'" not in sc:
+            bad.append("the screenshots job is not restore-only")
 for b in bad:
     print("FAIL  " + b)
 if not bad:

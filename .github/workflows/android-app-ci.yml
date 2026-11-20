@@ -369,6 +369,10 @@ jobs:
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}
+          # The one writer: the screenshot jobs below never fill this directory, and a second writer with the same
+          # key fails to save and can leave an entry without the new version's jars. A branch that is not the
+          # default restores only.
+          read-only: ${{ github.event.repository != null && github.ref_name != github.event.repository.default_branch }}
 
       - name: Unit tests and coverage
         env:
@@ -462,6 +466,7 @@ jobs:
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}
+          read-only: 'true'
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.

@@ -17,6 +17,14 @@ inputs:
     required: false
     default: ''
 
+  read-only:
+    description: >
+      'true' restores the cache without saving one. Pass it from a job that must not write a cache other jobs
+      trust (an agent's job, a pull request's branch) and from every parallel job but one: the first writer's
+      entry wins, and a later writer with the same key fails to save. Anything else restores and saves.
+    required: false
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -25,6 +33,8 @@ runs:
     - name: Find the Robolectric versions the build declares
       id: find
       shell: bash
+      env:
+        JARS: ${{ inputs.jars }}
       run: |
         set -euo pipefail
         versions=""
@@ -39,6 +49,12 @@ runs:
             } | LC_ALL=C sort -u | paste -sd_ -
           )
         fi
+        # The jars the caller names are part of the key. A saved entry is an exact hit and is never saved again, so
+        # a jar added later (a new SDK level) would otherwise never reach it: naming it changes the key, the
+        # restore key brings back the old jars, and the new entry holds the new one too.
+        if [ -n "$versions" ] && [ -n "${JARS//[[:space:]]/}" ]; then
+          versions="${versions}-$(printf '%s' "$JARS" | tr -s '[:space:]' '\n' | sed '/^$/d' | LC_ALL=C sort -u | sha256sum | cut -c1-8)"
+        fi
         echo "versions=$versions" >> "$GITHUB_OUTPUT"
         if [ -n "$versions" ]; then
           echo "Caching Robolectric's jars for: $versions"
@@ -46,8 +62,19 @@ runs:
           echo "No Robolectric version declared, or not a hosted runner: nothing to cache."
         fi
 
+    # Two steps because `actions/cache` saves in its post step and has no input that turns that off. A job that
+    # must not write the cache restores through `actions/cache/restore`, which never saves.
     - name: Restore Robolectric's jars
-      if: steps.find.outputs.versions != ''
+      if: steps.find.outputs.versions != '' && inputs.read-only == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.m2/repository/org/robolectric
+        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
+        restore-keys: |
+          robolectric-${{ runner.os }}-
+
+    - name: Restore and save Robolectric's jars
+      if: steps.find.outputs.versions != '' && inputs.read-only != 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric

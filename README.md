@@ -362,6 +362,13 @@ jars first with a retry and backoff, and a failed download is a warning, since R
 Android app CI workflow runs it in its tests and screenshots jobs, taking the list from `robolectric_jars`, and
 `ci-setup` runs it too, taking `robolectric-jars`.
 
+Only one job writes the cache. Its `read-only` input restores through `actions/cache/restore`, which never saves: the
+screenshots jobs pass it, the tests job passes it off the default branch, and `ci-setup` passes the same rule as the
+Gradle cache, so an agent's job and a pull request's branch never write an entry that other jobs restore. The jars named
+in `jars` are part of the key, so naming a new one gives a new entry that starts from the old jars. A jar a build needs
+but nobody names, such as a new SDK level under the same Robolectric version, is downloaded on every run until the
+version moves or it is named.
+
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,
 `system-image-source` and its `default-branch`, and gates the save to a push to that branch with

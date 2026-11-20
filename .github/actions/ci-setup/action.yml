@@ -102,6 +102,9 @@ runs:
       uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
       with:
         jars: ${{ inputs.robolectric-jars }}
+        # The same rule as the Gradle cache above: an agent's job and a branch that is not the default restore
+        # and never save, since the entry would be restored by every other job.
+        read-only: ${{ inputs.gradle-cache-read-only == 'true' || (github.event.repository != null && github.ref_name != github.event.repository.default_branch) }}
 
     # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
     #
