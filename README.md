@@ -315,7 +315,8 @@ job there reuses what is in it. Unset or empty, nothing changes: the action inst
                       and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
-                      restore-avd-cache / save-avd-cache, nightly-report,
+                      restore-avd-cache / save-avd-cache, robolectric-cache,
+                      nightly-report,
                       agent-claude-cache (every agent job uses it),
                       agent-network-limits and agent-tool-calls (every agent
                       job uses both), shard-screenshots, changed-files, pin-only, upstream-watch, submodule-bump and
@@ -350,6 +351,30 @@ match. The three author workflows that take `suppression_files` share it, each p
 
 All the actions live here rather than in the consuming repos so a PR cannot edit the
 guard that is about to refuse it, and so the public repos get one they never had.
+
+**`robolectric-cache` and `robolectric-cache-save`** keep Robolectric's `android-all` jars between runs on a
+GitHub-hosted runner. Robolectric downloads them from Maven Central itself, into `~/.m2/repository/org/robolectric`,
+outside Gradle's cache, and a rate limit (HTTP 429) there fails every unit test with `initializationError`.
+
+- `robolectric-cache` only restores. It reads the Robolectric version(s) the build declares from the version catalog and
+  the Gradle build files, and restores the newest entry for them, falling back to the newest of any version, so a new
+  version starts from the old jars. A build that declares none, and a self-hosted runner, restore nothing. It outputs
+  `versions` and `matched-key`. Its optional `jars` input (one `<artifact>:<version>` per line, empty by default)
+  downloads named jars first with a retry and backoff, and a failed download is a warning, since Robolectric then tries
+  itself.
+- `robolectric-cache-save` runs after the unit tests, in the one job that writes. It saves the directory under
+  `robolectric-<os>-<versions>-<hash of the jar files present>`. A run that downloaded one more jar, such as a new SDK
+  level under the same Robolectric version, saves a new entry holding all of them, and a run that downloaded nothing
+  new, or whose restored entry already matches, saves nothing. The restore's primary key is the bare prefix, which no
+  save names, so an older entry never hides a newer one.
+- The Android app CI workflow restores in its tests and screenshots jobs, taking the list from `robolectric_jars`, and
+  its tests job saves, on the default branch after a green run. The screenshots jobs never save, since they never fill
+  the directory. `ci-setup` restores too, taking `robolectric-jars`, and outputs `robolectric-versions` and
+  `robolectric-matched-key`. It has no step after the tests, so a job that wants the cache filled adds
+  `robolectric-cache-save` after its tests, passing those two. No restore step ever saves, so an agent's job and a pull
+  request's branch cannot write an entry that other jobs restore.
+- A jar the build needs that no run has downloaded yet is fetched once, and then it is in the entry. A hash of the files
+  present is not known before the run, so the first run after a new SDK level still downloads it.
 
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,

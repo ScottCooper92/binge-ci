@@ -149,6 +149,13 @@ on:
         description: Minutes before the checks job is stopped.
         type: number
         default: 30
+      robolectric_jars:
+        description: >
+          Optional, best-effort: Robolectric android-all artifacts to download before the unit tests and the
+          screenshot validation, with a retry on a rate limit, one `<artifact>:<version>` per line. Empty (the
+          default) fetches nothing. Robolectric's jars are restored from the cache on a hosted runner either way.
+        type: string
+        default: ''
       tests_timeout_minutes:
         description: Minutes before the tests job is stopped.
         type: number
@@ -357,6 +364,14 @@ jobs:
         with:
           cache-read-only: true
 
+      # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
+      # there fails every test with initializationError. Restored here on a hosted runner; this job saves what
+      # the tests left, below, and is the one writer.
+      - id: robolectric
+        uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
+        with:
+          jars: ${{ inputs.robolectric_jars }}
+
       - name: Unit tests and coverage
         env:
           TASKS: ${{ inputs.tests_tasks }}
@@ -367,6 +382,15 @@ jobs:
           [ "${#args[@]}" -gt 0 ] || { echo "::error::tests_tasks is empty."; exit 1; }
           [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
           ./gradlew "${args[@]}"
+
+      # Saved after the tests, under a key that names the jars present: a key fixed before the run is an exact hit
+      # once saved, and a jar for a new SDK level would never reach it. The one writer, on the default branch only:
+      # the screenshot jobs never fill the directory, and a branch's entry would be restored by no one else.
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.56
+        if: ${{ success() && github.event.repository != null && github.ref_name == github.event.repository.default_branch }}
+        with:
+          versions: ${{ steps.robolectric.outputs.versions }}
+          restored-key: ${{ steps.robolectric.outputs.matched-key }}
 
       # A test that leaks a coroutine is reported by the one that ran next. The report names the leak,
       # and the artifact below expires in a day, so a failed run says what leaked in its own log.
@@ -443,6 +467,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
         with:
           cache-read-only: true
+
+      # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
+      # there fails every test with initializationError. This job only restores them; the tests job saves.
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
+        with:
+          jars: ${{ inputs.robolectric_jars }}
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.

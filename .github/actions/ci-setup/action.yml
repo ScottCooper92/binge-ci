@@ -32,6 +32,22 @@ inputs:
     required: false
     default: '21'
 
+  robolectric-jars:
+    description: >
+      Optional, best-effort: Robolectric android-all artifacts to download with a retry on a rate limit, one
+      `<artifact>:<version>` per line. Empty (the default) fetches nothing. The robolectric-cache action restores the
+      cached jars on a hosted runner either way; saving them is robolectric-cache-save, after the tests.
+    required: false
+    default: ''
+
+outputs:
+  robolectric-versions:
+    description: The declared Robolectric version(s), for robolectric-cache-save. Empty when nothing is restored.
+    value: ${{ steps.robolectric.outputs.versions }}
+  robolectric-matched-key:
+    description: The Robolectric cache entry that was restored, for robolectric-cache-save. Empty on a miss.
+    value: ${{ steps.robolectric.outputs.matched-key }}
+
 runs:
   using: composite
   steps:
@@ -86,6 +102,15 @@ runs:
         cache-disabled: ${{ steps.runner.outputs.hosted == 'false' && inputs.persistent-gradle-home == 'true' }}
         cache-read-only: ${{ inputs.gradle-cache-read-only == 'true' || (github.event.repository != null && github.ref_name != github.event.repository.default_branch) }}
         cache-cleanup: on-success
+
+    # Robolectric downloads its android-all jars itself, outside Gradle's cache, and a Maven Central 429 fails
+    # every test with initializationError. The action caches them on a hosted runner and does nothing for a build
+    # that declares no Robolectric version.
+    - name: Restore Robolectric's jars
+      id: robolectric
+      uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
+      with:
+        jars: ${{ inputs.robolectric-jars }}
 
     # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
     #

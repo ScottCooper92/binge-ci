@@ -1,0 +1,55 @@
+name: Robolectric cache save
+description: >
+  Saves the Robolectric jars a test run left in ~/.m2, under a key that names the jars. Run it once, after the unit
+  tests, in the one job that writes the cache. A key that names only the Robolectric version is an exact hit once it
+  is saved and is never saved again, so a jar for a new SDK level under the same version would be downloaded on
+  every run. Here the key also holds a hash of the jar files present, so a run that downloaded one more jar saves a
+  new entry that holds all of them, and a run that downloaded nothing new saves nothing.
+
+inputs:
+  versions:
+    description: The `versions` output of robolectric-cache. Empty means there is nothing to save.
+    required: true
+  restored-key:
+    description: The `matched-key` output of robolectric-cache, so an unchanged set is not saved again.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Name the entry after the jars present
+      id: key
+      shell: bash
+      env:
+        VERSIONS: ${{ inputs.versions }}
+        RESTORED: ${{ inputs.restored-key }}
+        OS: ${{ runner.os }}
+      run: |
+        set -euo pipefail
+        dir="$HOME/.m2/repository/org/robolectric"
+        key=""
+        # Same-name, same-size files are the same set for this purpose: Robolectric's jars are versioned by name,
+        # so a jar that changes content changes its name.
+        if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ] && [ -n "$VERSIONS" ] && [ -d "$dir" ] \
+          && [ -n "$(find "$dir" -type f -name '*.jar' -print -quit)" ]; then
+          sum=$(cd "$dir" && find . -type f -printf '%P %s\n' | LC_ALL=C sort | sha256sum | cut -c1-12)
+          key="robolectric-${OS}-${VERSIONS}-${sum}"
+        fi
+        if [ -z "$key" ]; then
+          echo "Nothing to save."
+        elif [ "$key" = "$RESTORED" ]; then
+          echo "The restored entry already holds these jars."
+          key=""
+        else
+          echo "Saving $key"
+        fi
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+
+    # A second writer of the same key finds it reserved and only warns, so a race is a skipped save, not a failure.
+    - name: Save Robolectric's jars
+      if: steps.key.outputs.key != ''
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.m2/repository/org/robolectric
+        key: ${{ steps.key.outputs.key }}
