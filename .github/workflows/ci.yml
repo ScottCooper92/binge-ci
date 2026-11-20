@@ -162,6 +162,9 @@ jobs:
       # The rule rides in the review prompt behind an input, so what it reads and what it leaves out is held here.
       - name: Test the design-system review rule
         run: ./tools/test-design-system-rule.sh
+      # The review opens frames named by a PR, so what it lists and what it leaves out is held here.
+      - name: Test the new-frame review
+        run: ./tools/test-new-frames.sh
 
       # The re-record comment is built from the pushed commit, and the prompt and the review rules are held to the gate.
       - name: Test the screenshot re-record comment and its gate

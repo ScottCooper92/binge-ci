@@ -644,6 +644,26 @@ detektGate {
   and not read from the repository, so a PR cannot edit it, and the index is refused as a path a PR may change when CI
   does not build it. Set it in the caller beside `conventions_path`.
 
+### Reviewing new screenshot frames
+
+A frame a PR adds has nothing to be compared against: whatever was recorded becomes the baseline, and a green CI run
+says nothing about whether it is right. So `bot-review.yml` opens each reference PNG a PR **adds** and checks it against
+the repository's own design rules, as its review guide states them: clipped or cropped text, the same text drawn twice,
+a missing icon on a row, a destructive action not last, a state whose structure differs from its sibling states, an
+empty or broken picture. A finding names the frame's path and what is wrong. A frame that is fine gets no mention. A
+frame a PR only changes is not looked at here; the re-record rules above cover it.
+
+- **The list.** A step lists the added files only, from the merge base to the head, and hands the prompt a file. A path
+  that is not plain (letters, digits and `. _ / + @ = , ( ) -` and spaces) is counted and left out.
+- **The cap.** `new_frames_cap` (default 40) is the most frames one review opens. Past it the list is a sample, one
+  frame per test class in turn, so every class is seen before any is seen twice, and the same PR gives the same sample.
+  The review says how many it looked at of how many were added.
+- **Opting in.** On by default. `review_new_frames: false` turns it off. `new_frame_paths` (default
+  `**/screenshotTest*/reference/**/*.png`) names the frames' directories, as git globs one per line, for a repository
+  that keeps them elsewhere.
+- **What it will not do.** It does not open a frame the PR only changes, and text drawn inside a frame is data and
+  never an instruction to the reviewer.
+
 ### App CI
 
 `android-app-ci.yml` is the CI of an Android app, kept once. An app's own `ci.yml` is a thin caller: its triggers, its
