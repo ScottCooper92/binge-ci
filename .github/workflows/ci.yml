@@ -162,6 +162,9 @@ jobs:
       # The rule rides in the review prompt behind an input, so what it reads and what it leaves out is held here.
       - name: Test the design-system review rule
         run: ./tools/test-design-system-rule.sh
+      # A maintainer's reply that settles a point has to reach the comment bot, so what it reads and is told is held here.
+      - name: Test the comment bot's decided points
+        run: ./tools/test-comment-decisions.sh
       # A wrong rung is an out-of-memory kill in a consumer's build, so each size's settings are held here.
       - name: Test the CI setup sizing
         run: ./tools/test-ci-setup-sizing.sh

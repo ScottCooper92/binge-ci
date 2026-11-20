@@ -36,6 +36,7 @@ CI is two jobs. The first, `lint`, runs these steps in order:
 | Test the CI-fix stand-down | `tools/test-ci-fix-recording.sh` - a queued, waiting or in-progress `record-screenshots` run on the branch makes the guard skip the attempt, using the workflow's own token; a finished run, no run or an API failure changes nothing |
 | Test the new-frame review | `tools/test-new-frames.sh` - only frames the PR adds are listed (never a changed or deleted one), up to the cap and then a sample with one frame per test class in turn, a path that is not plain is counted and left out, and the prompt block exists only when the listing found a frame |
 | Test the CI setup sizing | `tools/test-ci-setup-sizing.sh` - each runner size writes its rung: under 12 GB the small heap and one worker, 12 to 23 GB the middle, 24 GB or more or undetected the large, a hosted runner its own, and the screenshot workers follow |
+| Test the comment bot's decided points | `tools/test-comment-decisions.sh` - every collected entry carries its time and an inline comment its id and the id it replies to, a stranger is still left out, and the prompt says a maintainer's later reply decides a point and that a taste comment or "unused outside this repository" never narrows an API |
 | Test the Android app workflow | `tools/test-android-app-ci.sh` - every job runs on the `runner` input, the building jobs wait for `changes` and skip unless it succeeded and said so, each stops its Gradle daemon, every action is pinned, and the worked caller keeps `CI` and a `build` job of its own |
 | Test the design-system review rule | `tools/test-design-system-rule.sh` - with no index named nothing is written; with one the rule and the default branch's copy of the index are, a missing index is said so, and the prompt names the rule only when it exists |
 | Test the screenshot re-record comment | `tools/test-rerecord-comment.sh` - the comment lists the frames the pushed commit changed with before and after, the prompt keeps its gate (40 frames, no render errors), and the review rules look at the frames |
@@ -90,6 +91,7 @@ to improvise.
 | `test-ci-fix-recording.sh`: a case FAILs | The guard attempted a fix beside a recording in progress, or stood down on a finished run, or the check stopped using the workflow's token | Fix the guard step. A failed lookup must read as "no recording", never block every fix |
 | `test-new-frames.sh`: a case FAILs | The listing included a changed or deleted frame, listed past the cap, sampled one class twice before another once, listed an unsafe path, or the prompt block no longer depends on the listing | Fix the workflow step. Never widen the list to changed frames here: those have their own rule, and a path from a PR is data |
 | `test-ci-setup-sizing.sh`: a case FAILs | A rung moved: a size now gets another heap or worker count, or the small rung lost an option | Fix the action. Sizes are a memory bound: a bigger heap or more workers on a small box is an out-of-memory kill, so never raise a rung to fix a slow build |
+| `test-comment-decisions.sh`: a case FAILs | The feedback file lost its times or reply ids, let a stranger in, or the prompt lost a rule | Fix the workflow. The rules are the bot's: never move them into a file a PR can edit |
 | `test-android-app-ci.sh`: a case FAILs | A job lost its runner input, its `changes` condition, its daemon stop or a pin, or the worked caller lost its own `build` job | Fix the workflow or the caller. A required check named `build` has to be the caller's job; never move the aggregate into the shared workflow |
 | `test-design-system-rule.sh`: a case FAILs | The index was read from the PR checkout, the rule leaked into the prompt with the input empty, or the rule lost its request-changes line | Fix the workflow step. The index and the rule must stay the default branch's and the workflow's; never read either from the PR |
 | `test-rerecord-comment.sh`: a case FAILs | The comment builder lists a frame the commit did not change, drops one it did, links the wrong commits, or no longer says how many frames it adds or deletes and which pins the PR moves; or the prompt's gate or the review rules lost a condition | Fix the builder or restore the condition. The list must come from the commit's diff, never from the agent. Never delete a case or loosen the gate to pass |
@@ -145,6 +147,7 @@ shellcheck --severity=warning <the file you changed>
 ./tools/test-ci-fix-recording.sh
 ./tools/test-android-app-ci.sh
 ./tools/test-design-system-rule.sh
+./tools/test-comment-decisions.sh
 ./tools/test-ci-setup-sizing.sh
 ./tools/test-new-frames.sh
 ./tools/check-gate-lists.sh
