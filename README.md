@@ -362,12 +362,17 @@ jars first with a retry and backoff, and a failed download is a warning, since R
 Android app CI workflow runs it in its tests and screenshots jobs, taking the list from `robolectric_jars`, and
 `ci-setup` runs it too, taking `robolectric-jars`.
 
-Only one job writes the cache. Its `read-only` input restores through `actions/cache/restore`, which never saves: the
-screenshots jobs pass it, the tests job passes it off the default branch, and `ci-setup` passes the same rule as the
-Gradle cache, so an agent's job and a pull request's branch never write an entry that other jobs restore. The jars named
-in `jars` are part of the key, so naming a new one gives a new entry that starts from the old jars. A jar a build needs
-but nobody names, such as a new SDK level under the same Robolectric version, is downloaded on every run until the
-version moves or it is named.
+Only one job writes the cache, and what it writes names the jars it holds. The `robolectric-cache` action restores,
+and its `read-only` input restores through `actions/cache/restore`, which never saves: the screenshots jobs and the
+tests job pass it, and `ci-setup` passes the same rule as the Gradle cache, so an agent's job and a pull request's
+branch never write an entry that other jobs restore. The Android app CI workflow's tests job then runs
+`robolectric-cache-save` after the unit tests, on the default branch after a green run. It names the entry
+`robolectric-<os>-<versions>-<hash of the jar files present>`, so a run that downloaded one more jar, such as a new SDK
+level under the same Robolectric version, saves a new entry that holds all of them, and a run that downloaded nothing
+new saves nothing. The restore keys are the version's prefix and then any version's, so the newest entry for the
+version is the one restored. `ci-setup` has no step after the tests, so where it saves it uses the older key naming the
+version and the jars named in `jars` only; a job that wants the jar-hash key adds `robolectric-cache-save` after its
+tests. The jars named in `jars` are part of that older key, so naming a new one gives a new entry.
 
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,

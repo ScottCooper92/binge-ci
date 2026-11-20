@@ -25,6 +25,16 @@ inputs:
     required: false
     default: 'false'
 
+outputs:
+  versions:
+    description: The declared Robolectric version(s), joined, or empty when nothing is cached.
+    value: ${{ steps.find.outputs.versions }}
+  matched-key:
+    description: >
+      The key of the entry that was restored, or empty on a miss. Pass it to robolectric-cache-save so it can skip
+      a save that would write the same jars again.
+    value: ${{ steps.restore_only.outputs.cache-matched-key || steps.restore_save.outputs.cache-matched-key }}
+
 runs:
   using: composite
   steps:
@@ -65,21 +75,25 @@ runs:
     # Two steps because `actions/cache` saves in its post step and has no input that turns that off. A job that
     # must not write the cache restores through `actions/cache/restore`, which never saves.
     - name: Restore Robolectric's jars
+      id: restore_only
       if: steps.find.outputs.versions != '' && inputs.read-only == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
         key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
         restore-keys: |
+          robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-
 
     - name: Restore and save Robolectric's jars
+      id: restore_save
       if: steps.find.outputs.versions != '' && inputs.read-only != 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
         key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
         restore-keys: |
+          robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-
 
     # Only what the caller named, and only what the cache did not already bring. curl retries 408, 429 and the

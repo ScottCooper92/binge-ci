@@ -104,12 +104,15 @@ else:
         if "steps.find.outputs.versions" not in w["key"] or "runner.os" not in w["key"]:
             bad.append("the key does not name the OS and the versions")
         rk = w["restore-keys"].strip().splitlines()
-        if len(rk) != 1 or not w["key"].startswith(rk[0]) or "versions" in rk[0]:
-            bad.append("the restore key is not the key's prefix without the versions")
+        if rk != ["robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-", "robolectric-${{ runner.os }}-"]:
+            bad.append("the restore keys are not the version's prefix, then any version's")
     if "inputs.read-only == 'true'" not in str(ro[0].get("if")) or "!= 'true'" not in str(rw[0].get("if")):
         bad.append("the read-only input does not choose between the restore-only and the saving step")
     if act["inputs"]["read-only"].get("default") != "false":
         bad.append("read-only does not default to false")
+    outs = act.get("outputs", {})
+    if "versions" not in outs or "matched-key" not in outs or "cache-matched-key" not in outs["matched-key"]["value"]:
+        bad.append("the action does not hand the versions and the matched key on")
 for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Android app workflow"),
                     (root + "/.github/actions/ci-setup/action.yml", "ci-setup")):
     text = open(path).read()
@@ -122,8 +125,21 @@ for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Androi
         # The tests job is the one writer, on the default branch; the screenshots job restores only.
         t = text[text.index("\n  tests:\n"):text.index("\n  screenshots:\n")]
         sc = text[text.index("\n  screenshots:\n"):text.index("\n  release:\n")]
-        if "robolectric-cache@" not in t or "read-only: ${{ github.event.repository != null && github.ref_name != github.event.repository.default_branch }}" not in t:
-            bad.append("the tests job is not the one writer on the default branch")
+        if "robolectric-cache@" not in t or "read-only: 'true'" not in t:
+            bad.append("the tests job does not restore through the restore-only path")
+        m = re.search(r"robolectric-cache-save@v\d+\.\d+\.\d+\n\s+if: (.*)\n\s+with:\n\s+versions: (.*)\n\s+restored-key: (.*)\n", t)
+        if not m:
+            bad.append("the tests job does not save after the tests")
+        else:
+            cond = m.group(1)
+            if "success()" not in cond or "github.ref_name == github.event.repository.default_branch" not in cond:
+                bad.append("the save is not after a green run on the default branch only")
+            if "steps.robolectric.outputs.versions" not in m.group(2) or "steps.robolectric.outputs.matched-key" not in m.group(3):
+                bad.append("the save is not given the versions and the matched key")
+            if t.index("robolectric-cache-save@") < t.index("Unit tests and coverage"):
+                bad.append("the save runs before the tests")
+        if "robolectric-cache-save@" in sc:
+            bad.append("the screenshots job saves")
         if "robolectric-cache@" not in sc or "read-only: 'true'" not in sc:
             bad.append("the screenshots job is not restore-only")
 for b in bad:
@@ -132,6 +148,39 @@ if not bad:
     print("ok    the cache is pinned, keyed on the versions with a prefix restore key, and wired where Robolectric runs")
 sys.exit(1 if bad else 0)
 PY
+
+# The save step's key: it names the jars present, so a jar added later is a new entry (#427).
+python3 -I - "$root/.github/actions/robolectric-cache-save/action.yml" "$work" <<'PYX'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
+k = [s for s in steps if s.get("id") == "key"]
+sv = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache/save@")]
+if len(k) != 1 or len(sv) != 1:
+    sys.exit("the save action does not have one key step and one save step")
+open(sys.argv[2] + "/savekey.sh", "w").write(k[0]["run"])
+if "steps.key.outputs.key != ''" not in str(sv[0].get("if")) or sv[0]["with"]["key"] != "${{ steps.key.outputs.key }}":
+    sys.exit("the save does not use the named key, or runs without one")
+PYX
+savekey() { # $1 home, $2 versions, $3 restored key, $4 runner environment
+  : > "$work/out"
+  env -i PATH="$PATH" HOME="$1" VERSIONS="$2" RESTORED="$3" OS=Linux RUNNER_ENVIRONMENT="${4:-github-hosted}" GITHUB_OUTPUT="$work/out" bash "$work/savekey.sh" > "$work/savekey.out" 2>&1
+  sed -n 's/^key=//p' "$work/out"
+}
+jars="$work/save-home/.m2/repository/org/robolectric/android-all-instrumented"
+mkdir -p "$jars/14-r1"; printf 'one' > "$jars/14-r1/android-all-instrumented-14-r1.jar"
+key1=$(savekey "$work/save-home" 4.14.1 ""); export key1
+expect "the key names the OS, the versions and a hash of the jars present" '[[ $key1 == robolectric-Linux-4.14.1-???????????? ]]'
+expect "the same jars give the same key" '[ "$(savekey "$work/save-home" 4.14.1 "")" = "$key1" ]'
+expect "the entry that was restored is not saved again" '[ -z "$(savekey "$work/save-home" 4.14.1 "$key1")" ]'
+mkdir -p "$jars/13-r2"; printf 'two' > "$jars/13-r2/android-all-instrumented-13-r2.jar"
+key2=$(savekey "$work/save-home" 4.14.1 "$key1"); export key2
+expect "a jar added under the same version is a new key, saved though the old one was restored" '[ -n "$key2" ] && [ "$key2" != "$key1" ]'
+expect "and it still starts with the version, so the restore key finds it" '[[ $key2 == robolectric-Linux-4.14.1-* ]]'
+expect "no version means nothing is saved" '[ -z "$(savekey "$work/save-home" "" "")" ]'
+expect "a self-hosted runner saves nothing" '[ -z "$(savekey "$work/save-home" 4.14.1 "" self-hosted)" ]'
+mkdir -p "$work/empty-home/.m2/repository/org/robolectric"
+expect "a directory with no jar saves nothing" '[ -z "$(savekey "$work/empty-home" 4.14.1 "")" ]'
+expect "a missing directory saves nothing" '[ -z "$(savekey "$work/none-home" 4.14.1 "")" ]'
 
 # The pre-fetch, with curl stubbed.
 mkdir "$work/bin"
