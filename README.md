@@ -315,7 +315,8 @@ job there reuses what is in it. Unset or empty, nothing changes: the action inst
                       and this repo's own CI
 .github/actions/      ci-setup (Android build bootstrap), governed-paths,
                       suppression-files, pr-check-run,
-                      restore-avd-cache / save-avd-cache, nightly-report,
+                      restore-avd-cache / save-avd-cache, robolectric-cache,
+                      nightly-report,
                       agent-claude-cache (every agent job uses it),
                       agent-network-limits and agent-tool-calls (every agent
                       job uses both), shard-screenshots, changed-files, pin-only, upstream-watch, submodule-bump and
@@ -350,6 +351,16 @@ match. The three author workflows that take `suppression_files` share it, each p
 
 All the actions live here rather than in the consuming repos so a PR cannot edit the
 guard that is about to refuse it, and so the public repos get one they never had.
+
+**`robolectric-cache`** keeps Robolectric's `android-all` jars between runs on a GitHub-hosted runner. Robolectric
+downloads them from Maven Central itself, into `~/.m2/repository/org/robolectric`, outside Gradle's cache, and a rate
+limit (HTTP 429) there fails every unit test with `initializationError`. The action caches that directory under a key
+naming the Robolectric version(s) the build declares, read from the version catalog and the Gradle build files, with a
+restore key on the prefix so a new version starts from the old jars. A build that declares none, and a self-hosted
+runner, cache nothing. Its optional `jars` input (one `<artifact>:<version>` per line, empty by default) downloads named
+jars first with a retry and backoff, and a failed download is a warning, since Robolectric then tries itself. The
+Android app CI workflow runs it in its tests and screenshots jobs, taking the list from `robolectric_jars`, and
+`ci-setup` runs it too, taking `robolectric-jars`.
 
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,
