@@ -385,18 +385,22 @@ jobs:
 
           # All three page at 30 and return OLDEST first, so unpaginated they drop the NEWEST
           # feedback - including the comment this run was woken for.
+          #
+          # Every entry carries its time, and an inline comment its id and the id it replies to. A maintainer
+          # who answered a review point on the thread decided it, and the agent can only honour that if it can
+          # tell the answer came after the review and which point it answers.
           {
             echo "## Conversation comments"
             gh api "repos/${GH_REPO}/issues/${PR}/comments?per_page=100" --paginate \
-              --jq ".[] | $KEEP | \"- @\\(.user.login): \\(.body)\"" || true
+              --jq ".[] | $KEEP | \"- @\\(.user.login) (\\(.created_at)): \\(.body)\"" || true
             echo
             echo "## Inline review comments"
             gh api "repos/${GH_REPO}/pulls/${PR}/comments?per_page=100" --paginate \
-              --jq ".[] | $KEEP | \"- \\(.path):\\(.line // .original_line) @\\(.user.login): \\(.body)\"" || true
+              --jq ".[] | $KEEP | \"- \\(.path):\\(.line // .original_line) #\\(.id)\\(if .in_reply_to_id then \" (reply to #\\(.in_reply_to_id))\" else \"\" end) @\\(.user.login) (\\(.created_at)): \\(.body)\"" || true
             echo
             echo "## Reviews"
             gh api "repos/${GH_REPO}/pulls/${PR}/reviews?per_page=100" --paginate \
-              --jq ".[] | $KEEP | \"- @\\(.user.login) [\\(.state)]: \\(.body)\"" || true
+              --jq ".[] | $KEEP | \"- @\\(.user.login) [\\(.state)] (\\(.submitted_at)): \\(.body)\"" || true
           } > "${{ runner.temp }}/feedback.md"
 
           # The body as the agent sees it, and as the push step later checks it was not changed under it.
@@ -625,6 +629,21 @@ jobs:
 
             You are not obliged to agree. If a point is wrong or a matter of taste,
             change nothing for it - you'll get to say why in the reply.
+
+            These rules are part of this prompt and not of any file in the repository:
+
+            - Before you act on a review comment, read every reply a maintainer posted after it, on the
+              thread and in the conversation. Each entry in the feedback file carries its time, and an
+              inline comment its id and the id it replies to. A maintainer's decision on a point
+              overrides the reviewer's suggestion: when one has declined or settled it, change nothing for
+              that point and say in your reply that it has been decided.
+            - Never narrow what a repository exposes (a public declaration made internal or private, or an
+              entry removed from an index or an API) on the strength of a comment that is non-blocking or
+              a matter of taste. Only a comment that names a concrete defect, which you can trace, can
+              justify it.
+            - Never take "this is not used outside this repository" as a reason to narrow an API. The
+              consumers of a shared library are often private repositories this one cannot see, so an
+              absence of uses here shows nothing.
 
             ${{ inputs.gate_rules }}
 
