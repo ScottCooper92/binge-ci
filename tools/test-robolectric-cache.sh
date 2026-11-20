@@ -74,6 +74,12 @@ root = sys.argv[2]
 bad = []
 steps = act["runs"]["steps"]
 cache = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache@")]
+ro = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache/restore@")]
+if len(ro) != 1 or not re.search(r"@[0-9a-f]{40}$", ro[0]["uses"].split(" ")[0]) \
+        or "inputs.read-only == 'true'" not in str(ro[0].get("if")) or ro[0]["with"] != cache[0]["with"]:
+    bad.append("the read-only step is not one pinned restore with the saving step's path and keys")
+if "inputs.read-only != 'true'" not in str(cache[0].get("if")):
+    bad.append("the saving step runs for a read-only caller")
 if len(cache) != 1:
     bad.append("the cache step is not in the action exactly once")
 else:
@@ -96,6 +102,14 @@ for path, label in ((root + "/.github/workflows/android-app-ci.yml", "the Androi
     want = 2 if "workflows" in path else 1
     if n != want:
         bad.append(f"{label} uses the cache action {n} times, not {want}")
+ci = open(root + "/.github/actions/ci-setup/action.yml").read()
+if not re.search(r"robolectric-cache@[^\n]*\n\s+with:\n(?:\s+[^\n]*\n)*?\s+read-only: \$\{\{ inputs\.gradle-cache-read-only == 'true'", ci):
+    bad.append("ci-setup does not pass its read-only expression to the cache")
+wf = open(root + "/.github/workflows/android-app-ci.yml").read()
+uses = [m.start() for m in re.finditer(r"robolectric-cache@", wf)]
+tails = [wf[u:u + 400] for u in uses]
+if sum("read-only: 'true'" in t.split("- ")[0] or "read-only: 'true'" in t.split("\n\n")[0] for t in tails) != 1:
+    bad.append("exactly one of the app workflow's two cache steps (screenshots) must be read-only")
 for b in bad:
     print("FAIL  " + b)
 if not bad:

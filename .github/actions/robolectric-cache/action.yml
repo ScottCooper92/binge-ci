@@ -17,6 +17,14 @@ inputs:
     required: false
     default: ''
 
+  read-only:
+    description: >
+      `true` restores the cache and never saves it. Set it for a job whose cache other builds trust but which must
+      not write it: an agent job, a PR branch, or a job that is not the one writer of the key. Anything else saves
+      on a key miss.
+    required: false
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -47,8 +55,17 @@ runs:
         fi
 
     - name: Restore Robolectric's jars
-      if: steps.find.outputs.versions != ''
+      if: steps.find.outputs.versions != '' && inputs.read-only != 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.m2/repository/org/robolectric
+        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
+        restore-keys: |
+          robolectric-${{ runner.os }}-
+
+    - name: Restore Robolectric's jars without saving them
+      if: steps.find.outputs.versions != '' && inputs.read-only == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
         key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}

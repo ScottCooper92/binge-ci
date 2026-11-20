@@ -462,6 +462,8 @@ jobs:
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}
+          # The screenshot lane renders with layoutlib and never fills this directory; `tests` is the one writer.
+          read-only: 'true'
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.
