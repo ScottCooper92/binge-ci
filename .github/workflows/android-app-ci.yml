@@ -470,7 +470,7 @@ jobs:
           cache-read-only: true
 
       # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
-      # there fails every test with initializationError. Cached on a hosted runner, keyed on the version.
+      # there fails every test with initializationError. Restored here on a hosted runner; the tests job saves it.
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.56
         with:
           jars: ${{ inputs.robolectric_jars }}

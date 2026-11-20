@@ -73,14 +73,17 @@ runs:
         fi
 
     # Two steps because `actions/cache` saves in its post step and has no input that turns that off. A job that
-    # must not write the cache restores through `actions/cache/restore`, which never saves.
+    # must not write the cache restores through `actions/cache/restore`, which never saves. An exact hit on the
+    # primary key beats every restore key, so the restoring step asks for a key no step ever saves (`-restore`) and
+    # the saving step writes `-base`: both are then found by prefix, newest first, beside the jar-hash entries of
+    # robolectric-cache-save.
     - name: Restore Robolectric's jars
       id: restore_only
       if: steps.find.outputs.versions != '' && inputs.read-only == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
-        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
+        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-restore
         restore-keys: |
           robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-
@@ -91,7 +94,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.m2/repository/org/robolectric
-        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}
+        key: robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-base
         restore-keys: |
           robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-

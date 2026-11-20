@@ -370,9 +370,9 @@ branch never write an entry that other jobs restore. The Android app CI workflow
 `robolectric-<os>-<versions>-<hash of the jar files present>`, so a run that downloaded one more jar, such as a new SDK
 level under the same Robolectric version, saves a new entry that holds all of them, and a run that downloaded nothing
 new saves nothing. The restore keys are the version's prefix and then any version's, so the newest entry for the
-version is the one restored. `ci-setup` has no step after the tests, so where it saves it uses the older key naming the
-version and the jars named in `jars` only; a job that wants the jar-hash key adds `robolectric-cache-save` after its
-tests. The jars named in `jars` are part of that older key, so naming a new one gives a new entry.
+version is the one restored. The restoring step asks for a primary key that no step saves, so an older exact
+entry never hides a newer one. `ci-setup` has no step after the tests, so where it saves it writes
+`robolectric-<os>-<versions>-base`, naming the version and the jars named in `jars` only. The jars named in `jars` are part of that older key, so naming a new one gives a new entry.
 
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,

@@ -103,9 +103,14 @@ else:
             bad.append("the cache path is not Robolectric's directory")
         if "steps.find.outputs.versions" not in w["key"] or "runner.os" not in w["key"]:
             bad.append("the key does not name the OS and the versions")
+        if not w["key"].startswith("robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-"):
+            bad.append("the key is not the version's prefix plus a suffix, so an exact entry could shadow the newer ones")
         rk = w["restore-keys"].strip().splitlines()
         if rk != ["robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-", "robolectric-${{ runner.os }}-"]:
             bad.append("the restore keys are not the version's prefix, then any version's")
+    # Every key a saving path can write: the saving step's, and robolectric-cache-save's jar-hash key.
+    if ro[0]["with"]["key"] == rw[0]["with"]["key"] or ro[0]["with"]["key"].endswith(("-base", "-${{ steps.key.outputs.key }}")):
+        bad.append("the restore-only key is one a saving path writes, so it would shadow the newer entries")
     if "inputs.read-only == 'true'" not in str(ro[0].get("if")) or "!= 'true'" not in str(rw[0].get("if")):
         bad.append("the read-only input does not choose between the restore-only and the saving step")
     if act["inputs"]["read-only"].get("default") != "false":
