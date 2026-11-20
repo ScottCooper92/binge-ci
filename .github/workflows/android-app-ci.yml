@@ -217,7 +217,7 @@ jobs:
       # `green_job` names a job of the CALLER's workflow, so the Actions API reports it by that bare name.
       - name: Classify the diff
         id: classify
-        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.55
+        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.56
         with:
           product_none: ${{ inputs.product_none }}
           no_frames: ${{ inputs.no_frames }}
@@ -448,7 +448,7 @@ jobs:
       # suite, which is what sharding avoids. So it skips Gradle and passes.
       - name: Pick this shard's test classes
         id: shard
-        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.55
+        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.56
         with:
           shards: ${{ inputs.screenshot_shards }}
           index: ${{ matrix.shard }}
