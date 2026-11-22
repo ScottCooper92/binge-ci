@@ -40,6 +40,14 @@ inputs:
     required: false
     default: ''
 
+  robolectric-offline:
+    description: >
+      `true` makes Robolectric run offline when every jar in robolectric-jars is present. It has no network fallback,
+      so the list must then name every android-all jar the build loads, at every SDK level, and change with each
+      Robolectric bump. `false` (the default) keeps robolectric-jars best-effort.
+    required: false
+    default: 'false'
+
 outputs:
   robolectric-versions:
     description: The declared Robolectric version(s), for robolectric-cache-save. Empty when nothing is restored.
@@ -111,6 +119,7 @@ runs:
       uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.59
       with:
         jars: ${{ inputs.robolectric-jars }}
+        offline: ${{ inputs.robolectric-offline }}
 
     # Both need it: self-hosted ships no SDK at all, hosted ships one but not this compileSdk.
     #

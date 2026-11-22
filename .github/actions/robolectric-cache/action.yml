@@ -5,18 +5,36 @@ description: >
   Central answers HTTP 429 the download fails and every Robolectric test fails with initializationError. The
   directory is restored from the newest entry for the Robolectric version(s) the build declares, falling back to any
   version's, so a new version still starts from the old jars. It only restores: robolectric-cache-save, run after
-  the tests in the one job that writes, saves the entry. A build that declares no Robolectric version does nothing.
+  the tests in the one job that writes, saves the entry. With `jars` named, a run that has every one of them works
+  offline, and one that lacks one is pointed at a mirror. A build that declares no Robolectric version does nothing.
 
 inputs:
   jars:
     description: >
       Optional, best-effort: android-all artifacts to download before the tests run, with a retry and backoff, so a
-      429 is retried and not fatal. One per line, as `<artifact>:<version>`, for example
+      429 is retried and not fatal. With `offline: true` the list must instead name every android-all jar the build
+      loads, for every SDK level, and be updated with each Robolectric bump. One per line, as `<artifact>:<version>`, for example
       `android-all-instrumented:14-robolectric-10818077-i7`. Empty (the default) downloads nothing, because the
       names depend on the Robolectric version and the SDK levels a build tests. A jar already in the cache is not
       fetched again.
     required: false
     default: ''
+  mirror:
+    description: >
+      The base URL of a Maven Central mirror, tried before Maven Central for the named jars, and the repository
+      Robolectric itself is pointed at when the cache cannot be used offline. Empty (the default) is Google's mirror of
+      Maven Central, the one this repository's own Gradle build uses.
+    required: false
+    default: ''
+  offline:
+    description: >
+      Opt in with `true` to make Robolectric run fully offline when every jar named in `jars` is present after the
+      restore and the fetch, so a cache hit never contacts Maven Central. Offline Robolectric has no network
+      fallback, so `jars` must then name every android-all jar the build loads, at every SDK level. `false` (the
+      default) leaves Robolectric to find its own jars, from the mirror. Nothing offline is set when `jars` is empty
+      or a named jar is missing.
+    required: false
+    default: 'false'
 
 outputs:
   versions:
@@ -72,16 +90,20 @@ runs:
           robolectric-${{ runner.os }}-${{ steps.find.outputs.versions }}-
           robolectric-${{ runner.os }}-
 
-    # Only what the caller named, and only what the cache did not already bring. curl retries 408, 429 and the
-    # 5xx answers itself, and backs off between tries when no delay is set; Retry-After is honoured.
+    # Only what the caller named, and only what the cache did not already bring. The mirror is asked before Maven
+    # Central, which rate-limits shared runners. curl retries 408, 429 and the 5xx answers itself, and backs off
+    # between tries when no delay is set; Retry-After is honoured.
     - name: Fetch the named jars, retrying on a rate limit
       if: inputs.jars != ''
       shell: bash
       env:
         JARS: ${{ inputs.jars }}
+        MIRROR: ${{ inputs.mirror }}
       run: |
         set -euo pipefail
-        base=https://repo1.maven.org/maven2/org/robolectric
+        mirror=${MIRROR:-https://maven-central.storage-download.googleapis.com/maven2}
+        [[ $mirror =~ ^https://[A-Za-z0-9._/-]+$ ]] || { echo "::error::mirror is not an https URL (letters, digits and . _ / - only)."; exit 1; }
+        bases=("${mirror%/}/org/robolectric" "https://repo1.maven.org/maven2/org/robolectric")
         root="$HOME/.m2/repository/org/robolectric"
         while IFS= read -r line; do
           line=${line//[[:space:]]/}
@@ -96,10 +118,59 @@ runs:
             continue
           fi
           mkdir -p "$dir"
-          curl --fail --silent --show-error --location \
-            --retry 6 --retry-max-time 300 \
-            --output "$dir/$artifact-$version.jar" \
-            "$base/$artifact/$version/$artifact-$version.jar" \
-            || { rm -f "$dir/$artifact-$version.jar"; echo "::warning::Could not fetch $artifact $version; Robolectric will try itself."; continue; }
-          echo "Fetched $artifact $version."
+          got=false
+          for base in "${bases[@]}"; do
+            if curl --fail --silent --show-error --location \
+              --retry 6 --retry-max-time 300 \
+              --output "$dir/$artifact-$version.jar" \
+              "$base/$artifact/$version/$artifact-$version.jar"; then
+              got=true
+              break
+            fi
+            rm -f "$dir/$artifact-$version.jar"
+          done
+          if [ "$got" = true ]; then
+            echo "Fetched $artifact $version."
+          else
+            echo "::warning::Could not fetch $artifact $version; Robolectric will try itself."
+          fi
         done <<<"$JARS"
+
+    # JAVA_TOOL_OPTIONS reaches the Gradle daemon and the test JVMs it forks, which is where Robolectric reads these
+    # properties. It is appended to, never replaced, so a caller's own options survive. Offline only when every named
+    # jar is here: a partial cache set offline would fail a test that would otherwise have fetched the rest. The flat
+    # directory is what robolectric.dependency.dir reads, `<artifact>-<version>.jar` with no Maven layout.
+    - name: Use the jars offline when all of them are here
+      id: offline
+      if: inputs.jars != '' && steps.find.outputs.versions != ''
+      shell: bash
+      env:
+        JARS: ${{ inputs.jars }}
+        MIRROR: ${{ inputs.mirror }}
+        OFFLINE: ${{ inputs.offline }}
+      run: |
+        set -euo pipefail
+        mirror=${MIRROR:-https://maven-central.storage-download.googleapis.com/maven2}
+        [[ $mirror =~ ^https://[A-Za-z0-9._/-]+$ ]] || { echo "::error::mirror is not an https URL (letters, digits and . _ / - only)."; exit 1; }
+        root="$HOME/.m2/repository/org/robolectric"
+        flat="$HOME/.m2/robolectric-offline"
+        rm -rf "$flat"
+        mkdir -p "$flat"
+        complete=true
+        while IFS= read -r line; do
+          line=${line//[[:space:]]/}
+          [ -n "$line" ] || continue
+          [[ $line =~ ^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$ ]] || continue
+          artifact=${line%%:*}
+          version=${line#*:}
+          jar="$root/$artifact/$version/$artifact-$version.jar"
+          if [ -s "$jar" ]; then ln -sfn "$jar" "$flat/$artifact-$version.jar"; else complete=false; fi
+        done <<<"$JARS"
+        if [ "$OFFLINE" = true ] && [ "$complete" = true ]; then
+          opts="-Drobolectric.offline=true -Drobolectric.dependency.dir=$flat"
+          echo "Every named jar is here: Robolectric runs offline."
+        else
+          opts="-Drobolectric.dependency.repo.url=${mirror%/} -Drobolectric.dependency.repo.id=mirror"
+          echo "Robolectric will fetch what is missing from $mirror."
+        fi
+        echo "JAVA_TOOL_OPTIONS=${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }$opts" >> "$GITHUB_ENV"
