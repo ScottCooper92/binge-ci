@@ -77,6 +77,7 @@ internal fun graphsOf(
     roots.forEach { root ->
         val id = root.id as? ProjectComponentIdentifier ?: return@forEach
         val path = id.projectPath
+        val prefix = id.buildPrefix()
         val deps = projectDeps.getOrPut(path) { mutableSetOf() }
         val seen = coordinates.getOrPut(path) { mutableMapOf() }
         root.dependencies.forEach { edge ->
@@ -84,11 +85,11 @@ internal fun graphsOf(
                 is UnresolvedDependencyResult -> unresolved += "$path: ${edge.attempted.displayName}"
                 is ResolvedDependencyResult -> {
                     val childId = edge.selected.id
-                    val local = childId is ProjectComponentIdentifier && childId.inThisBuild()
+                    val local = childId is ProjectComponentIdentifier && childId.buildPrefix() == prefix
                     val via = if (local) (childId as ProjectComponentIdentifier).projectPath else edge.requested.displayName
                     if (local) deps += (childId as ProjectComponentIdentifier).projectPath
-                    record(edge, via, seen)
-                    walk(edge.selected, via, seen, unresolved, path)
+                    record(edge, via, seen, prefix)
+                    walk(edge.selected, via, seen, unresolved, path, prefix)
                 }
             }
         }
@@ -96,20 +97,20 @@ internal fun graphsOf(
     return projectDeps.map { (path, deps) -> ModuleGraph(path, deps, coordinates.getValue(path)) }
 }
 
-/** The build tree path of a project of the root build is its project path, and an included build's is prefixed. */
-private fun ProjectComponentIdentifier.inThisBuild(): Boolean = buildTreePath == projectPath
+private fun ProjectComponentIdentifier.buildPrefix(): String = buildPrefix(buildTreePath, projectPath)
 
 /** What a dependency edge shows a module to see: the selected module, or an included build's project by coordinates. */
 private fun record(
     edge: ResolvedDependencyResult,
     via: String,
     seen: MutableMap<String, String>,
+    ownerPrefix: String,
 ) {
     val component = edge.selected
     when (val id = component.id) {
         is ModuleComponentIdentifier -> seen.putIfAbsent("${id.group}:${id.module}", via)
         is ProjectComponentIdentifier ->
-            if (!id.inThisBuild()) {
+            if (id.buildPrefix() != ownerPrefix) {
                 component.moduleVersion?.let { seen.putIfAbsent("${it.group}:${it.name}", via) }
                 (edge.requested as? ModuleComponentSelector)?.let { seen.putIfAbsent("${it.group}:${it.module}", via) }
             }
@@ -122,6 +123,7 @@ private fun walk(
     seen: MutableMap<String, String>,
     unresolved: MutableList<String>,
     owner: String,
+    ownerPrefix: String,
 ) {
     val visited = mutableSetOf<ResolvedComponentResult>()
     val queue = ArrayDeque(listOf(start))
@@ -132,10 +134,22 @@ private fun walk(
             when (edge) {
                 is UnresolvedDependencyResult -> unresolved += "$owner: ${edge.attempted.displayName}"
                 is ResolvedDependencyResult -> {
-                    record(edge, via, seen)
+                    record(edge, via, seen, ownerPrefix)
                     queue.add(edge.selected)
                 }
             }
         }
     }
 }
+
+/**
+ * The build tree path of the build a project belongs to, from the project's own build tree path and project path:
+ * empty for the root build of the tree, `:shared` for an included build, `:consumer` for a consumer build that is
+ * itself included from a parent. A project belongs to the owner's build when the two match, wherever that build sits
+ * in the tree. Comparing the build tree path with the project path alone only works in the root build of the tree.
+ */
+internal fun buildPrefix(
+    buildTreePath: String,
+    projectPath: String,
+): String =
+    if (projectPath == ":") buildTreePath.takeIf { it != ":" } ?: "" else buildTreePath.removeSuffix(projectPath)

@@ -243,7 +243,8 @@ moduleRules {
   substitution, is not a project of this build: its path is relative to its own build, so `:core` there is not `:core`
   here. It is held to `forbid` by its coordinates instead, both the module the dependency asked for (the one the
   substitution replaced) and the included project's own `group:name`, and the failure names the dependency it came
-  through. It is never read as a project edge, so it needs no kind.
+  through. It is never read as a project edge, so it needs no kind. This holds wherever the consumer's own build
+  sits: run as an included build of a parent composite, its own projects are still its own.
 - **The configuration cache.** The classpaths reach the task as Gradle's own lazy resolution results, so the check
   works with it on, and a functional test runs it again from the cache.
 
