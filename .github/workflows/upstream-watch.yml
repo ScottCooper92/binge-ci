@@ -72,7 +72,7 @@ jobs:
 
       - name: Check the upstreams
         id: watch
-        uses: ScottCooper92/binge-ci/.github/actions/upstream-watch@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/upstream-watch@v1.0.59
         with:
           upstreams: ${{ inputs.upstreams }}
           state_file: ${{ inputs.state_file }}
