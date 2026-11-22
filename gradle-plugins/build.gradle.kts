@@ -80,6 +80,12 @@ gradlePlugin {
             displayName = "Baseline staleness, aggregated at the root"
             description = "Fails when a detekt baseline shared by several projects holds an entry none of them produces."
         }
+        register("grpcAlignment") {
+            id = "binge.gates.grpc-alignment"
+            implementationClass = "binge.gates.GrpcAlignmentPlugin"
+            displayName = "gRPC alignment"
+            description = "Fails when the app's gRPC version is not the version the contracts build resolves."
+        }
         register("tvMaterialSeparation") {
             id = "binge.gates.tv-material-separation"
             implementationClass = "binge.gates.TvMaterialSeparationPlugin"
