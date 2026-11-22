@@ -62,7 +62,10 @@ abstract class ModuleRulesExtension
          */
         abstract val configurations: ListProperty<String>
 
-        /** Configurations left out of [configurations]. Defaults to the test ones. */
+        /**
+         * Configurations left out of [configurations]. Defaults to the test ones: a JVM module's `test*` and an Android
+         * module's `*UnitTest*` and `*AndroidTest*`. Test fixtures are not left out, since other modules consume them.
+         */
         abstract val excludeConfigurations: ListProperty<String>
     }
 
@@ -73,10 +76,15 @@ class ModuleRulesPlugin : Plugin<Project> {
             "binge.gates.module-rules is applied to the root project, which reads every other project's classpaths."
         }
         val rules = project.extensions.create("moduleRules", ModuleRulesExtension::class.java)
+        // Read as each configuration appears, so a value set after that would be ignored without a word. Finalizing on
+        // the first read turns that into an error that says so.
+        rules.ignoreProjects.finalizeValueOnRead()
+        rules.configurations.finalizeValueOnRead()
+        rules.excludeConfigurations.finalizeValueOnRead()
         rules.requireEveryProject.convention(true)
         rules.ignoreProjects.convention(listOf(":"))
         rules.configurations.convention(listOf("compileClasspath", "runtimeClasspath", "*CompileClasspath", "*RuntimeClasspath"))
-        rules.excludeConfigurations.convention(listOf("*Test*"))
+        rules.excludeConfigurations.convention(listOf("test*", "*Test*"))
 
         val check =
             project.tasks.register("checkModuleRules", CheckModuleRulesTask::class.java) {

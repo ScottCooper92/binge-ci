@@ -127,6 +127,50 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
+    fun `a JVM module's test classpath is not held to its kind`() {
+        library("com.acme.ui", "widgets")
+        build(
+            layers,
+            mapOf(
+                "contracts" to "",
+                "data" to
+                    """
+                    dependencies {
+                        api(project(":contracts"))
+                        testImplementation(project(":app"))
+                        testImplementation("com.acme.ui:widgets:1.0")
+                    }
+                    """.trimIndent(),
+                "app" to "",
+            ),
+        )
+
+        runner("check").build()
+    }
+
+    @Test
+    fun `a setting made after another project's configurations exist fails the build and says why`() {
+        write("settings.gradle.kts", "rootProject.name = \"sample\"\ninclude(\"data\")\n")
+        write(
+            "build.gradle.kts",
+            """
+            plugins { id("binge.gates.module-rules") }
+            subprojects { apply(plugin = "java-library") }
+            moduleRules {
+                excludeConfigurations.add("*Foo*")
+                kind("data") { projects(":data") }
+            }
+            """.trimIndent(),
+        )
+        write("data/build.gradle.kts", "")
+        write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
+
+        val out = runner("check").buildAndFail().output
+
+        assertTrue(out.contains("excludeConfigurations") && out.contains("final"), out)
+    }
+
+    @Test
     fun `a project in no kind fails check`() {
         build(
             layers,
