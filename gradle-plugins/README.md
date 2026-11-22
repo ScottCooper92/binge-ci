@@ -84,6 +84,31 @@ lists it sets. The gate refuses a build in which two config files set the same l
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
 
+### The shared base config
+
+`detektGate { baseConfig = true }` reads a base config before the consumer's own `detekt.yml`, so each repository keeps
+only what is its own. It is off by default, since it brings rules a repository has not met yet. It records deviations
+from detekt's defaults, so keep `buildUponDefaultConfig` on. What it sets:
+
+- **Compose-calibrated limits.** `CyclomaticComplexMethod` ignores `@Composable`, and `CognitiveComplexMethod`,
+  `NestedBlockDepth`, `LongParameterList`, `LongMethod` and `TooManyFunctions` are above detekt's defaults, because a
+  screen composable nests scopes and threads one lambda per destination without being a smell.
+- **Rules that misfire on this code, off.** `UnreachableCode`, `UnnecessarySafeCall`, `RedundantSuspendModifier`,
+  `MatchingDeclarationName`, `NoNameShadowing`, `UseOrEmpty` and `UnusedPrivateProperty` (in 2.0.0-alpha.6), with the
+  reason beside each in the file.
+- **Bans that are the same everywhere.** The `!!` ban (`UnsafeCallOnNullableType`, which needs the type resolution the
+  gate wires), `SwallowedException`, `TooGenericExceptionCaught`, `ForbiddenComment` for `TODO`, `FIXME` and `STOPSHIP`,
+  `ReturnCount` excluding guard clauses, and `MagicNumber` tuned to real logic.
+- **Annotations that exempt a framework shape.** `@Composable`, `@Preview`, `@PreviewParameter`, `@Provides` and `@Module`.
+- **Left to the consumer.** A ban on one API of its own, such as a `ForbiddenMethodCall` list, and the excludes for its
+  own generated or API-surface files.
+
+The consumer's file is read after the base, so it overrides any value. A list is replaced, not merged: a consumer
+that sets `TooManyFunctions.excludes` restates `'**/*Previews.kt'` if it wants to keep it. The clash check does not count
+the base, since replacing its list is the point; it still refuses two of the consumer's own files setting one list.
+The file is `src/main/resources/binge/gates/detekt-base.yml` in this build, unpacked into `build/binge-gates` by
+`writeDetektBaseConfig` before detekt runs.
+
 ### Preview data that stays analysed
 
 An excluded file is not analysed, and an `internal` declaration in it is invisible to detekt: the

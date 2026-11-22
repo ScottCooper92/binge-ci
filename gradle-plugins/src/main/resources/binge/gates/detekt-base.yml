@@ -1,0 +1,136 @@
+# The base detekt config of binge.gates.detekt, read before the consumer's own detekt.yml. It records only
+# deviations from detekt's defaults, so a consumer keeps `buildUponDefaultConfig = true`, and it carries what the
+# Android apps share: the Compose-calibrated complexity limits, the rules that are off because they misfire on this
+# code, and the bans that are the same everywhere. A consumer's file is read after this one, key by key, so any value
+# here can be overridden there. A list is replaced, not merged: a consumer that sets one restates the entries it wants
+# to keep. The comment rules are in detekt-comment-rules.yml, which `commentRules = true` adds.
+#
+# detekt 2.x's limits are `allowed...` and report above the value, where 1.x's `threshold...` reported at it, so each
+# limit below is the 1.x threshold minus one.
+
+complexity:
+  CyclomaticComplexMethod:
+    # A composable is `when`/branch heavy by construction, one arm per state or destination. That branching is not logic
+    # complexity, so it is exempt, and a flat `when` of single-expression arms does not count every arm.
+    ignoreSimpleWhenEntries: true
+    ignoreAnnotated: ['Composable']
+  CognitiveComplexMethod:
+    active: true
+    # Above detekt's default of 15: Compose scope nesting reads as cognitive load to the rule without being logic.
+    allowedComplexity: 24
+  NestedBlockDepth:
+    active: true
+    allowedDepth: 4
+  LongParameterList:
+    # A top-level screen composable threads one lambda per navigation destination, which is idiomatic. Defaults are not
+    # counted, so only required wiring is measured. These limits still cap a plain function or constructor.
+    allowedFunctionParameters: 11
+    allowedConstructorParameters: 15
+    ignoreDefaultParameters: true
+  LongMethod:
+    # A screen composable's body is a flat tree of child composables, so its length tracks the UI surface and not its
+    # branching. This clears that and still flags a method that should be split by concern.
+    allowedLines: 89
+  TooManyFunctions:
+    # A preview file has one function per frame, so its count tracks what is previewed, not what one thing does.
+    excludes:
+      - '**/*Previews.kt'
+    allowedFunctionsPerFile: 15
+    allowedFunctionsPerClass: 15
+    allowedFunctionsPerInterface: 15
+    allowedFunctionsPerObject: 15
+    allowedFunctionsPerEnum: 15
+
+potential-bugs:
+  # The `!!` ban. It needs type resolution, which binge.gates.detekt wires; without a classpath the rule loads and
+  # never fires.
+  UnsafeCallOnNullableType:
+    active: true
+  # Wiring type resolution for the rule above also activates these two. UnreachableCode mis-resolves Android platform
+  # types and calls live code dead.
+  UnreachableCode:
+    active: false
+  UnnecessarySafeCall:
+    active: false
+
+coroutines:
+  InjectDispatcher:
+    # A dependency-injection `@Provides` is the injection point, so naming a dispatcher there is what the rule wants.
+    ignoreAnnotated: ['Provides']
+    active: true
+  RedundantSuspendModifier:
+    # Off: type resolution mishandles inline suspend lambdas (`Flow.first`, `withContext`, `collectLatest`) and flags
+    # a needed `suspend` as redundant.
+    active: false
+
+exceptions:
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: true
+
+naming:
+  # Off: it counts top-level classes, so a screen file whose only class is a small `*Actions` holder is asked to be
+  # renamed after its least important member, and a new finding arrives with every new screen.
+  MatchingDeclarationName:
+    active: false
+  FunctionNaming:
+    # A composable is PascalCase by Compose convention.
+    ignoreAnnotated: ['Composable']
+  NoNameShadowing:
+    active: false
+
+style:
+  ReturnCount:
+    active: true
+    # The count is not the point, the guard clauses are: a run of leading `if (!precondition) return` lines reads well,
+    # and detekt's default of two returns punishes it. Guards are excluded, and the rest covers a mid-function error exit
+    # and the happy-path return.
+    max: 3
+    excludeGuardClauses: true
+  # Flags a magic number inside real logic, and leaves declarations, named arguments, enums, annotations and preview
+  # tooling alone: those carry their own name or context.
+  MagicNumber:
+    active: true
+    excludes: ['**/*PreviewData.kt', '**/*Previews.kt']
+    ignoreNumbers: ['-1', '0', '1', '2']
+    ignoreHashCodeFunction: true
+    ignoreAnnotation: true
+    ignoreNamedArgument: true
+    ignoreEnums: true
+    ignorePropertyDeclaration: true
+    ignoreConstantDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreLocalVariableDeclaration: true
+  # Deferred work is tracked in an issue, not in a comment. It is a comment scan, so it needs no type resolution, and
+  # a `TODO()` call is not a comment.
+  ForbiddenComment:
+    active: true
+    comments:
+      - reason: 'Track deferred work in an issue, not a TODO comment.'
+        value: 'TODO'
+      - reason: 'Track deferred work in an issue, not a FIXME comment.'
+        value: 'FIXME'
+      - reason: 'A STOPSHIP marker must be resolved before shipping; open an issue instead.'
+        value: 'STOPSHIP'
+  # ktlint owns line length and imports, so the two cannot double-report.
+  MaxLineLength:
+    active: false
+  WildcardImport:
+    active: false
+  # A dependency-injection `@Binds` module has to be an abstract class, which is a framework requirement and not a smell.
+  AbstractClassCanBeConcreteClass:
+    active: true
+    ignoreAnnotated: ['Module']
+  AbstractClassCanBeInterface:
+    active: true
+    ignoreAnnotated: ['Module']
+  UseOrEmpty:
+    active: false
+  # Off: in 2.0.0-alpha.6 it reports a constructor property as unused when its only reads sit inside nested lambdas or
+  # are a callable reference, and every finding was that shape.
+  UnusedPrivateProperty:
+    active: false
+  UnusedPrivateFunction:
+    # The Compose tooling invokes a preview, not the app, so detekt sees it as unused.
+    ignoreAnnotated: ['Preview', 'PreviewParameter']
