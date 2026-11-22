@@ -306,13 +306,13 @@ jobs:
           LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
           LOGCAT_MAX_BYTES: '104857600'
         run: |
-          set -uo pipefail
-          adb_bin=$(command -v adb || true)
-          if [ -z "$adb_bin" ]; then
-            for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
-              [ -n "$root" ] && [ -x "$root/platform-tools/adb" ] && adb_bin="$root/platform-tools/adb" && break
-            done
-          fi
+          set +e -uo pipefail
+          # The SDK's adb first: Gradle's managed devices use it, and two adb versions kill each other's server.
+          adb_bin=""
+          for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+            [ -n "$root" ] && [ -x "$root/platform-tools/adb" ] && adb_bin="$root/platform-tools/adb" && break
+          done
+          [ -n "$adb_bin" ] || adb_bin=$(command -v adb || true)
           if [ -z "$adb_bin" ]; then
             echo "::warning::capture_logcat is on but adb was not found, so no logcat is recorded."
             exit 0
@@ -322,7 +322,8 @@ jobs:
           loop="$RUNNER_TEMP/logcat-loop.sh"
           cat > "$loop" <<'LOOP'
           while [ "$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)" -lt "$LOGCAT_MAX_BYTES" ]; do
-            "$ADB" wait-for-device logcat -v threadtime -b all >> "$LOGCAT_FILE" 2>&1 || true
+            left=$((LOGCAT_MAX_BYTES - $(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)))
+            "$ADB" wait-for-device logcat -v threadtime -b all 2>&1 | head -c "$left" >> "$LOGCAT_FILE" || true
             sleep 2
           done
           LOOP
@@ -408,7 +409,7 @@ jobs:
           LOGCAT_PID: ${{ steps.logcat.outputs.pid }}
           LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           if [[ $LOGCAT_PID =~ ^[0-9]+$ ]]; then
             kill -- "-$LOGCAT_PID" 2> /dev/null || true
           fi

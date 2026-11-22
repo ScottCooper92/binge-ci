@@ -54,8 +54,6 @@ if "inputs.artifact_paths" not in path or "inputs.capture_logcat && 'device-smok
     bad.append("the upload does not add the logcat file only when the input is on")
 if "retention-days" not in up["with"] or "inputs.retention_days" not in str(up["with"]["retention-days"]):
     bad.append("the retention is not the short retention_days input")
-if "continue-on-error" in start or "continue-on-error" in stop:
-    pass
 for b in bad:
     print("FAIL  " + b)
 if not bad:
@@ -74,7 +72,6 @@ chmod +x "$work/bin/adb"
 
 # A process that has ended but not been reaped is a zombie, which `kill -0` still finds.
 alive() { local st; st=$(ps -o stat= -p "$1" 2> /dev/null || true); [ -n "$st" ] && [[ $st != Z* ]]; }
-export -f alive 2> /dev/null || true
 start() { # extra env assignments
   : > "$work/gh-out"
   env -i PATH="$work/bin:$PATH" RUNNER_TEMP="$work/tmp" GITHUB_OUTPUT="$work/gh-out" LOGCAT_FILE="$work/logcat.txt" \
@@ -112,6 +109,18 @@ sleep 5
 expect "the loop ends by itself at the size cap" '! alive "$pid2"'
 expect "and the file stopped near the cap" '[ "$(stat -c %s "$work/logcat.txt")" -lt 400 ]'
 stop "$pid2" || true
+
+# One run that keeps writing: the cap bounds the run itself, not only the gap between runs.
+cat > "$work/bin/adb" <<'STUB'
+#!/usr/bin/env bash
+while :; do echo "adb chatty line of logcat output padding padding padding"; done
+STUB
+start LOGCAT_MAX_BYTES=2000 || fail "the start step failed with a chatty stream"
+pid4=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid4
+sleep 6
+expect "a single endless stream ends the loop at the cap" '! alive "$pid4"'
+expect "and the file holds no more than the cap" '[ "$(stat -c %s "$work/logcat.txt")" -le 2000 ]'
+stop "$pid4" || true
 
 # No adb, no pid, and a bad pid.
 mkdir -p "$work/empty"
