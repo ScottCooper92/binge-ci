@@ -76,6 +76,15 @@ chmod +x "$work/bin/adb"
 
 # A process that has ended but not been reaped is a zombie, which `kill -0` still finds.
 alive() { local st; st=$(ps -o stat= -p "$1" 2> /dev/null || true); [ -n "$st" ] && [[ $st != Z* ]]; }
+# Waits on the condition itself, up to a deadline, instead of for a fixed time that a loaded runner can outrun.
+waitfor() { # condition, seconds
+  local i=0
+  while ! eval "$1"; do
+    i=$((i + 1))
+    [ "$i" -lt $((${2:-15} * 10)) ] || return 1
+    sleep 0.1
+  done
+}
 start() { # extra env assignments
   : > "$work/gh-out"
   env -i PATH="$work/bin:$PATH" RUNNER_TEMP="$work/tmp" GITHUB_OUTPUT="$work/gh-out" LOGCAT_FILE="$work/logcat.txt" \
@@ -86,30 +95,32 @@ stop() { env -i PATH="$PATH" LOGCAT_PID="$1" LOGCAT_FILE="$work/logcat.txt" bash
 start STUB_SLEEP=0.2 || fail "the start step failed"
 pid=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid
 expect "the start step records a pid" '[[ $pid =~ ^[0-9]+$ ]]'
-sleep 4
+waitfor '[ "$(grep -c "^adb " "$work/logcat.txt" 2> /dev/null)" -ge 2 ]' || true
 expect "the capture ran adb with wait-for-device and the full buffer set" 'grep -q "adb wait-for-device logcat -v threadtime -b all" "$work/logcat.txt"'
 expect "and ran it again after it ended, into the same file" '[ "$(grep -c "^adb " "$work/logcat.txt")" -ge 2 ]'
 stop "$pid" || fail "the stop step failed"
-sleep 1
+waitfor '! alive "$pid"' || true
 expect "the stop step ends the loop" '! alive "$pid"'
 expect "and says how much it recorded" 'grep -q "Recorded [0-9]* bytes of logcat" "$work/stop.out"'
-size=$(stat -c %s "$work/logcat.txt"); export size; sleep 2
+waitfor '! pgrep -f "$work/bin/adb" > /dev/null' || true
+size=$(stat -c %s "$work/logcat.txt"); export size
+sleep 2 # a check that nothing more arrives has to let time pass; the loop and adb are already gone
 expect "no more is written after the stop" '[ "$(stat -c %s "$work/logcat.txt")" = "$size" ]'
 
 # The stop step ends what runs under the loop too, with adb in the middle of a long run.
 start STUB_SLEEP=6 || fail "the start step failed for the group check"
 pid3=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid3
-sleep 1.5
+waitfor 'pgrep -f "$work/bin/adb" > /dev/null' || true
 expect "adb is running when the stop step starts" 'pgrep -f "$work/bin/adb" > /dev/null'
 stop "$pid3" || fail "the stop step failed for the group check"
-sleep 0.3
+waitfor '! pgrep -f "$work/bin/adb" > /dev/null' || true
 expect "the stop step ends adb under the loop as well, not only the loop" '! pgrep -f "$work/bin/adb" > /dev/null'
 expect "and the loop is gone" '! alive "$pid3"'
 
 # The size cap.
 start LOGCAT_MAX_BYTES=60 STUB_SLEEP=0 || fail "the start step failed with a cap"
 pid2=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid2
-sleep 5
+waitfor '! alive "$pid2"' || true
 expect "the loop ends by itself at the size cap" '! alive "$pid2"'
 expect "and the file stopped near the cap" '[ "$(stat -c %s "$work/logcat.txt")" -lt 400 ]'
 stop "$pid2" || true
@@ -117,7 +128,7 @@ stop "$pid2" || true
 # One long stream that keeps writing: the cap has to bound it while it runs, not only between runs.
 start LOGCAT_MAX_BYTES=500 STUB_FLOOD=1 || fail "the start step failed for the flood"
 pid4=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid4
-sleep 4
+waitfor '! alive "$pid4"' || true
 expect "a single endless stream is cut once the file reaches the cap, and not left to grow" '[ "$(stat -c %s "$work/logcat.txt")" -gt 0 ] && [ "$(stat -c %s "$work/logcat.txt")" -lt 30000000 ]'
 expect "and the loop ends by itself after it" '! alive "$pid4"'
 expect "with nothing left running" '! pgrep -f "$work/bin/adb" > /dev/null'
@@ -130,7 +141,7 @@ printf '#!/usr/bin/env bash\necho "path adb $*"\n' > "$work/pathbin/adb"
 chmod +x "$work/sdk/platform-tools/adb" "$work/pathbin/adb"
 start PATH="$work/pathbin:/usr/bin:/bin" ANDROID_HOME="$work/sdk" || fail "the start step failed for the adb choice"
 pid5=$(sed -n 's/^pid=//p' "$work/gh-out")
-sleep 1
+waitfor 'grep -q "^sdk adb" "$work/logcat.txt" 2> /dev/null' || true
 expect "the SDK's adb is used when there is one" 'grep -q "^sdk adb" "$work/logcat.txt" && ! grep -q "^path adb" "$work/logcat.txt"'
 stop "$pid5" || true
 

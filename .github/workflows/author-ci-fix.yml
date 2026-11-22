@@ -1837,13 +1837,13 @@ jobs:
       - name: Bound the agent's network calls
         uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.59
 
-      # The same agent, tools and bounds as the job above. Screenshot re-records are not offered:
-      # that gate is opted into per caller for PR branches, and a default branch is no place to start.
       # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
       - name: Work out the public citation rule
         id: citation
         uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.59
 
+      # The same agent, tools and bounds as the job above. Screenshot re-records are not offered:
+      # that gate is opted into per caller for PR branches, and a default branch is no place to start.
       - name: Repair with Claude
         id: claude
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
