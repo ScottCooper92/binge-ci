@@ -107,17 +107,6 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
-    fun `a classpath setting made after the configurations exist fails the build`() {
-        build(
-            layers + "\nmoduleRules { excludeConfigurations.add(\"extra*\") }",
-            mapOf("contracts" to "", "data" to "", "app" to ""),
-        )
-
-        val out = runner("check").buildAndFail().output
-        assertTrue(out.contains("excludeConfigurations"), out)
-    }
-
-    @Test
     fun `a forbidden project edge fails check and names the module and the kinds it may use`() {
         build(
             layers,
@@ -175,25 +164,24 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
-    fun `a setting made after another project's configurations exist fails the build and says why`() {
-        write("settings.gradle.kts", "rootProject.name = \"sample\"\ninclude(\"data\")\n")
+    fun `ignoreProjects set after the root applies a plugin that creates configurations still applies`() {
+        write("settings.gradle.kts", "rootProject.name = \"sample\"\ninclude(\"data\", \"tools\")\n")
         write(
             "build.gradle.kts",
             """
-            plugins { id("binge.gates.module-rules") }
+            plugins { id("binge.gates.module-rules"); java }
             subprojects { apply(plugin = "java-library") }
             moduleRules {
-                excludeConfigurations.add("*Foo*")
+                ignoreProjects.set(listOf(":", ":tools"))
                 kind("data") { projects(":data") }
             }
             """.trimIndent(),
         )
         write("data/build.gradle.kts", "")
+        write("tools/build.gradle.kts", "")
         write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
 
-        val out = runner("check").buildAndFail().output
-
-        assertTrue(out.contains("excludeConfigurations") && out.contains("final"), out)
+        runner("check").build()
     }
 
     @Test

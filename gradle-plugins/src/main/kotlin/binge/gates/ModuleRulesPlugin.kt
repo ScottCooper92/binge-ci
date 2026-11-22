@@ -76,11 +76,6 @@ class ModuleRulesPlugin : Plugin<Project> {
             "binge.gates.module-rules is applied to the root project, which reads every other project's classpaths."
         }
         val rules = project.extensions.create("moduleRules", ModuleRulesExtension::class.java)
-        // Read as each configuration appears, so a value set after that would be ignored without a word. Finalizing on
-        // the first read turns that into an error that says so.
-        rules.ignoreProjects.finalizeValueOnRead()
-        rules.configurations.finalizeValueOnRead()
-        rules.excludeConfigurations.finalizeValueOnRead()
         rules.requireEveryProject.convention(true)
         rules.ignoreProjects.convention(listOf(":"))
         rules.configurations.convention(listOf("compileClasspath", "runtimeClasspath", "*CompileClasspath", "*RuntimeClasspath"))
@@ -105,18 +100,31 @@ class ModuleRulesPlugin : Plugin<Project> {
             }
 
         // Each resolvable classpath hands its root component to the task as a lazy provider, so nothing is resolved
-        // until the task runs, and the configuration cache can hold it. The root build script is evaluated before
-        // the other projects, so the extension is set by the time their configurations appear.
+        // until the task runs, and the configuration cache can hold it. The name and project filters run inside that
+        // provider too, so a setting made after a root plugin created its configurations still applies.
         project.allprojects {
             val owner = this
             configurations.configureEach {
                 if (!isCanBeResolved) return@configureEach
-                val ignored = rules.ignoreProjects.get().map { globToRegex(it, ':') }
-                if (ignored.any { it.matches(owner.path) }) return@configureEach
-                val include = rules.configurations.get().map { globToRegex(it, ':') }
-                val exclude = rules.excludeConfigurations.get().map { globToRegex(it, ':') }
-                if (include.none { it.matches(name) } || exclude.any { it.matches(name) }) return@configureEach
-                check.configure { roots.add(incoming.resolutionResult.rootComponent) }
+                val configuration = this
+                check.configure {
+                    roots.addAll(
+                        project.provider {
+                            val ignored = rules.ignoreProjects.get().map { globToRegex(it, ':') }
+                            val include = rules.configurations.get().map { globToRegex(it, ':') }
+                            val exclude = rules.excludeConfigurations.get().map { globToRegex(it, ':') }
+                            val name = configuration.name
+                            if (ignored.any { it.matches(owner.path) } ||
+                                include.none { it.matches(name) } ||
+                                exclude.any { it.matches(name) }
+                            ) {
+                                emptyList()
+                            } else {
+                                listOf(configuration.incoming.resolutionResult.rootComponent.get())
+                            }
+                        },
+                    )
+                }
             }
         }
         project.wireIntoCheck(check)
