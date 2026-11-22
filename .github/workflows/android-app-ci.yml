@@ -231,7 +231,7 @@ jobs:
       # `green_job` names a job of the CALLER's workflow, so the Actions API reports it by that bare name.
       - name: Classify the diff
         id: classify
-        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.60
+        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.61
         with:
           product_none: ${{ inputs.product_none }}
           no_frames: ${{ inputs.no_frames }}
@@ -375,7 +375,7 @@ jobs:
       # there fails every test with initializationError. Restored here on a hosted runner; this job saves what
       # the tests left, below, and is the one writer.
       - id: robolectric
-        uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.60
+        uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.61
         with:
           jars: ${{ inputs.robolectric_jars }}
           offline: ${{ inputs.robolectric_offline }}
@@ -394,7 +394,7 @@ jobs:
       # Saved after the tests, under a key that names the jars present: a key fixed before the run is an exact hit
       # once saved, and a jar for a new SDK level would never reach it. The one writer, on the default branch only:
       # the screenshot jobs only restore (a jar one downloads is thrown away), and a branch's entry would be restored by no one else.
-      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.60
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.61
         if: ${{ success() && github.event.repository != null && github.ref_name == github.event.repository.default_branch }}
         with:
           versions: ${{ steps.robolectric.outputs.versions }}
@@ -478,7 +478,7 @@ jobs:
 
       # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
       # there fails every test with initializationError. This job only restores them; the tests job saves.
-      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.60
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.61
         with:
           jars: ${{ inputs.robolectric_jars }}
           offline: ${{ inputs.robolectric_offline }}
@@ -487,7 +487,7 @@ jobs:
       # suite, which is what sharding avoids. So it skips Gradle and passes.
       - name: Pick this shard's test classes
         id: shard
-        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.60
+        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.61
         with:
           shards: ${{ inputs.screenshot_shards }}
           index: ${{ matrix.shard }}
