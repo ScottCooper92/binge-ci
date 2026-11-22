@@ -103,6 +103,18 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    private fun baseConfigBuild(gate: String) =
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            $gate
+            """.trimIndent(),
+        )
+
     @Test
     fun `detekt gate runs without parallel by default, and parallel = true turns it back on`() {
         val printer =
@@ -138,6 +150,31 @@ class GatesFunctionalTest {
         )
         val on = runner("printParallel", withKotlin = true).build()
         assertTrue(on.output.contains("parallel=true"), on.output)
+    }
+
+    @Test
+    fun `the base config is read only when asked for, and brings the shared rules`() {
+        write("src/main/kotlin/sample/Todo.kt", "package sample\n\n// TODO fix this\nconst val X = 1\n")
+        baseConfigBuild("")
+        write("detekt.yml", "")
+        runner("detekt", withKotlin = true).build()
+
+        baseConfigBuild("detektGate { baseConfig = true }")
+        val failing = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(failing.output.contains("ForbiddenComment"), failing.output)
+    }
+
+    @Test
+    fun `the consumer's own file is read after the base and overrides it, and a list it sets replaces the base's without a clash`() {
+        write("src/main/kotlin/sample/Todo.kt", "package sample\n\n// TODO fix this\nconst val X = 1\n")
+        baseConfigBuild("detektGate { baseConfig = true }")
+        write(
+            "detekt.yml",
+            "style:\n  ForbiddenComment:\n    active: false\n  MagicNumber:\n    excludes: ['**/Other.kt']\n",
+        )
+
+        runner("detekt", withKotlin = true).build()
     }
 
     // detekt prints the count and passes; the gate has to read that line, so a detekt that rewords it fails here

@@ -61,6 +61,14 @@ abstract class DetektGateExtension {
     /** Defaults to `17`. */
     abstract val jvmTarget: Property<String>
 
+    /**
+     * Reads the shared base config before the consumer's own file: the Compose-calibrated complexity limits, the rules
+     * that misfire on this code, and the bans that are the same in every app. The consumer's file is read after it, so it
+     * overrides any value, and a list it sets replaces the base's list. Defaults to false, because turning it on brings
+     * rules a repository has not met yet.
+     */
+    abstract val baseConfig: Property<Boolean>
+
     /** Defaults to true, so the config file records only deviations from detekt's defaults. */
     abstract val buildUponDefaultConfig: Property<Boolean>
 
@@ -113,6 +121,7 @@ class DetektGatePlugin : Plugin<Project> {
         gate.suppressedPaths.convention(emptyList())
         gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
+        gate.baseConfig.convention(false)
         gate.buildUponDefaultConfig.convention(true)
         // Off while the detekt 2.0 alpha crashes with it on, which a consumer should not have to find out for itself.
         gate.parallel.convention(false)
@@ -125,6 +134,7 @@ class DetektGatePlugin : Plugin<Project> {
         // has set them. The tasks are configured rather than detekt's extension, so that a task registered
         // outside it, such as the baseline-staleness run, gets the same settings.
         val suppressions = DetektSuppressions.register(project, gate)
+        val baseConfig = project.tasks.register("writeDetektBaseConfig", WriteDetektBaseConfigTask::class.java)
         // A fragment that sets a list the consumer's own config sets would replace it without a word, so it is refused.
         val clashes =
             project.tasks.register("checkDetektConfigClashes", CheckDetektConfigClashesTask::class.java) {
@@ -136,7 +146,9 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(Detekt::class.java).configureEach {
             dependsOn(clashes)
             setSource(project.productionSource(gate))
-            config.setFrom(gate.configFile)
+            // The base is read first, so the consumer's file overrides it.
+            if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             // After the consumer's own file: detekt reads a later config file over an earlier one, so the layer's `excludes`
             // would replace a rule set's own. The task refuses that clash rather than let it through.
@@ -156,7 +168,8 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
             dependsOn(clashes)
             setSource(project.productionSource(gate))
-            config.setFrom(gate.configFile)
+            if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)

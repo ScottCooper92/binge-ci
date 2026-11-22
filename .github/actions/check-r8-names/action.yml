@@ -1,0 +1,36 @@
+name: Check R8 names
+description: >
+  Fails when R8 renamed a class an app needs to keep its name. A `-keepnames` rule keeps the names that a stack frame, a
+  reflective lookup or a log matcher depends on, and a removed or narrowed rule shows only in the release build users run.
+  This reads the release build's R8 mapping and holds the classes you name to their own names.
+
+inputs:
+  classes:
+    description: >
+      The classes that must keep their names, fully qualified, one per line. Pick a few that survive shrinking and sit
+      in each package the keep rule covers: -keepnames does not stop R8 merging or generating classes, so this is a short
+      list and not every class. Required, since a check of nothing passes everything.
+    required: true
+  mapping:
+    description: The release build's R8 mapping, relative to the workspace.
+    required: false
+    default: app/build/outputs/mapping/release/mapping.txt
+  keep_rule_hint:
+    description: A sentence added to a failure, such as the keep rule file and rule to restore.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Check the classes keep their names
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        CLASSES: ${{ inputs.classes }}
+        MAPPING: ${{ inputs.mapping }}
+        R8_KEEP_RULE_HINT: ${{ inputs.keep_rule_hint }}
+      run: |
+        set -euo pipefail
+        mapfile -t classes < <(sed -e 's/[[:space:]]//g' -e '/^$/d' <<<"$CLASSES")
+        bash "${ACTION_PATH}/check-r8-names.sh" "$MAPPING" "${classes[@]}"

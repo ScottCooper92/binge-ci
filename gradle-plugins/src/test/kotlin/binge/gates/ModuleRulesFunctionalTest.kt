@@ -259,6 +259,32 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
+    fun `a consumer build included from a parent composite is still checked against its own project edges`() {
+        write("settings.gradle.kts", "rootProject.name = \"parent\"\nincludeBuild(\"consumer\")\n")
+        write(
+            "build.gradle.kts",
+            """tasks.register("checkConsumer") { dependsOn(gradle.includedBuild("consumer").task(":check")) }""",
+        )
+        write("consumer/settings.gradle.kts", "rootProject.name = \"consumer\"\ninclude(\"contracts\", \"data\", \"app\")\n")
+        write(
+            "consumer/build.gradle.kts",
+            """
+            plugins { id("binge.gates.module-rules") }
+            subprojects { apply(plugin = "java-library") }
+            $layers
+            """.trimIndent(),
+        )
+        write("consumer/contracts/build.gradle.kts", "")
+        write("consumer/data/build.gradle.kts", """dependencies { implementation(project(":app")) }""")
+        write("consumer/app/build.gradle.kts", "")
+        write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
+
+        val out = runner("checkConsumer").buildAndFail().output
+
+        assertTrue(out.contains(":data (data) depends on :app (app)"), out)
+    }
+
+    @Test
     fun `a project in no kind fails check`() {
         build(
             layers,
