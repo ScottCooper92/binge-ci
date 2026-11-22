@@ -679,8 +679,6 @@ jobs:
       - name: Work out the public citation rule
         id: citation
         uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.57
-        with:
-          private-submodules: ${{ inputs.private_submodules }}
 
       - name: Resolve with Claude
         id: claude

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 #
-# Holds the rule that keeps a private submodule out of a public repository's text. In a public repository the
-# review, the follow-up issues, the replies and the pull request bodies the agents write are world-readable, and
-# quoting a private submodule's PR numbers or file paths there leaks private work. The public-citation-rule action
-# decides whether a prompt carries the rule, the same way the submodule-bump script decides whether to list a
-# private submodule's commit subjects: the caller names the submodule, and the calling repository is taken to be
-# public unless the API says it is private.
+# Holds the rule that keeps a private submodule or repository out of a public repository's text. In a public
+# repository the review, the follow-up issues, the replies and the pull request bodies the agents write are
+# world-readable, and quoting private pull request numbers or file paths there leaks private work. The
+# public-citation-rule action decides whether a prompt carries the rule from one fact only: the calling repository is
+# public unless the API says it is private, so a lookup that fails keeps the rule on. It is not keyed on what the
+# caller names, because a caller may have private code it does not name.
 #
-# What it holds: the rule is there for a public caller that lists a private submodule, and for one whose
-# visibility could not be read; it is absent for a private caller and for a caller listing none; it names no
-# repository; and every workflow that runs an agent which writes text runs the action and puts its output in the
-# prompt, once per agent step.
+# What it holds: the rule is there for a public caller and for one whose visibility could not be read; it is absent
+# for a private caller; it names no repository; and every workflow that runs an agent which writes text runs the action
+# and puts its output in the prompt, once per agent step.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,27 +43,26 @@ STUB
 chmod +x "$work/bin/gh"
 
 # Prints the block the action would hand the prompt.
-block() { # $1 private-submodules, $2 what the API says (true|false|fail)
+block() { # $1 what the API says (true|false|fail)
   : > "$work/out"
-  env -i PATH="$work/bin:$PATH" GITHUB_OUTPUT="$work/out" PRIVATE_SUBMODULES="$1" GH_TOKEN=t GH_REPO=o/r STUB_PRIVATE="$2" \
+  env -i PATH="$work/bin:$PATH" GITHUB_OUTPUT="$work/out" GH_TOKEN=t GH_REPO=o/r STUB_PRIVATE="$1" \
     bash "$work/rule.sh" > "$work/rule.log" 2>&1
   # The output is `block<<delim`, the text, and the delimiter.
   awk 'NR == 1 {delim = substr($0, 8); next} $0 == delim {exit} {print}' "$work/out"
 }
 export -f block 2> /dev/null || true
 
-pub=$(block "shared-lib" false); export pub
-expect "a public caller that lists a private submodule gets the rule" '[[ $pub == *"never cite a private submodule"* ]]'
+pub=$(block false); export pub
+expect "a public caller gets the rule" '[[ $pub == *"never cite"*"private"* ]]'
 expect "the rule says what to call it instead" '[[ $pub == *"the shared library"* ]]'
-expect "the rule covers numbers, URLs and file paths" '[[ $pub == *"pull"*"request or issue numbers, URLs or file paths"* ]]'
+expect "the rule covers numbers, URLs and file paths" '[[ $pub == *"pull request or issue numbers, URLs or file paths"* ]]'
+expect "the rule covers a private repository as well as a submodule" '[[ $pub == *"private"*"submodule or private repository"* ]]'
 expect "the rule names no repository, number or path" '! grep -qE "[A-Za-z0-9_-]+/[A-Za-z0-9_-]+|#[0-9]+" <<<"$pub"'
-unk=$(block "shared-lib" fail); export unk
+unk=$(block fail); export unk
 expect "a visibility that cannot be read counts as public" '[ "$unk" = "$pub" ]'
-expect "an answer that is not 'true' counts as public" '[ "$(block shared-lib maybe)" = "$pub" ]'
-expect "a private caller gets nothing" '[ -z "$(block shared-lib true)" ]'
-expect "a caller that lists no private submodule gets nothing" '[ -z "$(block "" false)" ]'
-expect "a list of only separators gets nothing" '[ -z "$(block " , " false)" ]'
-expect "several submodules still give the one rule" '[ "$(block "a,b" false)" = "$pub" ]'
+expect "an answer that is not 'true' counts as public" '[ "$(block maybe)" = "$pub" ]'
+expect "a private caller gets nothing" '[ -z "$(block true)" ]'
+expect "the action takes no private-submodules input: a caller may have private code it does not name" '! grep -q "private-submodules" "$root/.github/actions/public-citation-rule/action.yml"'
 
 python3 -I - "$root" <<'PYX' || failures=$((failures + 1))
 import re, sys, yaml
@@ -83,8 +81,8 @@ for w in ("bot-review", "author-ci-fix", "author-comments", "author-conflicts"):
                 bad.append(f"{w}/{jname}: the agent step is not preceded by the citation rule step exactly once")
                 continue
             c = cit[0]
-            if c["with"].get("private-submodules") != "${{ inputs.private_submodules }}":
-                bad.append(f"{w}/{jname}: the rule is not given the caller's private_submodules")
+            if c.get("with"):
+                bad.append(f"{w}/{jname}: the rule is given inputs it does not take")
             if f"steps.{c['id']}.outputs.block" not in s["with"]["prompt"]:
                 bad.append(f"{w}/{jname}: the agent's prompt does not carry the rule")
 text = open(f"{root}/.github/workflows/author-retarget.yml").read()
