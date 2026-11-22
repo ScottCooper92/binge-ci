@@ -17,6 +17,7 @@ commit, so the gates arrive at that commit with no new repository and no new pin
 | `binge.gates.baseline-staleness` | `checkBaselineStaleness` | The detekt baseline holds an entry the code no longer produces. |
 | `binge.gates.baseline-staleness-aggregate` | `checkBaselineStaleness`, at the root | A baseline several projects share holds an entry none of them produces. |
 | `binge.gates.tv-material-separation` | `checkTvMaterialSeparation` | TV source imports Material 3, or phone source imports tv-material. |
+| `binge.gates.grpc-alignment` | `checkGrpcAlignment` | The app's gRPC version is not the one the contracts build's catalog resolves. |
 | `binge.gates.module-rules` | `checkModuleRules`, at the root | A module depends on, or sees, what its kind of module may not. |
 
 ### Translation staleness
@@ -179,6 +180,29 @@ tvMaterialSeparation {
 `sources` is required: a check that finds no files fails rather than passing. Paths are relative to
 `rootDirectory`, which defaults to the settings directory. To keep the allowlist in a file, read it
 into the property: `allowlist.addAll(file("tv-allowlist.txt").readLines().filter { it.isNotBlank() })`.
+
+### gRPC alignment
+
+Generated gRPC stubs and the gRPC runtime have to be the same version, and the contracts submodule's own catalog says
+which. A comment saying the two "must agree" is not a check, and the disagreement only shows when the stubs meet a
+runtime that is not theirs. The check reads the `[versions]` table of both catalogs and fails when the values differ.
+
+```kotlin
+grpcAlignment {
+    contractsCatalog = layout.settingsDirectory.file("contracts/gradle/libs.versions.toml") // required
+    catalog = layout.settingsDirectory.file("gradle/libs.versions.toml")                    // the default
+    versionKey = "grpc"                                                                     // the default
+    contractsVersionKey = "grpc"                                                            // defaults to versionKey
+}
+```
+
+- It fails, and does not pass, when either file is missing, when the key is absent from either, or when
+  `contractsCatalog` is not set. A check that compares nothing passes everything. The message for a missing contracts
+  catalog says to run `git submodule update --init`.
+- A version written as a plain string or as a `{ strictly = "..." }`, `{ require = "..." }` or `{ prefer = "..." }`
+  table is read. A line outside `[versions]` is ignored, so a library named `grpc` is not read as a version.
+- Apply it to the project at the repository root. Paths are reported relative to `rootDirectory`, which defaults to
+  the settings directory.
 
 ### Module rules
 
