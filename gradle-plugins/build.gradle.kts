@@ -27,6 +27,11 @@ val testKitAndroid: Configuration = configurations.create("testKitAndroid")
 dependencies {
     // binge.gates.detekt applies the detekt plugin itself, so it ships with these plugins.
     implementation(libs.detekt.gradlePlugin)
+    // The comment rules in binge.gates.rules are loaded by detekt's own classloader, which supplies its API, so the
+    // gate must not carry a second copy.
+    compileOnly(libs.detekt.api)
+    testImplementation(libs.detekt.api)
+    testImplementation(libs.detekt.test)
     // compileOnly: a consumer that uses Kotlin already has it on its build classpath, and one that
     // does not must not be handed it. The detekt gate checks for it before touching its types.
     compileOnly(libs.kotlin.gradlePlugin)
@@ -45,6 +50,9 @@ tasks.validatePlugins {
 }
 
 tasks.test {
+    // The comment rules are tested as they ship: in this plugin's jar, loaded by a real detekt run.
+    dependsOn(tasks.jar)
+    systemProperty("pluginJar", tasks.jar.get().archiveFile.get().asFile.absolutePath)
     inputs.files(testKitKotlin, testKitAndroid)
     // The design-system tests read the fragments from outside this build, so an edit to one has to rerun them.
     inputs.files(fileTree("../detekt") { include("*.yml") }).withPathSensitivity(PathSensitivity.RELATIVE)

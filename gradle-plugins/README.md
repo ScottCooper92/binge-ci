@@ -80,7 +80,7 @@ detektGate {
 shared fragment from the `binge-ci` submodule (`additionalConfigs.from(layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"))`).
 detekt reads a later file over an earlier one key by key and replaces a list rather than merging it, so a fragment owns the
 lists it sets. The gate refuses a build in which two config files set the same list (`checkDetektConfigClashes`), naming the list and the files, since the earlier file's entries would otherwise be dropped silently. Empty by default, which changes nothing. `sourceDirectory`, `excludes`,
-`jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (true) and
+`jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (false, while the detekt 2.0 alpha crashes with it on; `parallel = true` turns it back on) and
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
 
@@ -108,6 +108,39 @@ plugin is applied, in either order. It is the first block of a convention plugin
 
 What an app differs in stays in its own block: its namespace, application id, SDK levels, instrumentation runner, build
 config fields, managed devices, Compose and signing secrets. A value the app sets is read after the plugin, so it wins.
+
+### Comment rules
+
+Four lexical comment rules ship in the plugin's own jar, under the rule set id `binge`. They need no type resolution and
+no per-repository allowlist.
+
+- `BannerComment` flags a ruler or banner comment (a run of `-`, `=`, `_`, `~` or box-drawing characters).
+- `ConsecutiveInlineComments` flags more than `threshold` standalone `//` lines in a row (default 3).
+- `DeclarationCommentShouldBeKDoc` flags a `//` comment placed above a declaration, which belongs in KDoc.
+- `KDocLength` caps the prose lines of a class, function or property KDoc (`classThreshold`, `functionThreshold`,
+  `propertyThreshold`; block tags are not counted).
+
+`detektGate { commentRules = true }` loads them onto the detekt run. They stay inactive until the config turns each one
+on under a top-level `binge:` key, so a repository takes its findings when it chooses:
+
+```yaml
+binge:
+  BannerComment:
+    active: true
+  ConsecutiveInlineComments:
+    active: true
+    threshold: 3
+  DeclarationCommentShouldBeKDoc:
+    active: true
+  KDocLength:
+    active: true
+    classThreshold: 6
+    functionThreshold: 6
+    propertyThreshold: 6
+```
+
+Expect findings on the first run in a repository that has not carried them. `customRulesProject` still loads a
+repository's own rules next to these. The rules are tested as they ship, in a real detekt run from the plugin jar.
 
 ### The shared base config
 

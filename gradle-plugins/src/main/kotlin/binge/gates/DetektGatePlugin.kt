@@ -13,6 +13,7 @@ import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
+import java.io.File
 
 internal const val DETEKT_WITHOUT_BASELINE = "detektWithoutBaseline"
 
@@ -62,6 +63,13 @@ abstract class DetektGateExtension {
     abstract val jvmTarget: Property<String>
 
     /**
+     * Loads the shared comment rules (`BannerComment`, `ConsecutiveInlineComments`, `DeclarationCommentShouldBeKDoc`,
+     * `KDocLength`) onto the detekt run. Defaults to false: they are inactive until a config file turns them on under
+     * `binge:`, and a repository that has not yet taken their findings should not meet them by surprise.
+     */
+    abstract val commentRules: Property<Boolean>
+
+    /**
      * Reads the shared base config before the consumer's own file: the Compose-calibrated complexity limits, the rules
      * that misfire on this code, and the bans that are the same in every app. The consumer's file is read after it, so it
      * overrides any value, and a list it sets replaces the base's list. Defaults to false, because turning it on brings
@@ -72,7 +80,10 @@ abstract class DetektGateExtension {
     /** Defaults to true, so the config file records only deviations from detekt's defaults. */
     abstract val buildUponDefaultConfig: Property<Boolean>
 
-    /** Defaults to true. */
+    /**
+     * Defaults to false, while the detekt 2.0 alpha crashes with it on. Set it to true to turn it back on once the
+     * release the consumers use has the fix; the default will follow.
+     */
     abstract val parallel: Property<Boolean>
 
     /**
@@ -118,12 +129,20 @@ class DetektGatePlugin : Plugin<Project> {
         gate.suppressedPaths.convention(emptyList())
         gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
+        gate.commentRules.convention(false)
         gate.baseConfig.convention(false)
         gate.buildUponDefaultConfig.convention(true)
-        gate.parallel.convention(true)
+        // Off while the detekt 2.0 alpha crashes with it on, which a consumer should not have to find out for itself.
+        gate.parallel.convention(false)
 
         project.configurations.named("detektPlugins") {
             dependencies.addLater(gate.customRulesProject.map { project.dependencies.project(mapOf("path" to it)) })
+            // The rules ship in this plugin's own jar, so detekt loads them from where the plugin itself was loaded.
+            dependencies.addLater(
+                gate.commentRules.map { on ->
+                    if (on) project.dependencies.create(project.files(commentRulesLocation())) else null
+                },
+            )
         }
 
         // The extension's values are read when a task is configured, which is after the build script
@@ -216,3 +235,6 @@ private fun kotlinGradlePluginVisible(): Boolean =
     runCatching {
         Class.forName("org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension", false, DetektGatePlugin::class.java.classLoader)
     }.isSuccess
+
+/** Where this plugin was loaded from. The rules only load from its jar: a class directory has no service file. */
+private fun commentRulesLocation(): File = File(DetektGatePlugin::class.java.protectionDomain.codeSource.location.toURI())

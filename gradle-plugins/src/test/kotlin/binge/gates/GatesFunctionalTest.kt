@@ -103,6 +103,46 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    @Test
+    fun `detekt gate adds the comment rules to the detekt run only when asked`() {
+        val printer =
+            """
+            tasks.register("printPlugins") {
+                val files = configurations.getByName("detektPlugins").incoming.files
+                doLast { println("plugins=" + files.files.size) }
+            }
+            """.trimIndent()
+        build("plugins {\n id(\"org.jetbrains.kotlin.jvm\")\n id(\"binge.gates.detekt\")\n}\n$REPOSITORIES\n$printer")
+        assertTrue(runner("printPlugins", withKotlin = true).build().output.contains("plugins=0"))
+
+        build("plugins {\n id(\"org.jetbrains.kotlin.jvm\")\n id(\"binge.gates.detekt\")\n}\n$REPOSITORIES\ndetektGate { commentRules = true }\n$printer")
+        assertTrue(runner("printPlugins", withKotlin = true).build().output.contains("plugins=1"))
+    }
+
+    // Through the plugin's own jar, as a consumer gets it: the service file, the rules and detekt's classloader.
+    @Test
+    fun `the comment rules fire in a real detekt run from the plugin jar`() {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            dependencies { detektPlugins(files("${System.getProperty("pluginJar").replace("\\", "/")}")) }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "binge:\n  BannerComment:\n    active: true\n")
+        write("src/main/kotlin/sample/Banner.kt", "package sample\n\n// ------ Section ------\nconst val X = 1\n")
+
+        val failing = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(failing.output.contains("BannerComment"), failing.output)
+
+        write("src/main/kotlin/sample/Banner.kt", "package sample\n\nconst val X = 1\n")
+        runner("detekt", withKotlin = true).build()
+    }
+
     private fun baseConfigBuild(gate: String) =
         build(
             """
@@ -114,6 +154,43 @@ class GatesFunctionalTest {
             $gate
             """.trimIndent(),
         )
+
+    @Test
+    fun `detekt gate runs without parallel by default, and parallel = true turns it back on`() {
+        val printer =
+            """
+            tasks.register("printParallel") {
+                val flags = tasks.withType<dev.detekt.gradle.Detekt>().map { it.parallel }
+                doLast { println("parallel=" + flags.joinToString { it.get().toString() }) }
+            }
+            """.trimIndent()
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            $printer
+            """.trimIndent(),
+        )
+        val byDefault = runner("printParallel", withKotlin = true).build()
+        assertTrue(byDefault.output.contains("parallel=false"), byDefault.output)
+
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            detektGate { parallel = true }
+            $printer
+            """.trimIndent(),
+        )
+        val on = runner("printParallel", withKotlin = true).build()
+        assertTrue(on.output.contains("parallel=true"), on.output)
+    }
 
     @Test
     fun `the base config is read only when asked for, and brings the shared rules`() {
