@@ -17,6 +17,7 @@ commit, so the gates arrive at that commit with no new repository and no new pin
 | `binge.gates.baseline-staleness` | `checkBaselineStaleness` | The detekt baseline holds an entry the code no longer produces. |
 | `binge.gates.baseline-staleness-aggregate` | `checkBaselineStaleness`, at the root | A baseline several projects share holds an entry none of them produces. |
 | `binge.gates.tv-material-separation` | `checkTvMaterialSeparation` | TV source imports Material 3, or phone source imports tv-material. |
+| `binge.gates.module-rules` | `checkModuleRules`, at the root | A module depends on, or sees, what its kind of module may not. |
 
 ### Translation staleness
 
@@ -178,6 +179,49 @@ tvMaterialSeparation {
 `sources` is required: a check that finds no files fails rather than passing. Paths are relative to
 `rootDirectory`, which defaults to the settings directory. To keep the allowlist in a file, read it
 into the property: `allowlist.addAll(file("tv-allowlist.txt").readLines().filter { it.isNotBlank() })`.
+
+### Module rules
+
+A data module should not see a UI toolkit, a dependency-injection framework or a vendor SDK, and a client module
+should never depend on the application module. The layers are the consumer's, so the check owns none of them: they
+are configuration, and the check owns only the comparison and the failure message.
+
+Apply it to the **root** project and configure it there. The settings can go anywhere in the root script.
+
+```kotlin
+moduleRules {
+    kind("contracts") { projects(":contracts") }
+    kind("data") {
+        projects(":data:*")                      // `*` is one path segment, `**` any number
+        mayDependOn("contracts")                 // its own kind is always allowed
+        forbid("androidx.compose.*", "com.google.dagger:*") // group:artifact, `*` is any run of characters
+    }
+    kind("client") { projects(":client:*"); mayDependOn("data", "contracts") }
+    kind("app") { projects(":app"); mayDependOn("client", "data", "contracts") }
+}
+```
+
+- **Depends on.** Every direct project dependency in a module's resolved classpaths must go to its own kind or a
+  kind it `mayDependOn`. A dependency on a project in no kind fails.
+- **Sees.** A `forbid` pattern is held against everything the resolved classpaths reach, so a library that arrives
+  through another library counts. The failure names the dependency it came through.
+- **Which classpaths.** Every variant's compile and runtime classpath, and not the test ones: a JVM module's `test*`
+  classpaths, test fixtures included, and an Android module's `*UnitTest*` and `*AndroidTest*` ones. The pattern
+  `*Test*` is what leaves them out, so it also drops a flavour whose name contains `Test`. `configurations`,
+  `excludeConfigurations` and `ignoreProjects` add to those built-in lists and never replace them, with `*` as a
+  wildcard, so adding to one cannot bring the test classpaths back or put the root project in a kind. They are read
+  once every project is evaluated, so they can be set anywhere in the root script. A classpath that does not resolve
+  fails the check, since a partial view is how a ban is missed.
+- **Fails closed.** A project in no kind fails (`requireEveryProject`, on by default; `ignoreProjects` adds projects to
+  skip, and the root `:` is always skipped), and so does a project in two kinds, a path pattern that matches no project, and a
+  `mayDependOn` that names no kind.
+- **Included builds.** A library a consumer takes from an included build, through `includeBuild` with a dependency
+  substitution, is not a project of this build: its path is relative to its own build, so `:core` there is not `:core`
+  here. It is held to `forbid` by its coordinates instead, both the module the dependency asked for (the one the
+  substitution replaced) and the included project's own `group:name`, and the failure names the dependency it came
+  through. It is never read as a project edge, so it needs no kind.
+- **The configuration cache.** The classpaths reach the task as Gradle's own lazy resolution results, so the check
+  works with it on, and a functional test runs it again from the cache.
 
 ## Using them
 

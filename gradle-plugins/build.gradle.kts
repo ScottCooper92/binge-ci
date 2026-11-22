@@ -80,6 +80,12 @@ gradlePlugin {
             displayName = "Baseline staleness, aggregated at the root"
             description = "Fails when a detekt baseline shared by several projects holds an entry none of them produces."
         }
+        register("moduleRules") {
+            id = "binge.gates.module-rules"
+            implementationClass = "binge.gates.ModuleRulesPlugin"
+            displayName = "Module rules"
+            description = "Fails when a module depends on, or sees, what its kind of module may not."
+        }
         register("tvMaterialSeparation") {
             id = "binge.gates.tv-material-separation"
             implementationClass = "binge.gates.TvMaterialSeparationPlugin"
