@@ -1,6 +1,7 @@
 package binge.gates
 
 import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -16,12 +17,12 @@ abstract class AndroidAppConventionExtension {
     /**
      * The committed debug keystore, with AOSP's own debug credentials. Committed rather than left to AGP's implicit one,
      * which generates a different key on every machine and runner, so installing one debug build over another signed by
-     * an earlier key fails as a signature mismatch. Defaults to `app/debug.keystore` at the root; with no file there, the
-     * debug build type keeps AGP's own.
+     * an earlier key fails as a signature mismatch. Unset, it is `app/debug.keystore` at the root; with no file at the path,
+     * the debug build type keeps AGP's own.
      */
     abstract val debugKeystore: RegularFileProperty
 
-    /** The Java and Kotlin target. Defaults to 17. */
+    /** The Java and Kotlin target. Unset, it is 17. */
     abstract val jvmVersion: Property<Int>
 }
 
@@ -35,14 +36,21 @@ abstract class AndroidAppConventionExtension {
 class AndroidAppConventionPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val convention = project.extensions.create("androidAppConvention", AndroidAppConventionExtension::class.java)
-        convention.debugKeystore.convention(project.rootProject.layout.projectDirectory.file("app/debug.keystore"))
-        convention.jvmVersion.convention(17)
 
         project.pluginManager.withPlugin("com.android.application") {
-            project.extensions.configure(ApplicationExtension::class.java) { configure(project, convention) }
+            project.extensions.configure(ApplicationExtension::class.java) { configure(project) }
+            // The plugin is applied from the `plugins {}` block, before the app's own `androidAppConvention {}` block runs, so
+            // the two settings are read once the whole DSL is final. An app's own `android {}` values are set by then, and a
+            // setting here wins over a value it gave for the same thing.
+            project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java).finalizeDsl { dsl ->
+                dsl.applyJvmVersion(convention)
+                dsl.applyDebugKeystore(project, convention)
+            }
         }
         project.tasks.withType(KotlinCompilationTask::class.java).configureEach {
-            (compilerOptions as? KotlinJvmCompilerOptions)?.jvmTarget?.set(convention.jvmVersion.map { JvmTarget.fromTarget(it.toString()) })
+            (compilerOptions as? KotlinJvmCompilerOptions)?.jvmTarget?.set(
+                convention.jvmVersion.orElse(DEFAULT_JVM_VERSION).map { JvmTarget.fromTarget(it.toString()) },
+            )
         }
     }
 }
@@ -58,14 +66,36 @@ private val TRANSLATION_LINTS =
         "UnusedResources",
     )
 
-private fun ApplicationExtension.configure(
+private const val DEFAULT_JVM_VERSION = 17
+
+/** The extension's `jvmVersion`, when the app set one, over the default the plugin gave `compileOptions`. */
+private fun ApplicationExtension.applyJvmVersion(convention: AndroidAppConventionExtension) {
+    val version = convention.jvmVersion.orNull ?: return
+    compileOptions {
+        sourceCompatibility = JavaVersion.toVersion(version)
+        targetCompatibility = JavaVersion.toVersion(version)
+    }
+}
+
+/** The committed debug keystore, from the extension's path or `app/debug.keystore` at the root, when the file is there. */
+private fun ApplicationExtension.applyDebugKeystore(
     project: Project,
     convention: AndroidAppConventionExtension,
 ) {
-    val java = convention.jvmVersion.map { JavaVersion.toVersion(it) }
+    val keystore = (convention.debugKeystore.orNull?.asFile ?: project.rootDir.resolve("app/debug.keystore"))
+    if (!keystore.exists()) return
+    signingConfigs.getByName("debug") {
+        storeFile = keystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+    }
+}
+
+private fun ApplicationExtension.configure(project: Project) {
     compileOptions {
-        sourceCompatibility = java.get()
-        targetCompatibility = java.get()
+        sourceCompatibility = JavaVersion.toVersion(DEFAULT_JVM_VERSION)
+        targetCompatibility = JavaVersion.toVersion(DEFAULT_JVM_VERSION)
     }
 
     // A locale is complete or it does not exist: the alternative is not English, it is Android's per-string fallback
@@ -85,7 +115,7 @@ private fun ApplicationExtension.configure(
         versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
     }
 
-    configureSigning(project, convention)
+    configureSigning(project)
 
     buildTypes {
         getByName("debug") {
@@ -112,10 +142,7 @@ private fun ApplicationExtension.configure(
  * local signed build, or from the environment in a release workflow. With none, the release build type gets no signing config at
  * all, so it still builds everywhere and its output is unsigned.
  */
-private fun ApplicationExtension.configureSigning(
-    project: Project,
-    convention: AndroidAppConventionExtension,
-) {
+private fun ApplicationExtension.configureSigning(project: Project) {
     val root = project.rootDir
     val keystoreProperties =
         Properties().apply {
@@ -126,16 +153,7 @@ private fun ApplicationExtension.configureSigning(
     fun signingValue(key: String): String? = keystoreProperties.getProperty(key) ?: System.getenv(key)
     val releaseStoreFile = signingValue("RELEASE_STORE_FILE")
 
-    val debugKeystore = convention.debugKeystore.orNull?.asFile
     signingConfigs {
-        if (debugKeystore != null && debugKeystore.exists()) {
-            getByName("debug") {
-                storeFile = debugKeystore
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
-        }
         if (releaseStoreFile != null) {
             create("release") {
                 storeFile = root.resolve(releaseStoreFile)

@@ -62,7 +62,7 @@ class AndroidAppConventionFunctionalTest {
                     val release = android.buildTypes.getByName("release")
                     println("debugSuffix=" + debug.applicationIdSuffix + " pseudo=" + debug.isPseudoLocalesEnabled + " debugMinify=" + debug.optimization.enable)
                     println("releaseMinify=" + release.optimization.enable + " releaseSigning=" + release.signingConfig?.name)
-                    println("debugKeystore=" + android.signingConfigs.getByName("debug").storeFile?.name)
+                    println("debugKeystore=" + android.signingConfigs.getByName("debug").storeFile?.absolutePath?.replace("\\", "/"))
                 }
             }
             """.trimIndent(),
@@ -106,7 +106,36 @@ class AndroidAppConventionFunctionalTest {
         val out = runner("print", "-PminifyDebug").build().output
 
         assertTrue(out.contains("debugMinify=true"), out)
-        assertTrue(out.contains("debugKeystore=debug.keystore"), out)
+        assertTrue(out.contains("${root.name}/app/debug.keystore"), out)
+    }
+
+    @Test
+    fun `without the committed keystore the debug build type keeps AGP's own`() {
+        build()
+
+        val out = runner("print").build().output
+
+        assertTrue(!out.contains("${root.name}/app/debug.keystore"), out)
+    }
+
+    @Test
+    fun `jvmVersion set in the app's own block is the Java target, though the plugin was applied first`() {
+        build("androidAppConvention { jvmVersion = 21 }")
+
+        val out = runner("print").build().output
+
+        assertTrue(out.contains("java=21/21"), out)
+    }
+
+    @Test
+    fun `debugKeystore set in the app's own block moves the debug key`() {
+        build("androidAppConvention { debugKeystore = layout.projectDirectory.file(\"keys/other.keystore\") }")
+        write("keys/other.keystore", "not a real keystore")
+        write("app/debug.keystore", "not a real keystore")
+
+        val out = runner("print").build().output
+
+        assertTrue(out.contains("${root.name}/keys/other.keystore"), out)
     }
 
     @Test
