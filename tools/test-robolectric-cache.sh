@@ -226,6 +226,9 @@ expect "a set with a jar missing is not offline" '! grep -q "robolectric.offline
 expect "and points Robolectric's own fetch at the mirror instead" 'grep -q "^JAVA_TOOL_OPTIONS=-Drobolectric.dependency.repo.url=https://maven-central.storage-download.googleapis.com/maven2 -Drobolectric.dependency.repo.id=mirror$" "$work/genv"'
 offline "$work/o1" "$two" OFFLINE=false || fail "the offline step failed with offline off"
 expect "offline: false does not set the offline options" '! grep -q "robolectric.offline" "$work/genv" && grep -q "dependency.repo.url" "$work/genv"'
+offline "$work/o1" "$two
+$jar" OFFLINE=false || fail "the offline step failed on a jar named twice"
+expect "a jar named twice is linked once and does not fail the step" '[ -s "$work/o1/.m2/robolectric-offline/android-all-instrumented-14-robolectric-10818077-i7.jar" ]'
 offline "$work/o1" "$two" OFFLINE= || fail "the offline step failed with offline unset"
 expect "offline unset (not opted in) does not set the offline options even when every named jar is here" '! grep -q "robolectric.offline" "$work/genv"'
 offline "$work/o1" "$two" OFFLINE=false MIRROR=https://mirror.example.org/m/ || true

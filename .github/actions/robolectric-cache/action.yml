@@ -164,7 +164,7 @@ runs:
           artifact=${line%%:*}
           version=${line#*:}
           jar="$root/$artifact/$version/$artifact-$version.jar"
-          if [ -s "$jar" ]; then ln -s "$jar" "$flat/$artifact-$version.jar"; else complete=false; fi
+          if [ -s "$jar" ]; then ln -sfn "$jar" "$flat/$artifact-$version.jar"; else complete=false; fi
         done <<<"$JARS"
         if [ "$OFFLINE" = true ] && [ "$complete" = true ]; then
           opts="-Drobolectric.offline=true -Drobolectric.dependency.dir=$flat"
