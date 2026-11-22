@@ -116,6 +116,43 @@ class GatesFunctionalTest {
         )
 
     @Test
+    fun `detekt gate runs without parallel by default, and parallel = true turns it back on`() {
+        val printer =
+            """
+            tasks.register("printParallel") {
+                val flags = tasks.withType<dev.detekt.gradle.Detekt>().map { it.parallel }
+                doLast { println("parallel=" + flags.joinToString { it.get().toString() }) }
+            }
+            """.trimIndent()
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            $printer
+            """.trimIndent(),
+        )
+        val byDefault = runner("printParallel", withKotlin = true).build()
+        assertTrue(byDefault.output.contains("parallel=false"), byDefault.output)
+
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            detektGate { parallel = true }
+            $printer
+            """.trimIndent(),
+        )
+        val on = runner("printParallel", withKotlin = true).build()
+        assertTrue(on.output.contains("parallel=true"), on.output)
+    }
+
+    @Test
     fun `the base config is read only when asked for, and brings the shared rules`() {
         write("src/main/kotlin/sample/Todo.kt", "package sample\n\n// TODO fix this\nconst val X = 1\n")
         baseConfigBuild("")
