@@ -122,6 +122,14 @@ on:
       retention_days:
         type: number
         default: 3
+      capture_logcat:
+        description: >
+          Record `adb logcat` for the whole run and upload it with the test results. A managed-device run
+          keeps no logcat when the instrumentation process crashes, so a crash before any test runs leaves
+          no cause to read. The capture starts before the device is created, restarts when the adb server
+          does, stops at about 100 MB, and is kept for `retention_days`. Off by default.
+        type: boolean
+        default: false
       gradle_cache_read_only:
         description: >
           Restore the Gradle cache without saving one. When false, setup-gradle's own default applies (save
@@ -287,6 +295,59 @@ jobs:
           system-image-source: ${{ inputs.system_image_source }}
           default-branch: ${{ inputs.default_branch }}
 
+      # Started before the device exists, so the first boot is in it. `adb wait-for-device` blocks until there is
+      # one, and the loop starts it again when it ends, because Gradle restarts the adb server between its tasks
+      # and that closes the stream. A capture that is lost, or never started, must not fail the lane: the lane's
+      # verdict is the tests.
+      - name: Start recording logcat
+        id: logcat
+        if: ${{ inputs.capture_logcat }}
+        env:
+          LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
+          LOGCAT_MAX_BYTES: '104857600'
+        run: |
+          # -e off: the runner starts a step with it on, and nothing here may turn a green lane red.
+          set +e
+          set -uo pipefail
+          # The SDK's adb first, the one Gradle's managed devices use: two adb versions on one host kill each
+          # other's server on every restart. `adb` on PATH only when the SDK has none.
+          adb_bin=""
+          for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+            [ -n "$root" ] && [ -x "$root/platform-tools/adb" ] && adb_bin="$root/platform-tools/adb" && break
+          done
+          [ -n "$adb_bin" ] || adb_bin=$(command -v adb || true)
+          if [ -z "$adb_bin" ]; then
+            echo "::warning::capture_logcat is on but adb was not found, so no logcat is recorded."
+            exit 0
+          fi
+          : > "$LOGCAT_FILE"
+          export ADB="$adb_bin"
+          loop="$RUNNER_TEMP/logcat-loop.sh"
+          cat > "$loop" <<'LOOP'
+          while :; do
+            size=$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)
+            [ "$size" -lt "$LOGCAT_MAX_BYTES" ] || break
+            "$ADB" wait-for-device logcat -v threadtime -b all >> "$LOGCAT_FILE" 2>&1 &
+            run=$!
+            # One stream can last the whole test step, so the cap is watched while it runs, not only between runs.
+            # Not a pipe into `head`: a runner starts its steps with SIGPIPE ignored, and a writer that ignores it
+            # is not stopped by a closed pipe. The file can pass the cap by what is written in half a second.
+            while kill -0 "$run" 2> /dev/null; do
+              size=$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)
+              if [ "$size" -ge "$LOGCAT_MAX_BYTES" ]; then
+                kill "$run" 2> /dev/null
+                break
+              fi
+              sleep 0.5
+            done
+            wait "$run" 2> /dev/null
+            sleep 2
+          done
+          LOOP
+          # Its own process group, so the stop step can end the loop and the adb under it together.
+          setsid bash "$loop" > /dev/null 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
       # --stacktrace costs nothing on a success, and a setup failure otherwise ends in a bare
       # message that Gradle suggests --stacktrace for without applying it.
       - name: Create the managed-device snapshot
@@ -357,6 +418,25 @@ jobs:
           default-branch: ${{ inputs.default_branch }}
           github-token: ${{ github.token }}
 
+      # Ends the capture before the upload reads the file: the loop and the adb under it share a process group.
+      # No `set -e`: a loop that already ended, or a pid that was never recorded, is nothing to fail on.
+      - name: Stop recording logcat
+        if: ${{ always() && inputs.capture_logcat }}
+        env:
+          LOGCAT_PID: ${{ steps.logcat.outputs.pid }}
+          LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
+        run: |
+          set +e
+          set -uo pipefail
+          if [[ $LOGCAT_PID =~ ^[0-9]+$ ]]; then
+            kill -- "-$LOGCAT_PID" 2> /dev/null || true
+          fi
+          if [ -f "$LOGCAT_FILE" ]; then
+            echo "Recorded $(stat -c %s "$LOGCAT_FILE") bytes of logcat."
+          else
+            echo "No logcat was recorded."
+          fi
+
       # On success too: a managed-device run that installs nothing and runs no tests still exits
       # 0, and the report is the only place that shows.
       - name: Upload test results
@@ -366,7 +446,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.artifact_name }}
-          path: ${{ inputs.artifact_paths }}
+          path: |
+            ${{ inputs.artifact_paths }}
+            ${{ inputs.capture_logcat && 'device-smoke-logcat.txt' || '' }}
           if-no-files-found: ignore
           retention-days: ${{ inputs.retention_days }}
 

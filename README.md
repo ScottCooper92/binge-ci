@@ -566,6 +566,13 @@ holds what each consumer learned separately:
   test still reports success, so the lane fails when `results_dir` records no test case.
   `expected_tests` names tests that must each appear.
 - **The artifact**, uploaded on success too.
+- **Logcat, when asked for.** A managed-device run keeps no logcat when the instrumentation process crashes, so a crash
+  before any test ran leaves no cause to read. `capture_logcat: true` (off by default) records `adb logcat -v threadtime
+  -b all` from before the device is created until the lane ends, starts it again when Gradle restarts the adb server,
+  stops at about 100 MB (the file is watched while a stream runs, twice a second, and the run is ended once it reaches
+  the cap), and uploads the file with the results for `retention_days`. The file sits at the workspace root, so with the input on the artifact's
+  paths start at the workspace and not at the results folder. A missing `adb` is a warning, and the
+  capture never changes the lane's verdict.
 
 The caller keeps the triggers, the concurrency group and any report on a red scheduled run, which
 `nightly-report` makes from a job of its own. It does not use `ci-setup`. A build that reads
