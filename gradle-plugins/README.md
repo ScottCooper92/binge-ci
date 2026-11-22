@@ -186,7 +186,7 @@ A data module should not see a UI toolkit, a dependency-injection framework or a
 should never depend on the application module. The layers are the consumer's, so the check owns none of them: they
 are configuration, and the check owns only the comparison and the failure message.
 
-Apply it to the **root** project and configure it there, before the other projects are evaluated.
+Apply it to the **root** project and configure it there. The settings can go anywhere in the root script.
 
 ```kotlin
 moduleRules {
@@ -206,7 +206,8 @@ moduleRules {
 - **Sees.** A `forbid` pattern is held against everything the resolved classpaths reach, so a library that arrives
   through another library counts. The failure names the dependency it came through.
 - **Which classpaths.** Every variant's compile and runtime classpath, and not the test ones: a JVM module's `test*`
-  classpaths, test fixtures included, and an Android module's `*UnitTest*` and `*AndroidTest*` ones. `configurations`,
+  classpaths, test fixtures included, and an Android module's `*UnitTest*` and `*AndroidTest*` ones. The pattern
+  `*Test*` is what leaves them out, so it also drops a flavour whose name contains `Test`. `configurations`,
   `excludeConfigurations` and `ignoreProjects` add to those built-in lists and never replace them, with `*` as a
   wildcard, so adding to one cannot bring the test classpaths back or put the root project in a kind. They are read
   once every project is evaluated, so they can be set anywhere in the root script. A classpath that does not resolve
