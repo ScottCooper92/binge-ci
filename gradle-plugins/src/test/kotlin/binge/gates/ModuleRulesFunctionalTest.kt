@@ -207,6 +207,57 @@ class ModuleRulesFunctionalTest {
         runner("check").build()
     }
 
+    /** An included build that provides `com.acme.ui:widgets`, substituted for the module the app asks for. */
+    private fun includedBuild(rules: String) {
+        write(
+            "settings.gradle.kts",
+            """
+            rootProject.name = "sample"
+            include("data")
+            includeBuild("shared") {
+                dependencySubstitution { substitute(module("com.acme.ui:widgets")).using(project(":")) }
+            }
+            """.trimIndent(),
+        )
+        write("shared/settings.gradle.kts", "rootProject.name = \"widgets\"\n")
+        write("shared/build.gradle.kts", "plugins { `java-library` }\ngroup = \"com.acme.ui\"\nversion = \"1.0\"\n")
+        write(
+            "build.gradle.kts",
+            """
+            plugins { id("binge.gates.module-rules") }
+            subprojects { apply(plugin = "java-library") }
+            $rules
+            """.trimIndent(),
+        )
+        write("data/build.gradle.kts", """dependencies { implementation("com.acme.ui:widgets:1.0") }""")
+        write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
+    }
+
+    @Test
+    fun `a library substituted from an included build is held to forbid by its coordinates`() {
+        includedBuild("""moduleRules { kind("data") { projects(":data"); forbid("com.acme.ui:*") } }""")
+
+        val out = runner("check").buildAndFail().output
+
+        assertTrue(out.contains(":data (data) sees com.acme.ui:widgets"), out)
+    }
+
+    @Test
+    fun `an included build's project path is not read as a project of this build`() {
+        includedBuild("""moduleRules { kind("data") { projects(":data") } }""")
+
+        runner("check").build()
+    }
+
+    @Test
+    fun `a library substituted from an included build is held to forbid by the module that was asked for`() {
+        includedBuild("""moduleRules { kind("data") { projects(":data"); forbid("com.acme.ui:widgets") } }""")
+
+        val out = runner("check").buildAndFail().output
+
+        assertTrue(out.contains("sees com.acme.ui:widgets, through com.acme.ui:widgets:1.0"), out)
+    }
+
     @Test
     fun `a project in no kind fails check`() {
         build(

@@ -3,6 +3,7 @@ package binge.gates
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
@@ -59,7 +60,14 @@ abstract class CheckModuleRulesTask : DefaultTask() {
     }
 }
 
-/** Reads each root's direct project dependencies and everything it reaches, merged per project. */
+/**
+ * Reads each root's direct project dependencies and everything it reaches, merged per project.
+ *
+ * A project of this build is a project edge, keyed by its path. A project of an included build is not: its path is
+ * relative to its own build, so `:core` there is not `:core` here. It is a library the app consumes, so it is recorded
+ * by its coordinates, both the module the dependency asked for (what a dependency substitution replaced) and the
+ * project's own, and a `forbid` pattern matches either.
+ */
 internal fun graphsOf(
     roots: List<ResolvedComponentResult>,
     unresolved: MutableList<String>,
@@ -75,16 +83,37 @@ internal fun graphsOf(
             when (edge) {
                 is UnresolvedDependencyResult -> unresolved += "$path: ${edge.attempted.displayName}"
                 is ResolvedDependencyResult -> {
-                    val child = edge.selected
-                    val childId = child.id
-                    val via = if (childId is ProjectComponentIdentifier) childId.projectPath else childId.displayName
-                    if (childId is ProjectComponentIdentifier) deps += childId.projectPath
-                    walk(child, via, seen, unresolved, path)
+                    val childId = edge.selected.id
+                    val local = childId is ProjectComponentIdentifier && childId.inThisBuild()
+                    val via = if (local) (childId as ProjectComponentIdentifier).projectPath else edge.requested.displayName
+                    if (local) deps += (childId as ProjectComponentIdentifier).projectPath
+                    record(edge, via, seen)
+                    walk(edge.selected, via, seen, unresolved, path)
                 }
             }
         }
     }
     return projectDeps.map { (path, deps) -> ModuleGraph(path, deps, coordinates.getValue(path)) }
+}
+
+/** The build tree path of a project of the root build is its project path, and an included build's is prefixed. */
+private fun ProjectComponentIdentifier.inThisBuild(): Boolean = buildTreePath == projectPath
+
+/** What a dependency edge shows a module to see: the selected module, or an included build's project by coordinates. */
+private fun record(
+    edge: ResolvedDependencyResult,
+    via: String,
+    seen: MutableMap<String, String>,
+) {
+    val component = edge.selected
+    when (val id = component.id) {
+        is ModuleComponentIdentifier -> seen.putIfAbsent("${id.group}:${id.module}", via)
+        is ProjectComponentIdentifier ->
+            if (!id.inThisBuild()) {
+                component.moduleVersion?.let { seen.putIfAbsent("${it.group}:${it.name}", via) }
+                (edge.requested as? ModuleComponentSelector)?.let { seen.putIfAbsent("${it.group}:${it.module}", via) }
+            }
+    }
 }
 
 private fun walk(
@@ -99,11 +128,13 @@ private fun walk(
     while (queue.isNotEmpty()) {
         val component = queue.removeFirst()
         if (!visited.add(component)) continue
-        (component.id as? ModuleComponentIdentifier)?.let { seen.putIfAbsent("${it.group}:${it.module}", via) }
         component.dependencies.forEach { edge ->
             when (edge) {
                 is UnresolvedDependencyResult -> unresolved += "$owner: ${edge.attempted.displayName}"
-                is ResolvedDependencyResult -> queue.add(edge.selected)
+                is ResolvedDependencyResult -> {
+                    record(edge, via, seen)
+                    queue.add(edge.selected)
+                }
             }
         }
     }

@@ -214,7 +214,13 @@ moduleRules {
 - **Fails closed.** A project in no kind fails (`requireEveryProject`, on by default; `ignoreProjects` adds projects to
   skip, and the root `:` is always skipped), and so does a project in two kinds, a path pattern that matches no project, and a
   `mayDependOn` that names no kind.
-- **The configuration cache.** Nothing is resolved until the task runs, so the check works with it on.
+- **Included builds.** A library a consumer takes from an included build, through `includeBuild` with a dependency
+  substitution, is not a project of this build: its path is relative to its own build, so `:core` there is not `:core`
+  here. It is held to `forbid` by its coordinates instead, both the module the dependency asked for (the one the
+  substitution replaced) and the included project's own `group:name`, and the failure names the dependency it came
+  through. It is never read as a project edge, so it needs no kind.
+- **The configuration cache.** The classpaths reach the task as Gradle's own lazy resolution results, so the check
+  works with it on, and a functional test runs it again from the cache.
 
 ## Using them
 

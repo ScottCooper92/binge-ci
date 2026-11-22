@@ -96,10 +96,10 @@ class ModuleRulesPlugin : Plugin<Project> {
                 )
             }
 
-        // Each wanted classpath hands its root component to the task as a lazy provider, so nothing is resolved until
-        // the task runs, and the configuration cache can hold it. Which classpaths are wanted is decided once every
-        // project is evaluated, so the order of the root script, and of the plugins it applies, does not matter, and
-        // a setting made anywhere in it is seen.
+        // Each wanted classpath hands its root component to the task as Gradle's own lazy resolution result, which the
+        // configuration cache knows how to hold; this code resolves nothing itself. Which classpaths are wanted is
+        // decided once every project is evaluated, so the order of the root script, and of the plugins it applies,
+        // does not matter, and a setting made anywhere in it is seen.
         project.gradle.projectsEvaluated {
             val ignored = (BUILT_IN_IGNORED + rules.ignoreProjects.get()).map { globToRegex(it, ':') }
             val include = (BUILT_IN_CLASSPATHS + rules.configurations.get()).map { globToRegex(it, ':') }
