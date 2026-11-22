@@ -17,6 +17,7 @@ commit, so the gates arrive at that commit with no new repository and no new pin
 | `binge.gates.baseline-staleness` | `checkBaselineStaleness` | The detekt baseline holds an entry the code no longer produces. |
 | `binge.gates.baseline-staleness-aggregate` | `checkBaselineStaleness`, at the root | A baseline several projects share holds an entry none of them produces. |
 | `binge.gates.tv-material-separation` | `checkTvMaterialSeparation` | TV source imports Material 3, or phone source imports tv-material. |
+| `binge.gates.module-rules` | `checkModuleRules`, at the root | A module depends on, or sees, what its kind of module may not. |
 
 ### Translation staleness
 
@@ -178,6 +179,39 @@ tvMaterialSeparation {
 `sources` is required: a check that finds no files fails rather than passing. Paths are relative to
 `rootDirectory`, which defaults to the settings directory. To keep the allowlist in a file, read it
 into the property: `allowlist.addAll(file("tv-allowlist.txt").readLines().filter { it.isNotBlank() })`.
+
+### Module rules
+
+A data module should not see a UI toolkit, a dependency-injection framework or a vendor SDK, and a client module
+should never depend on the application module. The layers are the consumer's, so the check owns none of them: they
+are configuration, and the check owns only the comparison and the failure message.
+
+Apply it to the **root** project and configure it there, before the other projects are evaluated.
+
+```kotlin
+moduleRules {
+    kind("contracts") { projects(":contracts") }
+    kind("data") {
+        projects(":data:*")                      // `*` is one path segment, `**` any number
+        mayDependOn("contracts")                 // its own kind is always allowed
+        forbid("androidx.compose.*", "com.google.dagger:*") // group:artifact, `*` is any run of characters
+    }
+    kind("client") { projects(":client:*"); mayDependOn("data", "contracts") }
+    kind("app") { projects(":app"); mayDependOn("client", "data", "contracts") }
+}
+```
+
+- **Depends on.** Every direct project dependency in a module's resolved classpaths must go to its own kind or a
+  kind it `mayDependOn`. A dependency on a project in no kind fails.
+- **Sees.** A `forbid` pattern is held against everything the resolved classpaths reach, so a library that arrives
+  through another library counts. The failure names the dependency it came through.
+- **Which classpaths.** By default every variant's compile and runtime classpath, and not the test ones
+  (`configurations` and `excludeConfigurations`, with `*` as a wildcard). A classpath that does not resolve fails the
+  check, since a partial view is how a ban is missed.
+- **Fails closed.** A project in no kind fails (`requireEveryProject`, on by default; `ignoreProjects` lists what to
+  skip, `:` by default), and so does a project in two kinds, a path pattern that matches no project, and a
+  `mayDependOn` that names no kind.
+- **The configuration cache.** Nothing is resolved until the task runs, so the check works with it on.
 
 ## Using them
 
