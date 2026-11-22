@@ -888,6 +888,22 @@ only automates the update.
 own validator when it is installed (`npx --package renovate renovate-config-validator --strict
 renovate/binge-ci-pins.json`). CI does not install Renovate, so there it skips the validator.
 
+### A Renovate preset for the shared libraries
+
+`renovate/shared-libraries.json` groups the libraries the Android apps share: DataStore, OkHttp, kotlinx.serialization and
+Robolectric, each in its own group, so an app receives one pull request per library and the apps can move to one version
+together. It matches the Gradle manager's catalog entries by `group:artifact`. A consumer opts in:
+
+```json
+{ "extends": ["github>ScottCooper92/binge-ci//renovate/binge-ci-pins", "github>ScottCooper92/binge-ci//renovate/shared-libraries"] }
+```
+
+It only groups. It sets no schedule, label, automerge or version limit, so the consumer's own settings decide those, and
+`tools/test-renovate-preset.sh` holds that, and that each artifact lands in exactly one group. It cannot make two
+repositories agree on a version: Renovate works in one repository at a time, so the apps stay level only when their pull
+requests merge together. A Robolectric bump also changes the `android-all` jar names a consumer passes to
+`robolectric-cache`, so that list moves in the same pull request.
+
 The preset is read from `main`, so an edit to it reaches every consumer that extends it when it merges, ahead of
 any release. A consumer that wants it fixed to a release extends `...binge-ci-pins#v1.0.N` instead.
 

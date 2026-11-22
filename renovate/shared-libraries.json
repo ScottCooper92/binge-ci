@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Groups the libraries the Android apps share, one pull request per library, so each app proposes its move of that library in a single change and the apps can be moved to one version together. It sets no schedule, label, automerge or version limit: the consumer's own settings decide those.",
+  "packageRules": [
+    {
+      "description": "DataStore: its artifacts share one version, and the apps should too.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": ["androidx.datastore:*"],
+      "groupName": "DataStore",
+      "groupSlug": "datastore"
+    },
+    {
+      "description": "OkHttp, with its companion artifacts.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": ["com.squareup.okhttp3:*"],
+      "groupName": "OkHttp",
+      "groupSlug": "okhttp"
+    },
+    {
+      "description": "kotlinx.serialization and its format artifacts.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": ["org.jetbrains.kotlinx:kotlinx-serialization-*"],
+      "groupName": "kotlinx.serialization",
+      "groupSlug": "kotlinx-serialization"
+    },
+    {
+      "description": "Robolectric and its android-all jars. A bump moves the jar names a consumer passes to robolectric-cache.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": ["org.robolectric:*"],
+      "groupName": "Robolectric",
+      "groupSlug": "robolectric"
+    }
+  ]
+}
