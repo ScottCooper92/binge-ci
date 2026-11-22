@@ -156,6 +156,13 @@ on:
           default) fetches nothing. Robolectric's jars are restored from the cache on a hosted runner either way.
         type: string
         default: ''
+      robolectric_offline:
+        description: >
+          `true` makes Robolectric run offline when every jar in robolectric_jars is present. It has no network
+          fallback, so the list must then name every android-all jar the build loads, at every SDK level, and change
+          with each Robolectric bump. `false` (the default) keeps robolectric_jars best-effort.
+        type: boolean
+        default: false
       tests_timeout_minutes:
         description: Minutes before the tests job is stopped.
         type: number
@@ -371,6 +378,7 @@ jobs:
         uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.59
         with:
           jars: ${{ inputs.robolectric_jars }}
+          offline: ${{ inputs.robolectric_offline }}
 
       - name: Unit tests and coverage
         env:
@@ -473,6 +481,7 @@ jobs:
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.59
         with:
           jars: ${{ inputs.robolectric_jars }}
+          offline: ${{ inputs.robolectric_offline }}
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.

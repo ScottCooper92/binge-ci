@@ -226,6 +226,8 @@ expect "a set with a jar missing is not offline" '! grep -q "robolectric.offline
 expect "and points Robolectric's own fetch at the mirror instead" 'grep -q "^JAVA_TOOL_OPTIONS=-Drobolectric.dependency.repo.url=https://maven-central.storage-download.googleapis.com/maven2 -Drobolectric.dependency.repo.id=mirror$" "$work/genv"'
 offline "$work/o1" "$two" OFFLINE=false || fail "the offline step failed with offline off"
 expect "offline: false does not set the offline options" '! grep -q "robolectric.offline" "$work/genv" && grep -q "dependency.repo.url" "$work/genv"'
+offline "$work/o1" "$two" OFFLINE= || fail "the offline step failed with offline unset"
+expect "offline unset (not opted in) does not set the offline options even when every named jar is here" '! grep -q "robolectric.offline" "$work/genv"'
 offline "$work/o1" "$two" OFFLINE=false MIRROR=https://mirror.example.org/m/ || true
 expect "a named mirror is the one Robolectric is pointed at" 'grep -q "repo.url=https://mirror.example.org/m " "$work/genv"'
 if offline "$work/o1" "$two" 'MIRROR=https://x.example.org/a b'; then fail "the offline step accepted a bad mirror"; else pass "the offline step refuses a mirror that would split the options"; fi
@@ -240,12 +242,12 @@ if names.index("Fetch the named jars, retrying on a rate limit") > steps.index(o
     bad.append("the offline step runs before the fetch")
 if "inputs.jars != ''" not in off["if"] or "steps.find.outputs.versions != ''" not in off["if"]:
     bad.append("the offline step runs with no jars named, or off a hosted runner")
-if act["inputs"]["offline"]["default"] != "true" or act["inputs"]["mirror"]["default"] != "":
-    bad.append("the offline and mirror defaults are not 'true' and empty")
+if act["inputs"]["offline"]["default"] != "false" or act["inputs"]["mirror"]["default"] != "":
+    bad.append("the offline and mirror defaults are not 'false' and empty")
 for b in bad:
     print("FAIL  " + b)
 if not bad:
-    print("ok    the offline step follows the fetch, needs jars and a hosted runner, and the defaults are on and the stock mirror")
+    print("ok    the offline step follows the fetch, needs jars and a hosted runner, and the defaults are off and the stock mirror")
 sys.exit(1 if bad else 0)
 PYZ
 [ "$failures" -eq 0 ]

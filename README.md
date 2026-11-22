@@ -381,12 +381,15 @@ outside Gradle's cache, and a rate limit (HTTP 429) there fails every unit test 
   downloads named jars first, from a Maven Central mirror and then from Central, with a retry and backoff on each, and a
   failed download is a warning, since Robolectric then tries itself. The mirror is Google's unless the optional `mirror`
   input names another.
-- **Offline.** When `jars` is set and every jar it names is present after the restore and the fetch, the action
+- **Offline (opt-in).** With `offline: true`, `jars` set and every jar it names present after the restore and the fetch, the action
   appends `-Drobolectric.offline=true -Drobolectric.dependency.dir=<a flat directory of the jars>` to
   `JAVA_TOOL_OPTIONS`, so the Gradle daemon and the test JVMs never contact Maven Central. A caller's own options are
-  kept. If a named jar is missing, nothing offline is set and Robolectric is pointed at the mirror instead
-  (`robolectric.dependency.repo.url`), so a cold run does not hit Central either. `offline: false` turns the offline
-  part off. The jar names depend on the Robolectric version and the SDK levels a build tests, so the shared code cannot
+  kept. Without `offline: true`, or if a named jar is missing, nothing offline is set and Robolectric is pointed at the mirror instead
+  (`robolectric.dependency.repo.url`), so a cold run does not hit Central either. Offline is opt-in: `offline: true`
+  (`robolectric_offline` on the workflow, `robolectric-offline` on `ci-setup`). Robolectric has no network fallback
+  when offline, so the list must then name every android-all jar the build loads, for every SDK level, and change with
+  each Robolectric bump. Every JVM in the job then prints `Picked up JAVA_TOOL_OPTIONS` to stderr.
+  The jar names depend on the Robolectric version and the SDK levels a build tests, so the shared code cannot
   know them: a failing run's log names the artifact (`android-all-instrumented-<version>`), and the caller passes it as
   `robolectric_jars` (`robolectric-jars` on `ci-setup`). These are Robolectric's own properties; the first hosted run
   after a release is what confirms them.

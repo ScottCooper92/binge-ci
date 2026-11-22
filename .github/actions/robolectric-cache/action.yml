@@ -12,7 +12,8 @@ inputs:
   jars:
     description: >
       Optional, best-effort: android-all artifacts to download before the tests run, with a retry and backoff, so a
-      429 is retried and not fatal. One per line, as `<artifact>:<version>`, for example
+      429 is retried and not fatal. With `offline: true` the list must instead name every android-all jar the build
+      loads, for every SDK level, and be updated with each Robolectric bump. One per line, as `<artifact>:<version>`, for example
       `android-all-instrumented:14-robolectric-10818077-i7`. Empty (the default) downloads nothing, because the
       names depend on the Robolectric version and the SDK levels a build tests. A jar already in the cache is not
       fetched again.
@@ -27,11 +28,13 @@ inputs:
     default: ''
   offline:
     description: >
-      `true` (the default) makes Robolectric run fully offline when every jar named in `jars` is present after the
-      restore and the fetch, so a cache hit never contacts Maven Central. `false` leaves Robolectric to find its own
-      jars. Nothing is set when `jars` is empty or a named jar is missing.
+      Opt in with `true` to make Robolectric run fully offline when every jar named in `jars` is present after the
+      restore and the fetch, so a cache hit never contacts Maven Central. Offline Robolectric has no network
+      fallback, so `jars` must then name every android-all jar the build loads, at every SDK level. `false` (the
+      default) leaves Robolectric to find its own jars, from the mirror. Nothing offline is set when `jars` is empty
+      or a named jar is missing.
     required: false
-    default: 'true'
+    default: 'false'
 
 outputs:
   versions:
@@ -163,7 +166,7 @@ runs:
           jar="$root/$artifact/$version/$artifact-$version.jar"
           if [ -s "$jar" ]; then ln -s "$jar" "$flat/$artifact-$version.jar"; else complete=false; fi
         done <<<"$JARS"
-        if [ "$OFFLINE" != false ] && [ "$complete" = true ]; then
+        if [ "$OFFLINE" = true ] && [ "$complete" = true ]; then
           opts="-Drobolectric.offline=true -Drobolectric.dependency.dir=$flat"
           echo "Every named jar is here: Robolectric runs offline."
         else
