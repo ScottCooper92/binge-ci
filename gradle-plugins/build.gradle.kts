@@ -86,6 +86,12 @@ gradlePlugin {
             displayName = "gRPC alignment"
             description = "Fails when the app's gRPC version is not the version the contracts build resolves."
         }
+        register("moduleRules") {
+            id = "binge.gates.module-rules"
+            implementationClass = "binge.gates.ModuleRulesPlugin"
+            displayName = "Module rules"
+            description = "Fails when a module depends on, or sees, what its kind of module may not."
+        }
         register("tvMaterialSeparation") {
             id = "binge.gates.tv-material-separation"
             implementationClass = "binge.gates.TvMaterialSeparationPlugin"

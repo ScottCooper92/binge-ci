@@ -156,6 +156,13 @@ on:
           default) fetches nothing. Robolectric's jars are restored from the cache on a hosted runner either way.
         type: string
         default: ''
+      robolectric_offline:
+        description: >
+          `true` makes Robolectric run offline when every jar in robolectric_jars is present. It has no network
+          fallback, so the list must then name every android-all jar the build loads, at every SDK level, and change
+          with each Robolectric bump. `false` (the default) keeps robolectric_jars best-effort.
+        type: boolean
+        default: false
       tests_timeout_minutes:
         description: Minutes before the tests job is stopped.
         type: number
@@ -224,7 +231,7 @@ jobs:
       # `green_job` names a job of the CALLER's workflow, so the Actions API reports it by that bare name.
       - name: Classify the diff
         id: classify
-        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.59
+        uses: ScottCooper92/binge-ci/.github/actions/changed-files@v1.0.60
         with:
           product_none: ${{ inputs.product_none }}
           no_frames: ${{ inputs.no_frames }}
@@ -368,9 +375,10 @@ jobs:
       # there fails every test with initializationError. Restored here on a hosted runner; this job saves what
       # the tests left, below, and is the one writer.
       - id: robolectric
-        uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.59
+        uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.60
         with:
           jars: ${{ inputs.robolectric_jars }}
+          offline: ${{ inputs.robolectric_offline }}
 
       - name: Unit tests and coverage
         env:
@@ -386,7 +394,7 @@ jobs:
       # Saved after the tests, under a key that names the jars present: a key fixed before the run is an exact hit
       # once saved, and a jar for a new SDK level would never reach it. The one writer, on the default branch only:
       # the screenshot jobs only restore (a jar one downloads is thrown away), and a branch's entry would be restored by no one else.
-      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.59
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.60
         if: ${{ success() && github.event.repository != null && github.ref_name == github.event.repository.default_branch }}
         with:
           versions: ${{ steps.robolectric.outputs.versions }}
@@ -470,15 +478,16 @@ jobs:
 
       # Robolectric fetches its android-all jars from Maven Central itself, outside Gradle's cache, and a 429
       # there fails every test with initializationError. This job only restores them; the tests job saves.
-      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.59
+      - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.60
         with:
           jars: ${{ inputs.robolectric_jars }}
+          offline: ${{ inputs.robolectric_offline }}
 
       # A shard with no class has nothing to validate, and a validate task given no filter runs the whole
       # suite, which is what sharding avoids. So it skips Gradle and passes.
       - name: Pick this shard's test classes
         id: shard
-        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.59
+        uses: ScottCooper92/binge-ci/.github/actions/shard-screenshots@v1.0.60
         with:
           shards: ${{ inputs.screenshot_shards }}
           index: ${{ matrix.shard }}

@@ -378,8 +378,21 @@ outside Gradle's cache, and a rate limit (HTTP 429) there fails every unit test 
   the Gradle build files, and restores the newest entry for them, falling back to the newest of any version, so a new
   version starts from the old jars. A build that declares none, and a self-hosted runner, restore nothing. It outputs
   `versions` and `matched-key`. Its optional `jars` input (one `<artifact>:<version>` per line, empty by default)
-  downloads named jars first with a retry and backoff, and a failed download is a warning, since Robolectric then tries
-  itself.
+  downloads named jars first, from a Maven Central mirror and then from Central, with a retry and backoff on each, and a
+  failed download is a warning, since Robolectric then tries itself. The mirror is Google's unless the optional `mirror`
+  input names another.
+- **Offline (opt-in).** With `offline: true`, `jars` set and every jar it names present after the restore and the fetch, the action
+  appends `-Drobolectric.offline=true -Drobolectric.dependency.dir=<a flat directory of the jars>` to
+  `JAVA_TOOL_OPTIONS`, so the Gradle daemon and the test JVMs never contact Maven Central. A caller's own options are
+  kept. Without `offline: true`, or if a named jar is missing, nothing offline is set and Robolectric is pointed at the mirror instead
+  (`robolectric.dependency.repo.url`), so a cold run does not hit Central either. Offline is opt-in: `offline: true`
+  (`robolectric_offline` on the workflow, `robolectric-offline` on `ci-setup`). Robolectric has no network fallback
+  when offline, so the list must then name every android-all jar the build loads, for every SDK level, and change with
+  each Robolectric bump. Every JVM in the job then prints `Picked up JAVA_TOOL_OPTIONS` to stderr.
+  The jar names depend on the Robolectric version and the SDK levels a build tests, so the shared code cannot
+  know them: a failing run's log names the artifact (`android-all-instrumented-<version>`), and the caller passes it as
+  `robolectric_jars` (`robolectric-jars` on `ci-setup`). These are Robolectric's own properties; the first hosted run
+  after a release is what confirms them.
 - `robolectric-cache-save` runs after the unit tests, in the one job that writes. It saves the directory under
   `robolectric-<os>-<versions>-<hash of the jar files present>`. A run that downloaded one more jar, such as a new SDK
   level under the same Robolectric version, saves a new entry holding all of them, and a run that downloaded nothing
