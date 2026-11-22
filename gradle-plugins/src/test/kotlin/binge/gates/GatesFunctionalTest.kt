@@ -103,6 +103,46 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    @Test
+    fun `detekt gate adds the comment rules to the detekt run only when asked`() {
+        val printer =
+            """
+            tasks.register("printPlugins") {
+                val files = configurations.getByName("detektPlugins").incoming.files
+                doLast { println("plugins=" + files.files.size) }
+            }
+            """.trimIndent()
+        build("plugins {\n id(\"org.jetbrains.kotlin.jvm\")\n id(\"binge.gates.detekt\")\n}\n$REPOSITORIES\n$printer")
+        assertTrue(runner("printPlugins", withKotlin = true).build().output.contains("plugins=0"))
+
+        build("plugins {\n id(\"org.jetbrains.kotlin.jvm\")\n id(\"binge.gates.detekt\")\n}\n$REPOSITORIES\ndetektGate { commentRules = true }\n$printer")
+        assertTrue(runner("printPlugins", withKotlin = true).build().output.contains("plugins=1"))
+    }
+
+    // Through the plugin's own jar, as a consumer gets it: the service file, the rules and detekt's classloader.
+    @Test
+    fun `the comment rules fire in a real detekt run from the plugin jar`() {
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            dependencies { detektPlugins(files("${System.getProperty("pluginJar").replace("\\", "/")}")) }
+            """.trimIndent(),
+        )
+        write("detekt.yml", "binge:\n  BannerComment:\n    active: true\n")
+        write("src/main/kotlin/sample/Banner.kt", "package sample\n\n// ------ Section ------\nconst val X = 1\n")
+
+        val failing = runner("detekt", withKotlin = true).buildAndFail()
+
+        assertTrue(failing.output.contains("BannerComment"), failing.output)
+
+        write("src/main/kotlin/sample/Banner.kt", "package sample\n\nconst val X = 1\n")
+        runner("detekt", withKotlin = true).build()
+    }
+
     // detekt prints the count and passes; the gate has to read that line, so a detekt that rewords it fails here
     // rather than silently turning the ratchet off in every consumer.
     @Test

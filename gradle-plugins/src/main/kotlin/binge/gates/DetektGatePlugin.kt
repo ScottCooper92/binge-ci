@@ -13,6 +13,7 @@ import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
+import java.io.File
 
 internal const val DETEKT_WITHOUT_BASELINE = "detektWithoutBaseline"
 
@@ -60,6 +61,13 @@ abstract class DetektGateExtension {
 
     /** Defaults to `17`. */
     abstract val jvmTarget: Property<String>
+
+    /**
+     * Loads the shared comment rules (`BannerComment`, `ConsecutiveInlineComments`, `DeclarationCommentShouldBeKDoc`,
+     * `KDocLength`) onto the detekt run. Defaults to false: they are inactive until a config file turns them on under
+     * `binge:`, and a repository that has not yet taken their findings should not meet them by surprise.
+     */
+    abstract val commentRules: Property<Boolean>
 
     /** Defaults to true, so the config file records only deviations from detekt's defaults. */
     abstract val buildUponDefaultConfig: Property<Boolean>
@@ -110,11 +118,18 @@ class DetektGatePlugin : Plugin<Project> {
         gate.suppressedPaths.convention(emptyList())
         gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
+        gate.commentRules.convention(false)
         gate.buildUponDefaultConfig.convention(true)
         gate.parallel.convention(true)
 
         project.configurations.named("detektPlugins") {
             dependencies.addLater(gate.customRulesProject.map { project.dependencies.project(mapOf("path" to it)) })
+            // The rules ship in this plugin's own jar, so detekt loads them from where the plugin itself was loaded.
+            dependencies.addLater(
+                gate.commentRules.map { on ->
+                    if (on) project.dependencies.create(project.files(commentRulesLocation())) else null
+                },
+            )
         }
 
         // The extension's values are read when a task is configured, which is after the build script
@@ -203,3 +218,6 @@ private fun kotlinGradlePluginVisible(): Boolean =
     runCatching {
         Class.forName("org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension", false, DetektGatePlugin::class.java.classLoader)
     }.isSuccess
+
+/** Where this plugin was loaded from: its jar, or its class directory when run from an included build's sources. */
+private fun commentRulesLocation(): File = File(DetektGatePlugin::class.java.protectionDomain.codeSource.location.toURI())
