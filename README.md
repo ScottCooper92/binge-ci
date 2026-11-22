@@ -407,6 +407,21 @@ outside Gradle's cache, and a rate limit (HTTP 429) there fails every unit test 
 - A jar the build needs that no run has downloaded yet is fetched once, and then it is in the entry. A hash of the files
   present is not known before the run, so the first run after a new SDK level still downloads it.
 
+**`check-r8-names`** fails when R8 renamed a class an app needs to keep its name. A `-keepnames` rule keeps the names
+that a stack frame, a reflective lookup or a log matcher depends on, and a removed or narrowed rule shows only in the
+release build users run, not in the minified debug build a device lane runs. The action reads the release build's R8
+mapping and holds the classes you name to their own names.
+
+- It takes `classes` (required: one fully qualified class per line, a few that survive shrinking and sit in each package
+  the keep rule covers), `mapping` (default `app/build/outputs/mapping/release/mapping.txt`) and `keep_rule_hint` (a
+  sentence added to a failure, such as the keep rule file to restore).
+- It fails for a class that is renamed, and for one that is missing from the mapping: a renamed or removed class makes
+  the list stale, and a check that finds nothing must not pass. It also fails for an empty list or mapping.
+  `-keepnames` does not stop R8 merging or generating classes, so this is a short list and not every class.
+- The Android app workflow runs it in the release job, after the release build, when the caller sets `r8_kept_classes`
+  (empty by default, so no check runs). `r8_mapping` and `r8_keep_rule_hint` pass the other two inputs on.
+- `tools/test-check-r8-names.sh` holds it against synthetic mappings, so no R8 run is needed.
+
 **`restore-avd-cache` and `save-avd-cache`** cache the Gradle Managed Device's AVD, its system
 image and the emulator package for an emulator lane. The caller passes `device`, `api-level`,
 `system-image-source` and its `default-branch`, and gates the save to a push to that branch with
