@@ -429,7 +429,7 @@ jobs:
       - name: List the suppression files
         id: suppression
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/suppression-files@v1.0.59
         with:
           patterns: ${{ inputs.suppression_files }}
           default-branch: ${{ inputs.default_branch }}
@@ -446,7 +446,7 @@ jobs:
       - name: Provide the governed-paths script
         id: governed
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/governed-paths@v1.0.59
         with:
           base-ref: origin/${{ steps.ctx.outputs.base }}
           default-ref: origin/${{ inputs.default_branch }}
@@ -477,7 +477,7 @@ jobs:
         if: >
           inputs.toolchain == 'android' &&
           steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/ci-setup@v1.0.59
         with:
           tmdb-api-key: ${{ inputs.tmdb_api_key_placeholder }}
           java-version: ${{ inputs.java_version }}
@@ -550,7 +550,7 @@ jobs:
         timeout-minutes: 10
         continue-on-error: true
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/agent-claude-cache@v1.0.59
         with:
           action_ref: 12dd8d74c712f5f3669365b2369b558c495b1104
 
@@ -559,12 +559,12 @@ jobs:
       # self-hosted runner keeps its HOME between jobs and the limits would pile up there. Git does
       # not read curl's config, so it gets its own pair. 120s: slow, legitimate fetches finish.
       - name: Bound the agent's network calls
-        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.59
 
       # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
       - name: Work out the public citation rule
         id: citation
-        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.59
 
       - name: Address it with Claude
         id: claude
@@ -697,7 +697,7 @@ jobs:
       # No `set -e`: this reports on a failure, and a missing file must not become a second one.
       - name: Show the agent's last tool calls
         if: always() && steps.claude.outcome != 'success' && steps.claude.outcome != 'skipped'
-        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.58
+        uses: ScottCooper92/binge-ci/.github/actions/agent-tool-calls@v1.0.59
         with:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           show_full_output: ${{ inputs.show_full_output }}
