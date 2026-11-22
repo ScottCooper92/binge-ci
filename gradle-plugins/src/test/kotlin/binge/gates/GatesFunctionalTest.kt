@@ -103,6 +103,43 @@ class GatesFunctionalTest {
         assertTheBanFires("check", withKotlin = true)
     }
 
+    @Test
+    fun `detekt gate runs without parallel by default, and parallel = true turns it back on`() {
+        val printer =
+            """
+            tasks.register("printParallel") {
+                val flags = tasks.withType<dev.detekt.gradle.Detekt>().map { it.parallel }
+                doLast { println("parallel=" + flags.joinToString { it.get().toString() }) }
+            }
+            """.trimIndent()
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            $printer
+            """.trimIndent(),
+        )
+        val byDefault = runner("printParallel", withKotlin = true).build()
+        assertTrue(byDefault.output.contains("parallel=false"), byDefault.output)
+
+        build(
+            """
+            plugins {
+                id("org.jetbrains.kotlin.jvm")
+                id("binge.gates.detekt")
+            }
+            $REPOSITORIES
+            detektGate { parallel = true }
+            $printer
+            """.trimIndent(),
+        )
+        val on = runner("printParallel", withKotlin = true).build()
+        assertTrue(on.output.contains("parallel=true"), on.output)
+    }
+
     // detekt prints the count and passes; the gate has to read that line, so a detekt that rewords it fails here
     // rather than silently turning the ratchet off in every consumer.
     @Test

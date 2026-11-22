@@ -64,7 +64,10 @@ abstract class DetektGateExtension {
     /** Defaults to true, so the config file records only deviations from detekt's defaults. */
     abstract val buildUponDefaultConfig: Property<Boolean>
 
-    /** Defaults to true. */
+    /**
+     * Defaults to false, while the detekt 2.0 alpha crashes with it on. Set it to true to turn it back on once the
+     * release the consumers use has the fix; the default will follow.
+     */
     abstract val parallel: Property<Boolean>
 
     /**
@@ -111,7 +114,8 @@ class DetektGatePlugin : Plugin<Project> {
         gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
         gate.buildUponDefaultConfig.convention(true)
-        gate.parallel.convention(true)
+        // Off while the detekt 2.0 alpha crashes with it on, which a consumer should not have to find out for itself.
+        gate.parallel.convention(false)
 
         project.configurations.named("detektPlugins") {
             dependencies.addLater(gate.customRulesProject.map { project.dependencies.project(mapOf("path" to it)) })
