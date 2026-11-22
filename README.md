@@ -248,7 +248,8 @@ keyed on `private_submodules`, because a caller may have private code it does no
   comments and conflicts bots. The retarget bot runs no agent. The rule is written by the action, so a PR cannot edit
   it, and it names no repository.
 - **Where it does not.** A private caller gets a prompt with nothing added. The text is generic, so it is harmless in a
-  public repository that has no private code.
+  public repository that has no private code. `fork-review.yml` is left out on purpose: its agent has no checkout and no
+  shell and reads only the rebuilt PR inputs, so it has no private content to quote.
 
 ### Recording screenshots on a runner
 

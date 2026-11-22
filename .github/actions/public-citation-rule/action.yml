@@ -43,7 +43,6 @@ runs:
         explained by quoting it, say what is wrong in this repository's own terms, and leave the reference out.
         RULE
           )
-          block=$(sed 's/^        //' <<<"$block")
         fi
         delim="EOF_$(date +%s%N)"
         {

@@ -385,7 +385,7 @@ jobs:
 
       # Saved after the tests, under a key that names the jars present: a key fixed before the run is an exact hit
       # once saved, and a jar for a new SDK level would never reach it. The one writer, on the default branch only:
-      # the screenshot jobs never fill the directory, and a branch's entry would be restored by no one else.
+      # the screenshot jobs only restore (a jar one downloads is thrown away), and a branch's entry would be restored by no one else.
       - uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache-save@v1.0.59
         if: ${{ success() && github.event.repository != null && github.ref_name == github.event.repository.default_branch }}
         with:
