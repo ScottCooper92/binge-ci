@@ -107,17 +107,6 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
-    fun `a classpath setting made after the configurations exist fails the build`() {
-        build(
-            layers + "\nmoduleRules { excludeConfigurations.add(\"extra*\") }",
-            mapOf("contracts" to "", "data" to "", "app" to ""),
-        )
-
-        val out = runner("check").buildAndFail().output
-        assertTrue(out.contains("excludeConfigurations"), out)
-    }
-
-    @Test
     fun `a forbidden project edge fails check and names the module and the kinds it may use`() {
         build(
             layers,
@@ -175,25 +164,47 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
-    fun `a setting made after another project's configurations exist fails the build and says why`() {
-        write("settings.gradle.kts", "rootProject.name = \"sample\"\ninclude(\"data\")\n")
+    fun `settings work in a root script that applies a plugin with resolvable configurations`() {
+        write("settings.gradle.kts", "rootProject.name = \"sample\"\ninclude(\"data\", \"tools\")\n")
         write(
             "build.gradle.kts",
             """
-            plugins { id("binge.gates.module-rules") }
-            subprojects { apply(plugin = "java-library") }
+            plugins {
+                id("binge.gates.module-rules")
+                `java-library`
+            }
             moduleRules {
-                excludeConfigurations.add("*Foo*")
+                ignoreProjects.add(":tools")
                 kind("data") { projects(":data") }
             }
+            subprojects { apply(plugin = "java-library") }
             """.trimIndent(),
         )
         write("data/build.gradle.kts", "")
+        write("tools/build.gradle.kts", "dependencies { implementation(project(\":data\")) }")
         write("gradle.properties", "org.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=1g\n")
 
-        val out = runner("check").buildAndFail().output
+        runner("check").build()
+    }
 
-        assertTrue(out.contains("excludeConfigurations") && out.contains("final"), out)
+    @Test
+    fun `adding to a list keeps the built-in entries, so the root and the test classpaths stay out`() {
+        library("com.acme.ui", "widgets")
+        build(
+            """
+            moduleRules {
+                ignoreProjects.add(":tools")
+                excludeConfigurations.add("noSuchClasspath*")
+                kind("data") { projects(":data"); forbid("com.acme.ui:*") }
+            }
+            """.trimIndent(),
+            mapOf(
+                "data" to """dependencies { testImplementation("com.acme.ui:widgets:1.0") }""",
+                "tools" to "",
+            ),
+        )
+
+        runner("check").build()
     }
 
     @Test

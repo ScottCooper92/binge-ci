@@ -53,17 +53,17 @@ abstract class ModuleRulesExtension
         /** Fail on a project that is in no kind. On by default, so a new module cannot slip past unchecked. */
         abstract val requireEveryProject: Property<Boolean>
 
-        /** Project paths that are not checked, such as the root project. Defaults to `:`. */
+        /** Project paths that are not checked, added to the root project `:`, which never is. `*` is one path segment. */
         abstract val ignoreProjects: ListProperty<String>
 
         /**
-         * The resolvable configurations read, by name, with `*` as a wildcard. Defaults to the compile and runtime
-         * classpaths of every variant, which is what a module can see.
+         * Resolvable configurations to read, by name with `*` as a wildcard, added to the compile and runtime classpaths
+         * of every variant, which is what a module can see.
          */
         abstract val configurations: ListProperty<String>
 
         /**
-         * Configurations left out of [configurations]. Defaults to the test ones: a JVM module's `test*`, test fixtures
+         * Configurations to leave out, added to the test ones, which always are: a JVM module's `test*`, test fixtures
          * included, and an Android module's `*UnitTest*` and `*AndroidTest*`.
          */
         abstract val excludeConfigurations: ListProperty<String>
@@ -76,15 +76,7 @@ class ModuleRulesPlugin : Plugin<Project> {
             "binge.gates.module-rules is applied to the root project, which reads every other project's classpaths."
         }
         val rules = project.extensions.create("moduleRules", ModuleRulesExtension::class.java)
-        // Read as each configuration appears, so a value set after that would be ignored without a word. Finalizing on
-        // the first read turns that into an error that says so.
-        rules.ignoreProjects.finalizeValueOnRead()
-        rules.configurations.finalizeValueOnRead()
-        rules.excludeConfigurations.finalizeValueOnRead()
         rules.requireEveryProject.convention(true)
-        rules.ignoreProjects.convention(listOf(":"))
-        rules.configurations.convention(listOf("compileClasspath", "runtimeClasspath", "*CompileClasspath", "*RuntimeClasspath"))
-        rules.excludeConfigurations.convention(listOf("test*", "*Test*"))
 
         val check =
             project.tasks.register("checkModuleRules", CheckModuleRulesTask::class.java) {
@@ -98,27 +90,31 @@ class ModuleRulesPlugin : Plugin<Project> {
                 )
                 projectPaths.set(
                     project.provider {
-                        val ignored = rules.ignoreProjects.get().map { globToRegex(it, ':') }
+                        val ignored = (BUILT_IN_IGNORED + rules.ignoreProjects.get()).map { globToRegex(it, ':') }
                         project.allprojects.map { it.path }.filter { path -> ignored.none { it.matches(path) } }
                     },
                 )
             }
 
-        // Each resolvable classpath hands its root component to the task as a lazy provider, so nothing is resolved
-        // until the task runs, and the configuration cache can hold it. The root build script is evaluated before
-        // the other projects, so the extension is set by the time their configurations appear.
-        project.allprojects {
-            val owner = this
-            configurations.configureEach {
-                if (!isCanBeResolved) return@configureEach
-                val ignored = rules.ignoreProjects.get().map { globToRegex(it, ':') }
-                if (ignored.any { it.matches(owner.path) }) return@configureEach
-                val include = rules.configurations.get().map { globToRegex(it, ':') }
-                val exclude = rules.excludeConfigurations.get().map { globToRegex(it, ':') }
-                if (include.none { it.matches(name) } || exclude.any { it.matches(name) }) return@configureEach
-                check.configure { roots.add(incoming.resolutionResult.rootComponent) }
+        // Each wanted classpath hands its root component to the task as a lazy provider, so nothing is resolved until
+        // the task runs, and the configuration cache can hold it. Which classpaths are wanted is decided once every
+        // project is evaluated, so the order of the root script, and of the plugins it applies, does not matter, and
+        // a setting made anywhere in it is seen.
+        project.gradle.projectsEvaluated {
+            val ignored = (BUILT_IN_IGNORED + rules.ignoreProjects.get()).map { globToRegex(it, ':') }
+            val include = (BUILT_IN_CLASSPATHS + rules.configurations.get()).map { globToRegex(it, ':') }
+            val exclude = (BUILT_IN_EXCLUDED + rules.excludeConfigurations.get()).map { globToRegex(it, ':') }
+            project.allprojects.filter { owner -> ignored.none { it.matches(owner.path) } }.forEach { owner ->
+                owner.configurations
+                    .filter { it.isCanBeResolved }
+                    .filter { cfg -> include.any { it.matches(cfg.name) } && exclude.none { it.matches(cfg.name) } }
+                    .forEach { cfg -> check.configure { roots.add(cfg.incoming.resolutionResult.rootComponent) } }
             }
         }
         project.wireIntoCheck(check)
     }
 }
+
+private val BUILT_IN_IGNORED = listOf(":")
+private val BUILT_IN_CLASSPATHS = listOf("compileClasspath", "runtimeClasspath", "*CompileClasspath", "*RuntimeClasspath")
+private val BUILT_IN_EXCLUDED = listOf("test*", "*Test*")
