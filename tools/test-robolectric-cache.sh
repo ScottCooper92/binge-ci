@@ -26,7 +26,7 @@ expect() { # $1=description  $2=shell condition
 python3 -I - "$action" "$work" <<'PY'
 import sys, yaml
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
-for key, step_id, name in (("find", "find", None), ("fetch", None, "Fetch the named jars, retrying on a rate limit")):
+for key, step_id, name in (("find", "find", None), ("fetch", None, "Fetch the named jars, retrying on a rate limit"), ("offline", "offline", None)):
     hits = [s for s in steps if (s.get("id") == step_id if step_id else s.get("name") == name)]
     if len(hits) != 1:
         sys.exit(f"the {key} step is not in the action exactly once")
@@ -177,6 +177,7 @@ echo "$*" >> "$CURL_LOG"
 out=""; prev=""
 for a in "$@"; do [ "$prev" = --output ] && out=$a; prev=$a; done
 [ "${CURL_FAILS:-}" = 1 ] && { printf 'partial' > "$out"; exit 22; }
+[ "${CURL_MIRROR_FAILS:-}" = 1 ] && [[ "$*" == *googleapis* ]] && { printf 'partial' > "$out"; exit 22; }
 printf 'jar' > "$out"
 STUB
 chmod +x "$work/bin/curl"
@@ -187,17 +188,64 @@ fetch() { # $1 home, $2 jars, rest env
 }
 jar='android-all-instrumented:14-robolectric-10818077-i7'
 fetch "$work/h1" "$jar" || fail "a named jar was not fetched"
-expect "a named jar is fetched from Maven Central" 'grep -q "repo1.maven.org/maven2/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar" "$work/curl.log"'
+expect "a named jar is fetched from the mirror first" 'grep -q "maven-central.storage-download.googleapis.com/maven2/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar" "$work/curl.log" && [ "$(wc -l < "$work/curl.log")" -eq 1 ]'
 expect "with a retry that covers a rate limit, and a time cap" 'grep -q -- "--retry 6" "$work/curl.log" && grep -q -- "--retry-max-time 300" "$work/curl.log" && grep -q -- "--fail" "$work/curl.log"'
 expect "into the layout Robolectric reads" '[ -s "$work/h1/.m2/repository/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar" ]'
 fetch "$work/h1" "$jar" || fail "a second fetch failed"
 expect "a jar already in the cache is not fetched again" '[ ! -s "$work/curl.log" ] && grep -q "already here" "$work/fetch.out"'
 if fetch "$work/h2" 'android-all-instrumented:14; rm -rf /'; then fail "a bad name was accepted"; else pass "a name with a shell metacharacter is refused"; fi
 if fetch "$work/h3" 'nocolon'; then fail "a name with no version was accepted"; else pass "a name with no version is refused"; fi
+fetch "$work/h6" "$jar" CURL_MIRROR_FAILS=1 || fail "a mirror failure stopped the job"
+expect "Maven Central is the fallback when the mirror fails" '[ "$(wc -l < "$work/curl.log")" -eq 2 ] && tail -n 1 "$work/curl.log" | grep -q "repo1.maven.org" && [ -s "$work/h6/.m2/repository/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar" ]'
+fetch "$work/h7" "$jar" MIRROR=https://mirror.example.org/maven2/ || fail "a named mirror was not used"
+expect "a named mirror is tried first, without its trailing slash doubled" 'head -n 1 "$work/curl.log" | grep -q "https://mirror.example.org/maven2/org/robolectric/android-all-instrumented/14-"'
+if fetch "$work/h8" "$jar" 'MIRROR=http://insecure.example.org/x y'; then fail "a bad mirror was accepted"; else pass "a mirror that is not an https URL is refused"; fi
 fetch "$work/h4" "$jar" CURL_FAILS=1 || fail "a failed download stopped the job"
 expect "a failed download is a warning, not a failure" 'grep -q "::warning::Could not fetch" "$work/fetch.out"'
 expect "and leaves no partial jar behind" '[ ! -e "$work/h4/.m2/repository/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar" ]'
 fetch "$work/h5" "$jar
 android-all:13-robolectric-9030017-i2" || fail "two jars were not fetched"
 expect "several jars, one per line, are all fetched" '[ "$(wc -l < "$work/curl.log")" -eq 2 ]'
+# The offline step: every named jar present means offline, else the mirror; the options are appended, not replaced.
+offline() { # $1 home, $2 jars, rest env
+  local home=$1 jars=$2; shift 2
+  mkdir -p "$home"; : > "$work/genv"
+  env -i PATH="$PATH" HOME="$home" JARS="$jars" OFFLINE=true GITHUB_ENV="$work/genv" "$@" bash "$work/offline.sh" > "$work/offline.out" 2>&1
+}
+two="$jar
+android-all:13-robolectric-9030017-i2"
+fetch "$work/o1" "$two" || fail "the fetch for the offline case failed"
+offline "$work/o1" "$two" || fail "the offline step failed on a complete set"
+expect "a complete set runs Robolectric offline" 'grep -q "^JAVA_TOOL_OPTIONS=-Drobolectric.offline=true -Drobolectric.dependency.dir=$work/o1/.m2/robolectric-offline$" "$work/genv"'
+expect "from a flat directory of <artifact>-<version>.jar" '[ -s "$work/o1/.m2/robolectric-offline/android-all-instrumented-14-robolectric-10818077-i7.jar" ] && [ -s "$work/o1/.m2/robolectric-offline/android-all-13-robolectric-9030017-i2.jar" ]'
+offline "$work/o1" "$two" JAVA_TOOL_OPTIONS=-Xmx1g || fail "the offline step failed with options already set"
+expect "a caller's own JAVA_TOOL_OPTIONS are kept, and ours added after them" 'grep -q "^JAVA_TOOL_OPTIONS=-Xmx1g -Drobolectric.offline=true " "$work/genv"'
+fetch "$work/o2" "$jar" || fail "the fetch for the partial case failed"
+offline "$work/o2" "$two" || fail "the offline step failed on a partial set"
+expect "a set with a jar missing is not offline" '! grep -q "robolectric.offline" "$work/genv"'
+expect "and points Robolectric's own fetch at the mirror instead" 'grep -q "^JAVA_TOOL_OPTIONS=-Drobolectric.dependency.repo.url=https://maven-central.storage-download.googleapis.com/maven2 -Drobolectric.dependency.repo.id=mirror$" "$work/genv"'
+offline "$work/o1" "$two" OFFLINE=false || fail "the offline step failed with offline off"
+expect "offline: false does not set the offline options" '! grep -q "robolectric.offline" "$work/genv" && grep -q "dependency.repo.url" "$work/genv"'
+offline "$work/o1" "$two" OFFLINE=false MIRROR=https://mirror.example.org/m/ || true
+expect "a named mirror is the one Robolectric is pointed at" 'grep -q "repo.url=https://mirror.example.org/m " "$work/genv"'
+if offline "$work/o1" "$two" 'MIRROR=https://x.example.org/a b'; then fail "the offline step accepted a bad mirror"; else pass "the offline step refuses a mirror that would split the options"; fi
+python3 -I - "$action" <<'PYZ' || failures=$((failures + 1))
+import sys, yaml
+act = yaml.safe_load(open(sys.argv[1]))
+steps = act["runs"]["steps"]
+names = [s.get("name", s.get("id")) for s in steps]
+off = [s for s in steps if s.get("id") == "offline"][0]
+bad = []
+if names.index("Fetch the named jars, retrying on a rate limit") > steps.index(off):
+    bad.append("the offline step runs before the fetch")
+if "inputs.jars != ''" not in off["if"] or "steps.find.outputs.versions != ''" not in off["if"]:
+    bad.append("the offline step runs with no jars named, or off a hosted runner")
+if act["inputs"]["offline"]["default"] != "true" or act["inputs"]["mirror"]["default"] != "":
+    bad.append("the offline and mirror defaults are not 'true' and empty")
+for b in bad:
+    print("FAIL  " + b)
+if not bad:
+    print("ok    the offline step follows the fetch, needs jars and a hosted runner, and the defaults are on and the stock mirror")
+sys.exit(1 if bad else 0)
+PYZ
 [ "$failures" -eq 0 ]
