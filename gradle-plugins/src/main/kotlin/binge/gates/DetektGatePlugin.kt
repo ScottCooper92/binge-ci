@@ -219,5 +219,5 @@ private fun kotlinGradlePluginVisible(): Boolean =
         Class.forName("org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension", false, DetektGatePlugin::class.java.classLoader)
     }.isSuccess
 
-/** Where this plugin was loaded from: its jar, or its class directory when run from an included build's sources. */
+/** Where this plugin was loaded from. The rules only load from its jar: a class directory has no service file. */
 private fun commentRulesLocation(): File = File(DetektGatePlugin::class.java.protectionDomain.codeSource.location.toURI())

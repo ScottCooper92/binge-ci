@@ -90,7 +90,7 @@ Four lexical comment rules ship in the plugin's own jar, under the rule set id `
 no per-repository allowlist.
 
 - `BannerComment` flags a ruler or banner comment (a run of `-`, `=`, `_`, `~` or box-drawing characters).
-- `ConsecutiveInlineComments` flags more than `threshold` standalone `//` lines in a row (default 2).
+- `ConsecutiveInlineComments` flags more than `threshold` standalone `//` lines in a row (default 3).
 - `DeclarationCommentShouldBeKDoc` flags a `//` comment placed above a declaration, which belongs in KDoc.
 - `KDocLength` caps the prose lines of a class, function or property KDoc (`classThreshold`, `functionThreshold`,
   `propertyThreshold`; block tags are not counted).
