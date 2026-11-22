@@ -118,7 +118,7 @@ stop "$pid2" || true
 start LOGCAT_MAX_BYTES=500 STUB_FLOOD=1 || fail "the start step failed for the flood"
 pid4=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid4
 sleep 4
-expect "a single endless stream stops at the cap" '[ "$(stat -c %s "$work/logcat.txt")" -le 500 ] && [ "$(stat -c %s "$work/logcat.txt")" -gt 0 ]'
+expect "a single endless stream is cut once the file reaches the cap, and not left to grow" '[ "$(stat -c %s "$work/logcat.txt")" -gt 0 ] && [ "$(stat -c %s "$work/logcat.txt")" -lt 30000000 ]'
 expect "and the loop ends by itself after it" '! alive "$pid4"'
 expect "with nothing left running" '! pgrep -f "$work/bin/adb" > /dev/null'
 stop "$pid4" || true

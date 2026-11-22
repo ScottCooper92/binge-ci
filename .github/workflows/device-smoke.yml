@@ -127,7 +127,7 @@ on:
           Record `adb logcat` for the whole run and upload it with the test results. A managed-device run
           keeps no logcat when the instrumentation process crashes, so a crash before any test runs leaves
           no cause to read. The capture starts before the device is created, restarts when the adb server
-          does, stops at 100 MB, and is kept for `retention_days`. Off by default.
+          does, stops at about 100 MB, and is kept for `retention_days`. Off by default.
         type: boolean
         default: false
       gradle_cache_read_only:
@@ -326,12 +326,21 @@ jobs:
           cat > "$loop" <<'LOOP'
           while :; do
             size=$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)
-            left=$((LOGCAT_MAX_BYTES - size))
-            [ "$left" -gt 0 ] || break
-            # Each run is bounded by the bytes left, not only checked between runs: one stream can last the
-            # whole test step. When head has had enough it closes the pipe, adb gets SIGPIPE on its next write,
-            # the run ends, and the check above ends the loop.
-            "$ADB" wait-for-device logcat -v threadtime -b all 2>&1 | head -c "$left" >> "$LOGCAT_FILE"
+            [ "$size" -lt "$LOGCAT_MAX_BYTES" ] || break
+            "$ADB" wait-for-device logcat -v threadtime -b all >> "$LOGCAT_FILE" 2>&1 &
+            run=$!
+            # One stream can last the whole test step, so the cap is watched while it runs, not only between runs.
+            # Not a pipe into `head`: a runner starts its steps with SIGPIPE ignored, and a writer that ignores it
+            # is not stopped by a closed pipe. The file can pass the cap by what is written in half a second.
+            while kill -0 "$run" 2> /dev/null; do
+              size=$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)
+              if [ "$size" -ge "$LOGCAT_MAX_BYTES" ]; then
+                kill "$run" 2> /dev/null
+                break
+              fi
+              sleep 0.5
+            done
+            wait "$run" 2> /dev/null
             sleep 2
           done
           LOOP
