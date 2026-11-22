@@ -63,8 +63,8 @@ abstract class ModuleRulesExtension
         abstract val configurations: ListProperty<String>
 
         /**
-         * Configurations left out of [configurations]. Defaults to the test ones: a JVM module's `test*` and an Android
-         * module's `*UnitTest*` and `*AndroidTest*`. Test fixtures are not left out, since other modules consume them.
+         * Configurations left out of [configurations]. Defaults to the test ones: a JVM module's `test*`, test fixtures
+         * included, and an Android module's `*UnitTest*` and `*AndroidTest*`.
          */
         abstract val excludeConfigurations: ListProperty<String>
     }

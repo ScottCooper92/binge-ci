@@ -92,6 +92,32 @@ class ModuleRulesFunctionalTest {
     }
 
     @Test
+    fun `a banned library and a forbidden project reached only through test configurations pass check`() {
+        library("com.acme.ui", "widgets")
+        build(
+            layers,
+            mapOf(
+                "contracts" to "",
+                "data" to """dependencies { testImplementation("com.acme.ui:widgets:1.0"); testImplementation(project(":app")) }""",
+                "app" to "",
+            ),
+        )
+
+        runner("check").build()
+    }
+
+    @Test
+    fun `a classpath setting made after the configurations exist fails the build`() {
+        build(
+            layers + "\nmoduleRules { excludeConfigurations.add(\"extra*\") }",
+            mapOf("contracts" to "", "data" to "", "app" to ""),
+        )
+
+        val out = runner("check").buildAndFail().output
+        assertTrue(out.contains("excludeConfigurations"), out)
+    }
+
+    @Test
     fun `a forbidden project edge fails check and names the module and the kinds it may use`() {
         build(
             layers,
