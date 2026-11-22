@@ -205,8 +205,10 @@ moduleRules {
   kind it `mayDependOn`. A dependency on a project in no kind fails.
 - **Sees.** A `forbid` pattern is held against everything the resolved classpaths reach, so a library that arrives
   through another library counts. The failure names the dependency it came through.
-- **Which classpaths.** By default every variant's compile and runtime classpath, and not the test ones
-  (`configurations` and `excludeConfigurations`, with `*` as a wildcard). A classpath that does not resolve fails the
+- **Which classpaths.** By default every variant's compile and runtime classpath, and not the test ones,
+  JVM `test*` and `testFixtures*` included (`configurations` and `excludeConfigurations`, with `*` as a wildcard).
+  Set them before any project's configurations are created, such as above a `subprojects {}` block that applies
+  plugins; a later set fails the build. A classpath that does not resolve fails the
   check, since a partial view is how a ban is missed.
 - **Fails closed.** A project in no kind fails (`requireEveryProject`, on by default; `ignoreProjects` lists what to
   skip, `:` by default), and so does a project in two kinds, a path pattern that matches no project, and a

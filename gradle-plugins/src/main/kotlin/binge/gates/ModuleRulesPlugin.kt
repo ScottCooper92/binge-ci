@@ -62,7 +62,7 @@ abstract class ModuleRulesExtension
          */
         abstract val configurations: ListProperty<String>
 
-        /** Configurations left out of [configurations]. Defaults to the test ones. */
+        /** Configurations left out of [configurations]. Defaults to the test ones, including `testFixtures`. */
         abstract val excludeConfigurations: ListProperty<String>
     }
 
@@ -76,7 +76,12 @@ class ModuleRulesPlugin : Plugin<Project> {
         rules.requireEveryProject.convention(true)
         rules.ignoreProjects.convention(listOf(":"))
         rules.configurations.convention(listOf("compileClasspath", "runtimeClasspath", "*CompileClasspath", "*RuntimeClasspath"))
-        rules.excludeConfigurations.convention(listOf("*Test*"))
+        rules.excludeConfigurations.convention(listOf("test*", "*Test*"))
+        // Configurations are filtered as they are created, so a value set after the first read would be ignored.
+        // Finalizing on read turns that order into an error.
+        rules.ignoreProjects.finalizeValueOnRead()
+        rules.configurations.finalizeValueOnRead()
+        rules.excludeConfigurations.finalizeValueOnRead()
 
         val check =
             project.tasks.register("checkModuleRules", CheckModuleRulesTask::class.java) {
