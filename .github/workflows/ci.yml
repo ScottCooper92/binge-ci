@@ -162,6 +162,9 @@ jobs:
       # The rule rides in the review prompt behind an input, so what it reads and what it leaves out is held here.
       - name: Test the design-system review rule
         run: ./tools/test-design-system-rule.sh
+      # What a public repository's agents write is world-readable, so the rule that keeps a private submodule out of it is held here.
+      - name: Test the public citation rule
+        run: ./tools/test-public-citation-rule.sh
       # A rate-limited jar download fails every Robolectric test, so what is cached and fetched is held here.
       - name: Test the Robolectric cache
         run: ./tools/test-robolectric-cache.sh

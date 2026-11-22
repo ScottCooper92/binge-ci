@@ -675,6 +675,13 @@ jobs:
       - name: Bound the agent's network calls
         uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.57
 
+      # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
+      - name: Work out the public citation rule
+        id: citation
+        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.57
+        with:
+          private-submodules: ${{ inputs.private_submodules }}
+
       - name: Resolve with Claude
         id: claude
         if: >
@@ -725,6 +732,8 @@ jobs:
             A merge of origin/${{ inputs.default_branch }} into this PR branch has
             stopped with conflicts. Run `git status` and `git diff --diff-filter=U`
             to see them.
+
+            ${{ steps.citation.outputs.block }}
 
             Resolve each conflict so that BOTH sides' intent survives - this is a
             merge, not a choice between versions. Remove every conflict marker and
