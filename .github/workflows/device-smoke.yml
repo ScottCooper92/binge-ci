@@ -306,13 +306,16 @@ jobs:
           LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
           LOGCAT_MAX_BYTES: '104857600'
         run: |
+          # -e off: the runner starts a step with it on, and nothing here may turn a green lane red.
+          set +e
           set -uo pipefail
-          adb_bin=$(command -v adb || true)
-          if [ -z "$adb_bin" ]; then
-            for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
-              [ -n "$root" ] && [ -x "$root/platform-tools/adb" ] && adb_bin="$root/platform-tools/adb" && break
-            done
-          fi
+          # The SDK's adb first, the one Gradle's managed devices use: two adb versions on one host kill each
+          # other's server on every restart. `adb` on PATH only when the SDK has none.
+          adb_bin=""
+          for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+            [ -n "$root" ] && [ -x "$root/platform-tools/adb" ] && adb_bin="$root/platform-tools/adb" && break
+          done
+          [ -n "$adb_bin" ] || adb_bin=$(command -v adb || true)
           if [ -z "$adb_bin" ]; then
             echo "::warning::capture_logcat is on but adb was not found, so no logcat is recorded."
             exit 0
@@ -321,8 +324,14 @@ jobs:
           export ADB="$adb_bin"
           loop="$RUNNER_TEMP/logcat-loop.sh"
           cat > "$loop" <<'LOOP'
-          while [ "$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)" -lt "$LOGCAT_MAX_BYTES" ]; do
-            "$ADB" wait-for-device logcat -v threadtime -b all >> "$LOGCAT_FILE" 2>&1 || true
+          while :; do
+            size=$(stat -c %s "$LOGCAT_FILE" 2> /dev/null || echo 0)
+            left=$((LOGCAT_MAX_BYTES - size))
+            [ "$left" -gt 0 ] || break
+            # Each run is bounded by the bytes left, not only checked between runs: one stream can last the
+            # whole test step. When head has had enough it closes the pipe, adb gets SIGPIPE on its next write,
+            # the run ends, and the check above ends the loop.
+            "$ADB" wait-for-device logcat -v threadtime -b all 2>&1 | head -c "$left" >> "$LOGCAT_FILE"
             sleep 2
           done
           LOOP
@@ -408,6 +417,7 @@ jobs:
           LOGCAT_PID: ${{ steps.logcat.outputs.pid }}
           LOGCAT_FILE: ${{ github.workspace }}/device-smoke-logcat.txt
         run: |
+          set +e
           set -uo pipefail
           if [[ $LOGCAT_PID =~ ^[0-9]+$ ]]; then
             kill -- "-$LOGCAT_PID" 2> /dev/null || true

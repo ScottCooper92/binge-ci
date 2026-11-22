@@ -569,7 +569,9 @@ holds what each consumer learned separately:
 - **Logcat, when asked for.** A managed-device run keeps no logcat when the instrumentation process crashes, so a crash
   before any test ran leaves no cause to read. `capture_logcat: true` (off by default) records `adb logcat -v threadtime
   -b all` from before the device is created until the lane ends, starts it again when Gradle restarts the adb server,
-  stops at 100 MB, and uploads the file with the results for `retention_days`. A missing `adb` is a warning, and the
+  stops at 100 MB (each run of `adb logcat` is cut at the bytes left, so one long stream cannot pass it), and uploads the
+  file with the results for `retention_days`. The file sits at the workspace root, so with the input on the artifact's
+  paths start at the workspace and not at the results folder. A missing `adb` is a warning, and the
   capture never changes the lane's verdict.
 
 The caller keeps the triggers, the concurrency group and any report on a red scheduled run, which

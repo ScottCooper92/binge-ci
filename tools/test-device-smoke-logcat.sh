@@ -54,8 +54,6 @@ if "inputs.artifact_paths" not in path or "inputs.capture_logcat && 'device-smok
     bad.append("the upload does not add the logcat file only when the input is on")
 if "retention-days" not in up["with"] or "inputs.retention_days" not in str(up["with"]["retention-days"]):
     bad.append("the retention is not the short retention_days input")
-if "continue-on-error" in start or "continue-on-error" in stop:
-    pass
 for b in bad:
     print("FAIL  " + b)
 if not bad:
@@ -67,6 +65,10 @@ PYX
 mkdir -p "$work/bin" "$work/tmp"
 cat > "$work/bin/adb" <<'STUB'
 #!/usr/bin/env bash
+if [ "${STUB_FLOOD:-}" = 1 ]; then
+  # One run that never ends and keeps writing, like a chatty device on one long stream.
+  while :; do echo "a chatty logcat line that goes on and on"; done
+fi
 echo "adb $* run $(date +%s%N)"
 sleep "${STUB_SLEEP:-0.2}"
 STUB
@@ -74,7 +76,6 @@ chmod +x "$work/bin/adb"
 
 # A process that has ended but not been reaped is a zombie, which `kill -0` still finds.
 alive() { local st; st=$(ps -o stat= -p "$1" 2> /dev/null || true); [ -n "$st" ] && [[ $st != Z* ]]; }
-export -f alive 2> /dev/null || true
 start() { # extra env assignments
   : > "$work/gh-out"
   env -i PATH="$work/bin:$PATH" RUNNER_TEMP="$work/tmp" GITHUB_OUTPUT="$work/gh-out" LOGCAT_FILE="$work/logcat.txt" \
@@ -112,6 +113,26 @@ sleep 5
 expect "the loop ends by itself at the size cap" '! alive "$pid2"'
 expect "and the file stopped near the cap" '[ "$(stat -c %s "$work/logcat.txt")" -lt 400 ]'
 stop "$pid2" || true
+
+# One long stream that keeps writing: the cap has to bound it while it runs, not only between runs.
+start LOGCAT_MAX_BYTES=500 STUB_FLOOD=1 || fail "the start step failed for the flood"
+pid4=$(sed -n 's/^pid=//p' "$work/gh-out"); export pid4
+sleep 4
+expect "a single endless stream stops at the cap" '[ "$(stat -c %s "$work/logcat.txt")" -le 500 ] && [ "$(stat -c %s "$work/logcat.txt")" -gt 0 ]'
+expect "and the loop ends by itself after it" '! alive "$pid4"'
+expect "with nothing left running" '! pgrep -f "$work/bin/adb" > /dev/null'
+stop "$pid4" || true
+
+# The SDK's adb is preferred over the one on PATH.
+mkdir -p "$work/sdk/platform-tools" "$work/pathbin"
+printf '#!/usr/bin/env bash\necho "sdk adb $*"\n' > "$work/sdk/platform-tools/adb"
+printf '#!/usr/bin/env bash\necho "path adb $*"\n' > "$work/pathbin/adb"
+chmod +x "$work/sdk/platform-tools/adb" "$work/pathbin/adb"
+start PATH="$work/pathbin:/usr/bin:/bin" ANDROID_HOME="$work/sdk" || fail "the start step failed for the adb choice"
+pid5=$(sed -n 's/^pid=//p' "$work/gh-out")
+sleep 1
+expect "the SDK's adb is used when there is one" 'grep -q "^sdk adb" "$work/logcat.txt" && ! grep -q "^path adb" "$work/logcat.txt"'
+stop "$pid5" || true
 
 # No adb, no pid, and a bad pid.
 mkdir -p "$work/empty"
