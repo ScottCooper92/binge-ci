@@ -92,7 +92,7 @@ stop "$pid" || fail "the stop step failed"
 sleep 1
 expect "the stop step ends the loop" '! alive "$pid"'
 expect "and says how much it recorded" 'grep -q "Recorded [0-9]* bytes of logcat" "$work/stop.out"'
-size=$(stat -c %s "$work/logcat.txt"); sleep 2
+size=$(stat -c %s "$work/logcat.txt"); export size; sleep 2
 expect "no more is written after the stop" '[ "$(stat -c %s "$work/logcat.txt")" = "$size" ]'
 
 # The stop step ends what runs under the loop too, with adb in the middle of a long run.
