@@ -1003,6 +1003,11 @@ jobs:
       - name: Bound the agent's network calls
         uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.57
 
+      # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
+      - name: Work out the public citation rule
+        id: citation
+        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.57
+
       - name: Fix with Claude
         id: claude
         if: >
@@ -1057,6 +1062,8 @@ jobs:
             CI failed on this branch. The failing job output is at
             ${{ runner.temp }}/ci-failure.trimmed.log — read it first.
             ${{ steps.reports.outputs.note }}
+
+            ${{ steps.citation.outputs.block }}
 
             Use the triage table in ${{ steps.docs.outputs.dir }}/ci-triage.md to
             decide WHY it is red before touching anything. That table maps each
@@ -1832,6 +1839,11 @@ jobs:
 
       # The same agent, tools and bounds as the job above. Screenshot re-records are not offered:
       # that gate is opted into per caller for PR branches, and a default branch is no place to start.
+      # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
+      - name: Work out the public citation rule
+        id: citation
+        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.57
+
       - name: Repair with Claude
         id: claude
         if: steps.decide.outputs.skip != 'true' && steps.log.outputs.skip != 'true'
@@ -1856,6 +1868,8 @@ jobs:
             CI failed on `${{ inputs.default_branch }}` itself, not on a pull
             request. The failing job output is at
             ${{ runner.temp }}/ci-failure.trimmed.log — read it first.
+
+            ${{ steps.citation.outputs.block }}
 
             A failure here usually comes from two changes that were each green on
             their own and merged without meeting: one renamed or removed something,

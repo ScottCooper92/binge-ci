@@ -1,0 +1,54 @@
+name: Public citation rule
+description: >
+  The rule an agent prompt carries when it writes text in a PUBLIC repository: never cite a private submodule's or
+  private repository's PR or issue numbers, URLs or file paths. The text of a review, a follow-up issue, a reply or a
+  PR body is world-readable there, and quoting private work leaks it. The rule is generic, so it is harmless where
+  there is no private code, and it does not depend on the caller naming anything. Empty when the calling repository is
+  private, so a prompt that includes it is unchanged there.
+
+inputs:
+  token:
+    description: A token that can read the calling repository's metadata. The workflow's own token is enough.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  block:
+    description: The rule, or an empty string when it does not apply.
+    value: ${{ steps.rule.outputs.block }}
+
+runs:
+  using: composite
+  steps:
+    # The caller is taken to be public unless the API says it is private, as in the submodule-bump script, so a
+    # lookup that fails keeps the rule on instead of leaking. Not keyed on `private_submodules`: the agent workflows
+    # take it only to fetch submodules, a caller may have private code it does not name, and a rule that never
+    # fires protects nothing.
+    - name: Decide whether the rule applies
+      id: rule
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        block=""
+        private=$(gh api "repos/${GH_REPO}" --jq .private 2> /dev/null) || private=unknown
+        if [ "$private" != true ]; then
+          block=$(cat <<'RULE'
+        This repository is public. What you write here is world-readable: a review, a comment, a follow-up issue and a
+        pull request body. In it, never cite the pull request or issue numbers, URLs or file paths of a private
+        submodule or private repository, and never quote its source, its notes or its commit subjects. Refer to that
+        code as "the shared library", or by the public name of the API in question. When a point can only be
+        explained by quoting it, say what is wrong in this repository's own terms, and leave the reference out.
+        RULE
+          )
+          block=$(sed 's/^        //' <<<"$block")
+        fi
+        delim="EOF_$(date +%s%N)"
+        {
+          echo "block<<${delim}"
+          printf '%s\n' "$block"
+          echo "$delim"
+        } >> "$GITHUB_OUTPUT"
+        if [ -n "$block" ]; then echo "The public citation rule applies."; else echo "The public citation rule does not apply."; fi

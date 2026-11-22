@@ -561,6 +561,11 @@ jobs:
       - name: Bound the agent's network calls
         uses: ScottCooper92/binge-ci/.github/actions/agent-network-limits@v1.0.57
 
+      # A public repository's text is world-readable: a prompt that writes it must not cite a private submodule.
+      - name: Work out the public citation rule
+        id: citation
+        uses: ScottCooper92/binge-ci/.github/actions/public-citation-rule@v1.0.57
+
       - name: Address it with Claude
         id: claude
         if: steps.ctx.outputs.skip != 'true' && steps.rounds.outputs.skip != 'true'
@@ -614,6 +619,8 @@ jobs:
           prompt: |
             Review feedback has come in on this PR. All of it is collected at
             ${{ runner.temp }}/feedback.md - read that first.
+
+            ${{ steps.citation.outputs.block }}
 
             The repo's conventions are at
             ${{ steps.docs.outputs.dir }}/conventions.md, a copy taken from

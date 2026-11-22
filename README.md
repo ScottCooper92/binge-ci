@@ -233,6 +233,23 @@ nothing.
 
   Drop "Do not touch any screenshot baseline PNG, and never run the update task" from `gate_rules`.
 
+### Keeping private code out of a public repository's text
+
+What the agents write in a public repository is world-readable: a review, a follow-up issue, a reply, a pull request
+body. Quoting a private submodule or repository there leaks private work. The `public-citation-rule` action decides
+whether a prompt carries a rule against that from one fact: the calling repository counts as public unless the API says
+it is private, so a lookup that fails keeps the rule on, as the submodule-bump script does for its PR body. It is not
+keyed on `private_submodules`, because a caller may have private code it does not name.
+
+- **The rule.** Never cite the pull request or issue numbers, URLs or file paths of a private submodule or private
+  repository, and never quote its source, notes or commit subjects. Call it "the shared library", or use the public name
+  of the API. When a point can only be explained by quoting it, say what is wrong in the repository's own terms.
+- **Where it applies.** The review bot's prompt (which also covers its follow-up issues) and the prompts of the CI-fix,
+  comments and conflicts bots. The retarget bot runs no agent. The rule is written by the action, so a PR cannot edit
+  it, and it names no repository.
+- **Where it does not.** A private caller gets a prompt with nothing added. The text is generic, so it is harmless in a
+  public repository that has no private code.
+
 ### Recording screenshots on a runner
 
 A cloud worker cannot build an app whose submodules are private, so it cannot record a new or changed screenshot
