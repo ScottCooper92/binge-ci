@@ -30,6 +30,8 @@ dependencies {
     // compileOnly: a consumer that uses Kotlin already has it on its build classpath, and one that
     // does not must not be handed it. The detekt gate checks for it before touching its types.
     compileOnly(libs.kotlin.gradlePlugin)
+    // The android-app convention configures AGP's DSL, which a consumer's build already has on its classpath.
+    compileOnly(libs.android.gradlePlugin)
     testKitKotlin(libs.kotlin.gradlePlugin)
     testKitAndroid(libs.android.gradlePlugin)
     testImplementation(libs.junit.jupiter.api)
@@ -91,6 +93,12 @@ gradlePlugin {
             implementationClass = "binge.gates.ModuleRulesPlugin"
             displayName = "Module rules"
             description = "Fails when a module depends on, or sees, what its kind of module may not."
+        }
+        register("androidAppConvention") {
+            id = "binge.conventions.android-app"
+            implementationClass = "binge.gates.AndroidAppConventionPlugin"
+            displayName = "Android app conventions"
+            description = "What the Android apps share in their android block: the Java target, translation lint, build types and signing."
         }
         register("tvMaterialSeparation") {
             id = "binge.gates.tv-material-separation"

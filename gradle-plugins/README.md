@@ -84,6 +84,30 @@ lists it sets. The gate refuses a build in which two config files set the same l
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
 
+### Android app conventions
+
+`binge.conventions.android-app` configures what the Android apps share in their `android {}` block, once AGP's application
+plugin is applied, in either order. It is the first block of a convention plugin; more arrive as their own changes.
+
+- **Java and Kotlin target.** 17, for `compileOptions` and for every Kotlin compile task (`jvmVersion`).
+- **Translation lint.** `MissingTranslation`, `ExtraTranslation`, `MissingQuantity`, `UnusedQuantity`, `StringFormatMatches`,
+  `StringFormatCount` and `UnusedResources` are errors. A locale is complete or it does not exist, and a removed call site
+  cannot leave its string and translations behind with a green build.
+- **Locale config and build config.** `generateLocaleConfig` on, so the app is offered in the per-app language picker and
+  adding a locale is one directory, and `buildConfig` on. Unit tests include Android resources, for Robolectric screens built
+  from `stringResource` and `dimensionResource`.
+- **Build types.** Debug installs beside release (`applicationIdSuffix = ".debug"`) and ships the en-XA and ar-XB pseudo
+  locales. Release turns optimization on. `-PminifyDebug` turns it on for debug too, so a device lane can run the minified
+  build: it must stay identical to release, or the lane stops proving what release ships.
+- **Signing.** Debug uses `app/debug.keystore` at the repository root, with AOSP's debug credentials, when the file exists
+  (`androidAppConvention.debugKeystore` moves it), so every machine and runner signs debug builds with one key. Release is
+  signed from `keystore.properties` at the root (gitignored) or the environment (`RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`,
+  `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`), and with none of them the release build is unsigned.
+- **Version.** `VERSION_CODE` and `VERSION_NAME` from the environment, with `1` and `0.1.0` for a local build.
+
+What an app differs in stays in its own block: its namespace, application id, SDK levels, instrumentation runner, build
+config fields, managed devices, Compose and signing secrets. A value the app sets is read after the plugin, so it wins.
+
 ### Preview data that stays analysed
 
 An excluded file is not analysed, and an `internal` declaration in it is invisible to detekt: the
