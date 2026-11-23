@@ -116,7 +116,7 @@ runs:
     # that declares no Robolectric version.
     - name: Restore Robolectric's jars
       id: robolectric
-      uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.60
+      uses: ScottCooper92/binge-ci/.github/actions/robolectric-cache@v1.0.61
       with:
         jars: ${{ inputs.robolectric-jars }}
         offline: ${{ inputs.robolectric-offline }}
