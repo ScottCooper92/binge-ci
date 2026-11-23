@@ -72,10 +72,14 @@ class AndroidAppConventionFunctionalTest {
         write("src/main/AndroidManifest.xml", "<manifest />\n")
     }
 
-    private fun runner(vararg args: String): GradleRunner =
+    private fun runner(
+        vararg args: String,
+        environment: Map<String, String>? = null,
+    ): GradleRunner =
         GradleRunner
             .create()
             .withProjectDir(root)
+            .apply { if (environment != null) withEnvironment(System.getenv() + environment) }
             .withPluginClasspath(
                 PluginUnderTestMetadataReading.readImplementationClasspath() +
                     System.getProperty("testKitKotlin").split(File.pathSeparator).map(::File) +
@@ -136,6 +140,37 @@ class AndroidAppConventionFunctionalTest {
         val out = runner("print").build().output
 
         assertTrue(out.contains("${root.name}/keys/other.keystore"), out)
+    }
+
+    @Test
+    fun `an empty environment variable counts as unset, as a secret that was never set arrives`() {
+        build()
+
+        val out =
+            runner("print", environment = mapOf("VERSION_NAME" to "", "VERSION_CODE" to "", "RELEASE_STORE_FILE" to "", "RELEASE_KEY_ALIAS" to ""))
+                .build()
+                .output
+
+        assertTrue(out.contains("versionName=0.1.0 versionCode=1"), out)
+        assertTrue(out.contains("releaseSigning=null"), out)
+    }
+
+    @Test
+    fun `a set environment supplies the version`() {
+        build()
+
+        val out = runner("print", environment = mapOf("VERSION_NAME" to "2.3.4", "VERSION_CODE" to "42")).build().output
+
+        assertTrue(out.contains("versionName=2.3.4 versionCode=42"), out)
+    }
+
+    @Test
+    fun `minifyDebug set to false does not minify the debug build`() {
+        build()
+
+        val out = runner("print", "-PminifyDebug=false").build().output
+
+        assertTrue(out.contains("debugMinify=false"), out)
     }
 
     @Test
