@@ -612,7 +612,7 @@ jobs:
       # in this build's mapping, and otherwise only on a user's device.
       - name: Check the R8 names
         if: ${{ inputs.r8_kept_classes != '' }}
-        uses: ScottCooper92/binge-ci/.github/actions/check-r8-names@v1.0.60
+        uses: ScottCooper92/binge-ci/.github/actions/check-r8-names@v1.0.61
         with:
           classes: ${{ inputs.r8_kept_classes }}
           mapping: ${{ inputs.r8_mapping }}
