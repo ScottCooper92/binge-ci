@@ -80,9 +80,97 @@ detektGate {
 shared fragment from the `binge-ci` submodule (`additionalConfigs.from(layout.settingsDirectory.file("binge-ci/detekt/design-system-bans.yml"))`).
 detekt reads a later file over an earlier one key by key and replaces a list rather than merging it, so a fragment owns the
 lists it sets. The gate refuses a build in which two config files set the same list (`checkDetektConfigClashes`), naming the list and the files, since the earlier file's entries would otherwise be dropped silently. Empty by default, which changes nothing. `sourceDirectory`, `excludes`,
-`jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (true) and
+`jvmTarget` (`17`), `buildUponDefaultConfig` (true), `parallel` (false, while the detekt 2.0 alpha crashes with it on; `parallel = true` turns it back on) and
 `typeResolutionCompilation` and `allowedCompilerErrors` (unset: report only) cover the rest. The custom rules stay in the consumer; only the wiring
 is shared.
+
+### Android app conventions
+
+`binge.conventions.android-app` configures what the Android apps share in their `android {}` block, once AGP's application
+plugin is applied, in either order. It is the first block of a convention plugin; more arrive as their own changes.
+
+- **Java and Kotlin target.** 17, for `compileOptions` and for every Kotlin compile task. `androidAppConvention { jvmVersion = 21 }` moves both; it is read after the app's own build script has run.
+- **Translation lint.** `MissingTranslation`, `ExtraTranslation`, `MissingQuantity`, `UnusedQuantity`, `StringFormatMatches`,
+  `StringFormatCount` and `UnusedResources` are errors. A locale is complete or it does not exist, and a removed call site
+  cannot leave its string and translations behind with a green build.
+- **Locale config and build config.** `generateLocaleConfig` on, so the app is offered in the per-app language picker and
+  adding a locale is one directory (it needs a `res/resources.properties` with `unqualifiedResLocale`, or the locale
+  config task fails), and `buildConfig` on. Unit tests include Android resources, for Robolectric screens built
+  from `stringResource` and `dimensionResource`.
+- **Build types.** Debug installs beside release (`applicationIdSuffix = ".debug"`) and ships the en-XA and ar-XB pseudo
+  locales. Release turns optimization on. `-PminifyDebug` (any value but `false`) turns it on for debug too, so a device lane can run the minified
+  build: it must stay identical to release, or the lane stops proving what release ships.
+- **Signing.** Debug uses `app/debug.keystore` at the repository root, with AOSP's debug credentials, when the file exists
+  (`androidAppConvention { debugKeystore = ... }` moves it, and is read after the app's own build script has run), so every machine and runner signs debug builds with one key. Release is
+  signed from `keystore.properties` at the root (gitignored) or the environment (`RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`,
+  `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`), and with none of them the release build is unsigned. An empty variable counts as unset, since a workflow
+  passes a secret that was never set as an empty string.
+- **Version.** `VERSION_CODE` and `VERSION_NAME` from the environment, with `1` and `0.1.0` for a local build.
+
+What an app differs in stays in its own block: its namespace, application id, SDK levels, instrumentation runner, build
+config fields, managed devices, Compose and signing secrets. A value the app sets is read after the plugin, so it wins, except the JVM target: the Kotlin
+compile tasks take it from `androidAppConvention { jvmVersion }` only, so set it there and not in a `kotlin {}` block. The plugin needs
+AGP and the Kotlin Gradle plugin on the app's build classpath.
+
+### Comment rules
+
+Four lexical comment rules ship in the plugin's own jar, under the rule set id `binge`. They need no type resolution and
+no per-repository allowlist.
+
+- `BannerComment` flags a ruler or banner comment (a run of `-`, `=`, `_`, `~` or box-drawing characters).
+- `ConsecutiveInlineComments` flags more than `threshold` standalone `//` lines in a row (default 3).
+- `DeclarationCommentShouldBeKDoc` flags a `//` comment placed above a declaration, which belongs in KDoc.
+- `KDocLength` caps the prose lines of a class, function or property KDoc (`classThreshold`, `functionThreshold`,
+  `propertyThreshold`; block tags are not counted).
+
+`detektGate { commentRules = true }` loads them onto the detekt run and turns all four on, with the thresholds below, in a
+config read before the consumer's own `detekt.yml`. A repository takes its findings when it sets the option, and overrides
+any value by setting the same key under `binge:` in its own file. Without the option the rules are not loaded. The
+shipped thresholds:
+
+```yaml
+binge:
+  BannerComment:
+    active: true
+  ConsecutiveInlineComments:
+    active: true
+    threshold: 3
+  DeclarationCommentShouldBeKDoc:
+    active: true
+  KDocLength:
+    active: true
+    classThreshold: 6
+    functionThreshold: 6
+    propertyThreshold: 6
+```
+
+Expect findings on the first run in a repository that has not carried them. `customRulesProject` still loads a
+repository's own rules next to these. The rules are tested as they ship, in a real detekt run from the plugin jar.
+
+### The shared base config
+
+`detektGate { baseConfig = true }` reads a base config before the consumer's own `detekt.yml`, so each repository keeps
+only what is its own. It is off by default, since it brings rules a repository has not met yet. It records deviations
+from detekt's defaults, so keep `buildUponDefaultConfig` on. What it sets:
+
+- **Compose-calibrated limits.** `CyclomaticComplexMethod` ignores `@Composable`, and `CognitiveComplexMethod`,
+  `NestedBlockDepth`, `LongParameterList`, `LongMethod` and `TooManyFunctions` are above detekt's defaults, because a
+  screen composable nests scopes and threads one lambda per destination without being a smell.
+- **Rules that misfire on this code, off.** `UnreachableCode`, `UnnecessarySafeCall`, `RedundantSuspendModifier`,
+  `MatchingDeclarationName`, `NoNameShadowing`, `UseOrEmpty` and `UnusedPrivateProperty` (in 2.0.0-alpha.6), with the
+  reason beside each in the file.
+- **Bans that are the same everywhere.** The `!!` ban (`UnsafeCallOnNullableType`, which needs the type resolution the
+  gate wires), `SwallowedException`, `TooGenericExceptionCaught`, `ForbiddenComment` for `TODO`, `FIXME` and `STOPSHIP`,
+  `ReturnCount` excluding guard clauses, and `MagicNumber` tuned to real logic.
+- **Annotations that exempt a framework shape.** `@Composable`, `@Preview`, `@PreviewParameter`, `@Provides` and `@Module`.
+- **Left to the consumer.** A ban on one API of its own, such as a `ForbiddenMethodCall` list, and the excludes for its
+  own generated or API-surface files.
+
+The consumer's file is read after the base, so it overrides any value. A list is replaced, not merged: a consumer
+that sets `TooManyFunctions.excludes` restates `'**/*Previews.kt'` if it wants to keep it. The clash check does not count
+the base, since replacing its list is the point; it still refuses two of the consumer's own files setting one list.
+The file is `src/main/resources/binge/gates/detekt-base.yml` in this build, unpacked into `build/binge-gates` by
+`writeDetektBaseConfig` before detekt runs.
 
 ### Preview data that stays analysed
 
@@ -243,7 +331,8 @@ moduleRules {
   substitution, is not a project of this build: its path is relative to its own build, so `:core` there is not `:core`
   here. It is held to `forbid` by its coordinates instead, both the module the dependency asked for (the one the
   substitution replaced) and the included project's own `group:name`, and the failure names the dependency it came
-  through. It is never read as a project edge, so it needs no kind.
+  through. It is never read as a project edge, so it needs no kind. This holds wherever the consumer's own build
+  sits: run as an included build of a parent composite, its own projects are still its own.
 - **The configuration cache.** The classpaths reach the task as Gradle's own lazy resolution results, so the check
   works with it on, and a functional test runs it again from the cache.
 

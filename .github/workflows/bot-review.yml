@@ -130,6 +130,18 @@ on:
           workflow_run inherits its actor from the CI run.
         type: string
         default: binge-pr-author[bot]
+      review_stacked:
+        description: >
+          Whether to review a PR whose base is not `default_branch` - a STACKED child. Off by
+          default: a child's review is wasted, because when its parent merges author-retarget
+          retargets it and catches it up with a push, which runs CI again and, on green, reviews it
+          against the default branch. Reviewing it before then buys a verdict on a head that is
+          about to change, and "Merge if the bar is met" would only hold it anyway. Every door
+          resolves the PR in one step, so this closes all four: a green CI run, a label, a
+          push and a rebuttal on a stacked child review nothing, and say so in the run's log.
+          Turn it on for a caller that wants a stack reviewed bottom to top before anything lands.
+        type: boolean
+        default: false
       max_rebuttals:
         description: >
           How many times the author bot's reply to a CHANGES_REQUESTED verdict re-opens the review
@@ -523,6 +535,7 @@ jobs:
           COMMENT_PR: ${{ github.event_name == 'issue_comment' && github.event.issue.number || '' }}
           CI_WORKFLOW: ${{ inputs.ci_workflow_file }}
           DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          REVIEW_STACKED: ${{ inputs.review_stacked }}
           UNBUILT_PATHS: ${{ inputs.unbuilt_paths }}
           UNBUILT_REGEX: ${{ inputs.unbuilt_paths_regex }}
           GUARDS: ${{ steps.guards.outputs.script }}
@@ -555,9 +568,9 @@ jobs:
           # Unit separator (0x1f), not tab. An unlabelled PR leaves an empty middle field, and tab is
           # an IFS *whitespace* character: IFS=$'\t' still collapses a run of them, so @tsv would shift
           # sha and cross a field left. Only a non-whitespace separator survives read.
-          IFS=$'\037' read -r isdraft labels sha cross state < <(gh pr view "$num" \
-            --json isDraft,labels,headRefOid,isCrossRepository,state \
-            --jq '[.isDraft, ([.labels[].name] | join(",")), .headRefOid, .isCrossRepository, .state]
+          IFS=$'\037' read -r isdraft labels sha cross state base < <(gh pr view "$num" \
+            --json isDraft,labels,headRefOid,isCrossRepository,state,baseRefName \
+            --jq '[.isDraft, ([.labels[].name] | join(",")), .headRefOid, .isCrossRepository, .state, .baseRefName]
                   | join("\u001f")')
 
           # The workflow_run door listed open PRs only; the label, synchronize and dispatch doors
@@ -572,6 +585,14 @@ jobs:
 
           echo ",$labels," | grep -q ",$AGENT_LABEL," \
             || skip "PR #$num has no '$AGENT_LABEL' label - not opted in."
+
+          # A stacked child waits. When its parent merges, author-retarget retargets it and catches
+          # it up with a push, so CI runs again and a green run reviews it against the default
+          # branch - a review now is of a head that is about to change, and the merge gate would
+          # hold its verdict anyway. See `review_stacked`.
+          if [ "$base" != "$DEFAULT_BRANCH" ] && [ "$REVIEW_STACKED" != "true" ]; then
+            skip "PR #$num targets '$base', not '$DEFAULT_BRANCH' - a stacked PR is reviewed once it is retargeted onto '$DEFAULT_BRANCH' (review_stacked is off)."
+          fi
 
           # Published HERE rather than with the rest at the end: this is the line at which opt-in is
           # proven and everything below it can fail. "Report a failed resolve" keys off this output,
@@ -700,7 +721,7 @@ jobs:
 
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "pushed_at=$pushed_at" >> "$GITHUB_OUTPUT"
-          echo "base=$(gh pr view "$num" --json baseRefName --jq .baseRefName)" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
       # A failure HERE is silent in a way nothing downstream can cover: `review` needs this job, so
       # when this dies `review` is skipped and its reporter never runs - and the PR looks exactly

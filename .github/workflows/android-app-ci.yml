@@ -186,6 +186,22 @@ on:
         description: The release job's timeout, in minutes.
         type: number
         default: 30
+      r8_kept_classes:
+        description: >
+          Classes that must keep their names in the release build, fully qualified, one per line. Empty (the default)
+          runs no check. With a list, the release job reads the release build's R8 mapping after the build and fails
+          when R8 renamed or dropped one, which is how a removed or narrowed `-keepnames` rule is caught before a user
+          meets it. Pick a few that survive shrinking and sit in each package the keep rule covers.
+        type: string
+        default: ''
+      r8_mapping:
+        description: The release build's R8 mapping, relative to the workspace. Read only when `r8_kept_classes` is set.
+        type: string
+        default: app/build/outputs/mapping/release/mapping.txt
+      r8_keep_rule_hint:
+        description: A sentence added to the R8 name failure, such as the keep rule file and rule to restore.
+        type: string
+        default: ''
     secrets:
       REVIEWER_APP_ID:
         description: Only read when `private_submodules` is set, to mint the read-only submodule token.
@@ -591,6 +607,16 @@ jobs:
           [ "${#args[@]}" -gt 0 ] || { echo "::error::release_tasks is empty."; exit 1; }
           [ -z "$JVMARGS" ] || args+=("-Dorg.gradle.jvmargs=$JVMARGS")
           ./gradlew "${args[@]}"
+
+      # The build users run, not the minified debug one a device lane runs: a removed or narrowed -keepnames rule shows
+      # in this build's mapping, and otherwise only on a user's device.
+      - name: Check the R8 names
+        if: ${{ inputs.r8_kept_classes != '' }}
+        uses: ScottCooper92/binge-ci/.github/actions/check-r8-names@v1.0.60
+        with:
+          classes: ${{ inputs.r8_kept_classes }}
+          mapping: ${{ inputs.r8_mapping }}
+          keep_rule_hint: ${{ inputs.r8_keep_rule_hint }}
 
       - name: Upload reports
         if: ${{ failure() }}

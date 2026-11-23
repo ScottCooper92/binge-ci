@@ -165,6 +165,9 @@ jobs:
       # The capture runs beside the tests and must never fail the lane or outlive it, so both are held here.
       - name: Test the device-smoke logcat capture
         run: ./tools/test-device-smoke-logcat.sh
+      # A removed or narrowed -keepnames rule shows only in the release build users run, so the check that reads its mapping is held here.
+      - name: Test the R8 name check
+        run: ./tools/test-check-r8-names.sh
       # What a public repository's agents write is world-readable, so the rule that keeps a private submodule out of it is held here.
       - name: Test the public citation rule
         run: ./tools/test-public-citation-rule.sh

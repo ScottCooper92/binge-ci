@@ -13,6 +13,7 @@ import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
+import java.io.File
 
 internal const val DETEKT_WITHOUT_BASELINE = "detektWithoutBaseline"
 
@@ -61,10 +62,28 @@ abstract class DetektGateExtension {
     /** Defaults to `17`. */
     abstract val jvmTarget: Property<String>
 
+    /**
+     * Loads the shared comment rules (`BannerComment`, `ConsecutiveInlineComments`, `DeclarationCommentShouldBeKDoc`,
+     * `KDocLength`) onto the detekt run, with their thresholds, all four on, read before the consumer's own file. Defaults to
+     * false, since a repository that has not yet taken their findings should not meet them by surprise.
+     */
+    abstract val commentRules: Property<Boolean>
+
+    /**
+     * Reads the shared base config before the consumer's own file: the Compose-calibrated complexity limits, the rules
+     * that misfire on this code, and the bans that are the same in every app. The consumer's file is read after it, so it
+     * overrides any value, and a list it sets replaces the base's list. Defaults to false, because turning it on brings
+     * rules a repository has not met yet.
+     */
+    abstract val baseConfig: Property<Boolean>
+
     /** Defaults to true, so the config file records only deviations from detekt's defaults. */
     abstract val buildUponDefaultConfig: Property<Boolean>
 
-    /** Defaults to true. */
+    /**
+     * Defaults to false, while the detekt 2.0 alpha crashes with it on. Set it to true to turn it back on once the
+     * release the consumers use has the fix; the default will follow.
+     */
     abstract val parallel: Property<Boolean>
 
     /**
@@ -110,17 +129,27 @@ class DetektGatePlugin : Plugin<Project> {
         gate.suppressedPaths.convention(emptyList())
         gate.suppressedRuleSets.convention(emptyList())
         gate.jvmTarget.convention("17")
+        gate.commentRules.convention(false)
+        gate.baseConfig.convention(false)
         gate.buildUponDefaultConfig.convention(true)
-        gate.parallel.convention(true)
+        // Off while the detekt 2.0 alpha crashes with it on, which a consumer should not have to find out for itself.
+        gate.parallel.convention(false)
 
         project.configurations.named("detektPlugins") {
             dependencies.addLater(gate.customRulesProject.map { project.dependencies.project(mapOf("path" to it)) })
+            // The rules ship in this plugin's own jar, so detekt loads them from where the plugin itself was loaded.
+            dependencies.addLater(
+                gate.commentRules.map { on ->
+                    if (on) project.dependencies.create(project.files(commentRulesLocation())) else null
+                },
+            )
         }
 
         // The extension's values are read when a task is configured, which is after the build script
         // has set them. The tasks are configured rather than detekt's extension, so that a task registered
         // outside it, such as the baseline-staleness run, gets the same settings.
         val suppressions = DetektSuppressions.register(project, gate)
+        val baseConfig = project.tasks.register("writeDetektBaseConfig", WriteDetektBaseConfigTask::class.java)
         // A fragment that sets a list the consumer's own config sets would replace it without a word, so it is refused.
         val clashes =
             project.tasks.register("checkDetektConfigClashes", CheckDetektConfigClashesTask::class.java) {
@@ -132,7 +161,10 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(Detekt::class.java).configureEach {
             dependsOn(clashes)
             setSource(project.productionSource(gate))
-            config.setFrom(gate.configFile)
+            // The base is read first, so the consumer's file overrides it.
+            if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            if (gate.commentRules.get()) config.from(baseConfig.flatMap { it.commentRulesFile })
+            config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             // After the consumer's own file: detekt reads a later config file over an earlier one, so the layer's `excludes`
             // would replace a rule set's own. The task refuses that clash rather than let it through.
@@ -152,7 +184,9 @@ class DetektGatePlugin : Plugin<Project> {
         project.tasks.withType(DetektCreateBaselineTask::class.java).configureEach {
             dependsOn(clashes)
             setSource(project.productionSource(gate))
-            config.setFrom(gate.configFile)
+            if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            if (gate.commentRules.get()) config.from(baseConfig.flatMap { it.commentRulesFile })
+            config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })
             buildUponDefaultConfig.set(gate.buildUponDefaultConfig)
@@ -203,3 +237,6 @@ private fun kotlinGradlePluginVisible(): Boolean =
     runCatching {
         Class.forName("org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension", false, DetektGatePlugin::class.java.classLoader)
     }.isSuccess
+
+/** Where this plugin was loaded from. The rules only load from its jar: a class directory has no service file. */
+private fun commentRulesLocation(): File = File(DetektGatePlugin::class.java.protectionDomain.codeSource.location.toURI())

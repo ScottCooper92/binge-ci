@@ -1,0 +1,18 @@
+# The thresholds of the comment rules that `detektGate { commentRules = true }` loads, read before the consumer's own
+# detekt.yml, so a consumer overrides a value there. All four are on.
+
+binge:
+  BannerComment:
+    active: true
+  ConsecutiveInlineComments:
+    active: true
+    # Two is the usual cap, and a subtle invariant may earn a third line, so the rule flags four and over.
+    threshold: 3
+  DeclarationCommentShouldBeKDoc:
+    active: true
+  KDocLength:
+    active: true
+    # Prose lines only: block tags such as `@param` and `@return` are not counted.
+    classThreshold: 6
+    functionThreshold: 6
+    propertyThreshold: 6

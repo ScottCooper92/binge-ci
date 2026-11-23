@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Holds renovate/binge-ci-pins.json, the preset each consumer extends to get its binge-ci pins as one pull request.
+# Holds renovate/binge-ci-pins.json, the preset each consumer extends to get its binge-ci pins as one pull request, and
+# renovate/shared-libraries.json, which only groups the libraries the apps share.
 # What it must never do is reach a consumer's `v1` or a branch head: the exact SHA pins are what stop a bad release
 # reaching every consumer at once, so the preset may only ever offer a v1.0.N tag. It checks the file's own rules
 # (the version restriction, the one group, the label, no `hold`, no schedule that would override the consumer's, and the
@@ -74,10 +75,44 @@ assert not ({"schedule", "labels", "addLabels", "extends", "automerge"} & set(p)
 PY
 then ok "the preset offers only v1.0.N, groups the pins and the submodule into one agent-labelled pull request, and adds no hold"; else fail "the preset's rules are wrong"; fi
 
+# The shared-libraries preset only groups. It must set nothing a consumer owns: no schedule, label, automerge, version
+# limit or enabled flag, and each library family has its own group, so one pull request moves one library.
+shared="$root/renovate/shared-libraries.json"
+if python3 -I - "$shared" <<'PY'
+import json, re, sys
+p = json.load(open(sys.argv[1]))
+assert set(p) == {"$schema", "description", "packageRules"}, sorted(p)
+rules = p["packageRules"]
+want = {"DataStore", "OkHttp", "kotlinx.serialization", "Robolectric"}
+assert {r["groupName"] for r in rules} == want and len(rules) == len(want), [r["groupName"] for r in rules]
+assert len({r["groupSlug"] for r in rules}) == len(rules), "two groups share a slug"
+allowed = {"description", "matchManagers", "matchPackageNames", "groupName", "groupSlug"}
+for r in rules:
+    assert set(r) <= allowed, sorted(set(r) - allowed)
+    assert r["matchManagers"] == ["gradle"] and len(r["matchPackageNames"]) == 1
+
+def glob(g):
+    return re.compile("^" + ".*".join(re.escape(x) for x in g.split("*")) + "$")
+def group_of(dep):
+    hits = [r["groupName"] for r in rules if glob(r["matchPackageNames"][0]).match(dep)]
+    assert len(hits) <= 1, (dep, hits)
+    return hits[0] if hits else None
+for dep, group in (("androidx.datastore:datastore-preferences", "DataStore"), ("androidx.datastore:datastore", "DataStore"),
+                   ("com.squareup.okhttp3:okhttp", "OkHttp"), ("com.squareup.okhttp3:logging-interceptor", "OkHttp"),
+                   ("org.jetbrains.kotlinx:kotlinx-serialization-json", "kotlinx.serialization"),
+                   ("org.robolectric:robolectric", "Robolectric"), ("org.robolectric:android-all-instrumented", "Robolectric"),
+                   ("org.jetbrains.kotlinx:kotlinx-coroutines-core", None), ("androidx.datastore2:x", None),
+                   ("com.squareup.okio:okio", None), ("org.robolectricx:robolectric", None)):
+    assert group_of(dep) == group, (dep, group_of(dep), group)
+PY
+then ok "the shared-libraries preset only groups four library families, one pull request each, and sets nothing a consumer owns"; else fail "the shared-libraries preset's rules are wrong"; fi
+
 if command -v renovate-config-validator > /dev/null; then
-  if renovate-config-validator --strict "$preset" > /dev/null 2>&1; then ok "Renovate's own validator accepts it"; else fail "Renovate's validator rejects the preset"; fi
+  for f in "$preset" "$shared"; do
+    if renovate-config-validator --strict "$f" > /dev/null 2>&1; then ok "Renovate's own validator accepts ${f##*/}"; else fail "Renovate's validator rejects ${f##*/}"; fi
+  done
 else
-  echo "skip  renovate-config-validator is not installed; run: npx --package renovate renovate-config-validator --strict renovate/binge-ci-pins.json"
+  echo "skip  renovate-config-validator is not installed; run: npx --package renovate renovate-config-validator --strict renovate/*.json"
 fi
 
 [ "$failures" -eq 0 ] || { echo "$failures failure(s)"; exit 1; }

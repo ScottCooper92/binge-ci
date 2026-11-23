@@ -110,4 +110,17 @@ class ModuleRulesTest {
         assertTrue(globToRegex(":data:**", ':').matches(":data:movies:impl"))
         assertTrue(!globToRegex(":data:*", ':').matches(":dataX:movies"))
     }
+
+    @Test
+    fun `a project belongs to the build its prefix names, wherever that build sits in the tree`() {
+        assertEquals("", buildPrefix(":", ":"))
+        assertEquals("", buildPrefix(":data", ":data"))
+        assertEquals("", buildPrefix(":data:impl", ":data:impl"))
+        assertEquals(":shared", buildPrefix(":shared", ":"))
+        assertEquals(":shared", buildPrefix(":shared:core", ":core"))
+        assertEquals(":consumer", buildPrefix(":consumer:data", ":data"))
+        assertEquals(":consumer", buildPrefix(":consumer", ":"))
+        assertEquals(":consumer:shared", buildPrefix(":consumer:shared", ":"))
+        assertEquals(":consumer:shared", buildPrefix(":consumer:shared:core", ":core"))
+    }
 }
