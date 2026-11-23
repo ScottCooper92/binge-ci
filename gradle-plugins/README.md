@@ -98,16 +98,19 @@ plugin is applied, in either order. It is the first block of a convention plugin
   config task fails), and `buildConfig` on. Unit tests include Android resources, for Robolectric screens built
   from `stringResource` and `dimensionResource`.
 - **Build types.** Debug installs beside release (`applicationIdSuffix = ".debug"`) and ships the en-XA and ar-XB pseudo
-  locales. Release turns optimization on. `-PminifyDebug` turns it on for debug too, so a device lane can run the minified
+  locales. Release turns optimization on. `-PminifyDebug` (any value but `false`) turns it on for debug too, so a device lane can run the minified
   build: it must stay identical to release, or the lane stops proving what release ships.
 - **Signing.** Debug uses `app/debug.keystore` at the repository root, with AOSP's debug credentials, when the file exists
   (`androidAppConvention { debugKeystore = ... }` moves it, and is read after the app's own build script has run), so every machine and runner signs debug builds with one key. Release is
   signed from `keystore.properties` at the root (gitignored) or the environment (`RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`,
-  `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`), and with none of them the release build is unsigned.
+  `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`), and with none of them the release build is unsigned. An empty variable counts as unset, since a workflow
+  passes a secret that was never set as an empty string.
 - **Version.** `VERSION_CODE` and `VERSION_NAME` from the environment, with `1` and `0.1.0` for a local build.
 
 What an app differs in stays in its own block: its namespace, application id, SDK levels, instrumentation runner, build
-config fields, managed devices, Compose and signing secrets. A value the app sets is read after the plugin, so it wins.
+config fields, managed devices, Compose and signing secrets. A value the app sets is read after the plugin, so it wins, except the JVM target: the Kotlin
+compile tasks take it from `androidAppConvention { jvmVersion }` only, so set it there and not in a `kotlin {}` block. The plugin needs
+AGP and the Kotlin Gradle plugin on the app's build classpath.
 
 ### Comment rules
 
@@ -120,8 +123,10 @@ no per-repository allowlist.
 - `KDocLength` caps the prose lines of a class, function or property KDoc (`classThreshold`, `functionThreshold`,
   `propertyThreshold`; block tags are not counted).
 
-`detektGate { commentRules = true }` loads them onto the detekt run. They stay inactive until the config turns each one
-on under a top-level `binge:` key, so a repository takes its findings when it chooses:
+`detektGate { commentRules = true }` loads them onto the detekt run and turns all four on, with the thresholds below, in a
+config read before the consumer's own `detekt.yml`. A repository takes its findings when it sets the option, and overrides
+any value by setting the same key under `binge:` in its own file. Without the option the rules are not loaded. The
+shipped thresholds:
 
 ```yaml
 binge:

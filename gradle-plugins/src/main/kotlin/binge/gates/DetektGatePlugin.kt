@@ -64,8 +64,8 @@ abstract class DetektGateExtension {
 
     /**
      * Loads the shared comment rules (`BannerComment`, `ConsecutiveInlineComments`, `DeclarationCommentShouldBeKDoc`,
-     * `KDocLength`) onto the detekt run. Defaults to false: they are inactive until a config file turns them on under
-     * `binge:`, and a repository that has not yet taken their findings should not meet them by surprise.
+     * `KDocLength`) onto the detekt run, with their thresholds, all four on, read before the consumer's own file. Defaults to
+     * false, since a repository that has not yet taken their findings should not meet them by surprise.
      */
     abstract val commentRules: Property<Boolean>
 
@@ -163,6 +163,7 @@ class DetektGatePlugin : Plugin<Project> {
             setSource(project.productionSource(gate))
             // The base is read first, so the consumer's file overrides it.
             if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            if (gate.commentRules.get()) config.from(baseConfig.flatMap { it.commentRulesFile })
             config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             // After the consumer's own file: detekt reads a later config file over an earlier one, so the layer's `excludes`
@@ -184,6 +185,7 @@ class DetektGatePlugin : Plugin<Project> {
             dependsOn(clashes)
             setSource(project.productionSource(gate))
             if (gate.baseConfig.get()) config.from(baseConfig.flatMap { it.baseFile })
+            if (gate.commentRules.get()) config.from(baseConfig.flatMap { it.commentRulesFile })
             config.from(gate.configFile)
             config.from(gate.additionalConfigs)
             if (gate.suppressedPaths.get().isNotEmpty()) config.from(suppressions.flatMap { it.output })

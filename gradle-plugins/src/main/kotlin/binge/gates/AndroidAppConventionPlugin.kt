@@ -112,7 +112,7 @@ private fun ApplicationExtension.configure(project: Project) {
     // Both from the tag a release workflow builds; a local build keeps the placeholders.
     defaultConfig {
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+        versionName = environment("VERSION_NAME") ?: "0.1.0"
     }
 
     configureSigning(project)
@@ -128,7 +128,9 @@ private fun ApplicationExtension.configure(project: Project) {
             // Opt-in (`-PminifyDebug`): the minified debug build a device lane runs, so a keep rule that goes stale fails
             // there rather than on a user. It must stay identical to the release switch below, or the lane stops proving
             // what release ships.
-            if (project.hasProperty("minifyDebug")) optimization.enable = true
+            if (project.findProperty("minifyDebug")?.toString() != null && project.findProperty("minifyDebug") != "false") {
+                optimization.enable = true
+            }
         }
         getByName("release") {
             // One switch for code shrinking, resource shrinking and the default keep rules.
@@ -150,7 +152,7 @@ private fun ApplicationExtension.configureSigning(project: Project) {
             if (file.exists()) file.inputStream().use { load(it) }
         }
 
-    fun signingValue(key: String): String? = keystoreProperties.getProperty(key) ?: System.getenv(key)
+    fun signingValue(key: String): String? = keystoreProperties.getProperty(key)?.takeIf { it.isNotEmpty() } ?: environment(key)
     val releaseStoreFile = signingValue("RELEASE_STORE_FILE")
 
     signingConfigs {
@@ -165,3 +167,6 @@ private fun ApplicationExtension.configureSigning(project: Project) {
         }
     }
 }
+
+/** A workflow passes a secret that was never set as an empty string, not a missing one, so blank is unset. */
+private fun environment(key: String): String? = System.getenv(key)?.takeIf { it.isNotEmpty() }

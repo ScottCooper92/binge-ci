@@ -217,6 +217,28 @@ class GatesFunctionalTest {
         runner("detekt", withKotlin = true).build()
     }
 
+    @Test
+    fun `the comment rules' thresholds are read before the consumer's file, and only with commentRules on`() {
+        val printer =
+            """
+            tasks.register("printConfig") {
+                val files = tasks.named<dev.detekt.gradle.Detekt>("detekt").flatMap { it.config.elements }
+                doLast { println("config=" + files.get().joinToString(",") { it.asFile.name }) }
+            }
+            """.trimIndent()
+        write("detekt.yml", "")
+        baseConfigBuild("$printer")
+        assertTrue(runner("printConfig", withKotlin = true).build().output.contains("config=detekt.yml\n"))
+
+        baseConfigBuild("detektGate { commentRules = true }\n$printer")
+        val on = runner("printConfig", withKotlin = true).build().output
+        assertTrue(on.contains("config=detekt-comment-rules.yml,detekt.yml\n"), on)
+
+        baseConfigBuild("detektGate { baseConfig = true; commentRules = true }\n$printer")
+        val both = runner("printConfig", withKotlin = true).build().output
+        assertTrue(both.contains("config=detekt-base.yml,detekt-comment-rules.yml,detekt.yml\n"), both)
+    }
+
     // detekt prints the count and passes; the gate has to read that line, so a detekt that rewords it fails here
     // rather than silently turning the ratchet off in every consumer.
     @Test
