@@ -1288,7 +1288,11 @@ jobs:
           git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
           if [ -n "$dirty" ]; then
             git add -A
-            git commit -m "fix: address CI failure on ${SHA:0:7}"
+            # A bot's fix never moves a pin: the workspace's submodule may sit at another commit than the PR's.
+            kept_pins=$(bash "$GOVERNED_SCRIPT" --keep-pins "${checked_out:-HEAD}")
+            if [ -n "$kept_pins" ]; then echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"; fi
+            # Nothing else staged once the pins are kept: the agent changed nothing the branch keeps.
+            git diff --cached --quiet || git commit -m "fix: address CI failure on ${SHA:0:7}"
           fi
           # Read before the push, so a rebase onto a moved branch cannot fold someone else's commits
           # into what this run reports as its own.

@@ -42,6 +42,14 @@
 #   undo - the guard the README describes is not in force. bot-review calls it too, from the
 #   default branch, so a PR cannot add to the rules its own review runs under.
 #
+# Usage: restore-agent-governed-paths.sh --keep-pins <ref>
+#   Run after `git add -A` and before the commit. A submodule whose staged commit is not <ref>'s is
+#   put back to <ref>'s in the index, and the path is printed on stdout. The agent's workspace holds
+#   a submodule at whatever commit it was initialised to or an agent left it on, and `git add -A`
+#   would record that as a pin move nobody asked for, on a PR whose body says no pin moved. CLAUDE.md
+#   in a consuming repository has a pin move in a commit of its own, by a person or the submodule-bump
+#   action: never one riding along in a bot's fix. A submodule added or removed is not touched here.
+#
 # Usage: restore-agent-governed-paths.sh --prompt-note
 #   Prints the paragraph an agent's prompt carries about the rewrite, or nothing when it changes
 #   nothing here. Run it BEFORE the rewrite: it names the governed paths whose working-tree copy
@@ -87,6 +95,21 @@ fi
 
 if [ "${1:-}" = "--list" ]; then
   printf '%s\n' "${governed[@]}"
+  exit 0
+fi
+
+if [ "${1:-}" = "--keep-pins" ]; then
+  base=$(git rev-parse -q --verify "${2:?usage: --keep-pins <ref>}^{commit}") \
+    || { echo "Cannot keep the pins: ${2} does not resolve." >&2; exit 1; }
+  # -z, and --ignore-submodules=none so a consumer's `ignore = all` cannot hide a gitlink. Fields:
+  # ":<old mode> <new mode> <old sha> <new sha> <status>", then the path, NUL-separated.
+  while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+    read -r old_mode new_mode _ _ status <<<"${meta#:}"
+    if [ "$old_mode" = 160000 ] && [ "$new_mode" = 160000 ] && [ "$status" = M ]; then
+      git reset -q "$base" -- "$path"
+      printf '%s\n' "$path"
+    fi
+  done < <(git diff --cached --raw -z --no-abbrev --no-renames --ignore-submodules=none "$base")
   exit 0
 fi
 
