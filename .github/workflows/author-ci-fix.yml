@@ -1962,7 +1962,17 @@ jobs:
           committed=false
           [ "$(git rev-parse HEAD)" = "$SHA" ] || committed=true
 
-          if [ -z "$dirty" ] && [ "$committed" = "false" ]; then
+          # A bot's fix never moves a pin: the workspace's submodule may sit at another commit than the base's.
+          # Decided after the pins are kept: a tree dirty only in a submodule is a run that changed nothing.
+          staged=false
+          if [ -n "$dirty" ]; then
+            git add -A
+            kept_pins=$(bash "$GOVERNED_SCRIPT" --keep-pins "$SHA")
+            if [ -n "$kept_pins" ]; then echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"; fi
+            if ! git diff --cached --quiet; then staged=true; fi
+          fi
+
+          if [ "$staged" = "false" ] && [ "$committed" = "false" ]; then
             {
               printf '%s\n' "$attempted"
               printf 'CI on `%s` is red at `%s` ([run](%s)). I looked and changed nothing, so this needs a human.\n' \
@@ -1977,8 +1987,7 @@ jobs:
           git config user.name "$AUTHOR_BOT"
           git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          if [ -n "$dirty" ]; then
-            git add -A
+          if [ "$staged" = "true" ]; then
             git commit -m "fix: repair ${DEFAULT_BRANCH} after CI went red on ${SHA:0:7}"
           fi
           commit_stat=$(git diff --stat "$SHA" HEAD | sed -n '1,40p')
