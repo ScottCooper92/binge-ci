@@ -176,4 +176,13 @@ cd "$work/keeps-pins" && git reset -q && git add -A && git reset -q HEAD -- lib
 kept=$(bash "$script" --keep-pins HEAD 2>/dev/null)
 if [ -n "$kept" ]; then fail "named a pin that did not move: '$kept'"; else ok; fi
 
+# A run whose only change was a pin leaves nothing staged, which the workflows read as "changed nothing".
+case=keeps-pins-pin-only-stages-nothing
+cd "$work/keeps-pins" && git reset -q --hard HEAD && git -C lib checkout -q "$second"
+git add -A
+kept=$(bash "$script" --keep-pins HEAD 2>/dev/null)
+if [ "$kept" != "lib" ]; then fail "the moved pin was not named: '$kept'"
+elif ! git diff --cached --quiet; then fail "something stayed staged: '$(git diff --cached --name-only)'"
+else ok; fi
+
 exit $failures

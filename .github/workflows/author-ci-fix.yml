@@ -1269,7 +1269,21 @@ jobs:
           attempted="<!-- ci-fix-attempted:${SHA} -->"
           declined="<!-- ci-fix-declined:${SHA} -->"
 
-          if [ -z "$dirty" ] && [ "$committed" = "false" ]; then
+          git config user.name "$AUTHOR_BOT"
+          git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
+          if [ -n "$dirty" ]; then
+            git add -A
+            # A bot's fix never moves a pin: the workspace's submodule may sit at another commit than the PR's.
+            kept_pins=$(bash "$GOVERNED_SCRIPT" --keep-pins "${checked_out:-HEAD}")
+            if [ -n "$kept_pins" ]; then echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"; fi
+            # Decided after the pins are kept: a tree dirty only in a submodule is a run that changed nothing.
+            if ! git diff --cached --quiet; then
+              git commit -m "fix: address CI failure on ${SHA:0:7}"
+              committed=true
+            fi
+          fi
+
+          if [ "$committed" = "false" ]; then
             {
               printf '%s\n%s\n' "$attempted" "$declined"
               if [ -n "$note" ]; then
@@ -1284,16 +1298,6 @@ jobs:
             exit 0
           fi
 
-          git config user.name "$AUTHOR_BOT"
-          git config user.email "${AUTHOR_BOT_ID}+${AUTHOR_BOT}@users.noreply.github.com"
-          if [ -n "$dirty" ]; then
-            git add -A
-            # A bot's fix never moves a pin: the workspace's submodule may sit at another commit than the PR's.
-            kept_pins=$(bash "$GOVERNED_SCRIPT" --keep-pins "${checked_out:-HEAD}")
-            if [ -n "$kept_pins" ]; then echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"; fi
-            # Nothing else staged once the pins are kept: the agent changed nothing the branch keeps.
-            git diff --cached --quiet || git commit -m "fix: address CI failure on ${SHA:0:7}"
-          fi
           # Read before the push, so a rebase onto a moved branch cannot fold someone else's commits
           # into what this run reports as its own.
           commit_stat=""
