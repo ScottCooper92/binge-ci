@@ -153,4 +153,36 @@ if ! GOVERNED_EXTRA_PATHS=$'  docs/agents  \n' bash "$script" --list | grep -qx 
 elif ! bash "$script" --list | grep -qx 'CLAUDE.md'; then fail "CLAUDE.md is not governed"
 else ok; fi
 
+# A submodule the workspace holds at another commit than the PR pins: `git add -A` stages the move, and
+# --keep-pins puts it back, leaving every other staged change alone.
+case=keeps-pins
+cd "$work" && rm -rf sub-src && mkdir sub-src && cd sub-src
+git init -q -b main . && git config user.email t@example.com && git config user.name t
+echo one > f && git add f && git commit -qm one && first=$(git rev-parse HEAD)
+echo two > f && git commit -qam two && second=$(git rev-parse HEAD)
+export first second
+repo 'git -c protocol.file.allow=always submodule add -q "$work/sub-src" lib && git -C lib checkout -q "$first" && git add lib' ':'
+echo fix > fixed.txt
+git -C lib checkout -q "$second"
+git add -A
+kept=$(bash "$script" --keep-pins HEAD 2>/dev/null)
+staged=$(git diff --cached --name-only)
+if [ "$kept" != "lib" ]; then fail "the moved pin was not named: '$kept'"
+elif [ "$staged" != "fixed.txt" ]; then fail "staged after keeping the pin: '$staged'"
+else ok; fi
+
+case=keeps-pins-leaves-an-unmoved-submodule-alone
+cd "$work/keeps-pins" && git reset -q && git add -A && git reset -q HEAD -- lib
+kept=$(bash "$script" --keep-pins HEAD 2>/dev/null)
+if [ -n "$kept" ]; then fail "named a pin that did not move: '$kept'"; else ok; fi
+
+# A run whose only change was a pin leaves nothing staged, which the workflows read as "changed nothing".
+case=keeps-pins-pin-only-stages-nothing
+cd "$work/keeps-pins" && git reset -q --hard HEAD && git -C lib checkout -q "$second"
+git add -A
+kept=$(bash "$script" --keep-pins HEAD 2>/dev/null)
+if [ "$kept" != "lib" ]; then fail "the moved pin was not named: '$kept'"
+elif ! git diff --cached --quiet; then fail "something stayed staged: '$(git diff --cached --name-only)'"
+else ok; fi
+
 exit $failures
