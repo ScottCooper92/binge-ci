@@ -787,7 +787,12 @@ jobs:
             git add -A
             # A bot's fix never moves a pin: the workspace's submodule may sit at another commit than the PR's.
             kept_pins=$(bash "$GOVERNED_SCRIPT" --keep-pins "${checked_out:-HEAD}")
-            if [ -n "$kept_pins" ]; then echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"; fi
+            if [ -n "$kept_pins" ]; then
+              echo "::notice::left the pin of $(tr '\n' ' ' <<<"$kept_pins")alone"
+              # The agent wrote its account before the pins were kept, so it can claim a pin move that was not pushed.
+              pin_caveat="_I left the pin of $(sed 's/.*/`&`/' <<<"$kept_pins" | paste -sd, - | sed 's/,/, /g') where it was: a bot's commit never moves a submodule pin. Anything said above about moving it does not hold._"
+              governed_caveat="${governed_caveat:+$governed_caveat$'\n\n'}$pin_caveat"
+            fi
             # Decided after the pins are kept: a tree dirty only in a submodule has nothing to push.
             if ! git diff --cached --quiet; then
               git commit -m "chore: address review feedback"
